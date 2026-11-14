@@ -65,6 +65,8 @@ client  ->  Service  ->  leader pod ---- blobs (read/write) ----> S3 bucket
 
 A split into separate frontend and backend pods has been considered and is not implemented; see [designs/fe-be-pod-split.md](designs/fe-be-pod-split.md).
 
+Running every pod active at once on a PostgreSQL metadata backend is proposed and not implemented, see [designs/active-active-postgres.md](designs/active-active-postgres.md).
+
 ## Related documents
 
 - [Installation](installation.md) for choosing a storage layout at install time.
