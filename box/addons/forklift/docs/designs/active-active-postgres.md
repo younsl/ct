@@ -76,7 +76,7 @@ A `--target` flag with an env fallback selects what a process runs.
 | `api` | yes | no | PostgreSQL mode |
 | `worker` | health and metrics only | yes, when it holds the Lease | PostgreSQL mode |
 
-Background jobs are the work the leadership callbacks own today: retention and cache eviction, blob garbage collection, coverage scans, security insights, license and vulnerability scans, notifications, audit pruning, and applying declarative state (bootstrap admin, chart RBAC policy, seeded repositories). In PostgreSQL mode the Lease no longer gates readiness or routing. It only picks which worker runs these jobs.
+Background jobs are the work the leadership callbacks own today: retention and cache eviction, blob garbage collection, the idle reaper, OCI upload and tag pruning, coverage scans, security insights, license and vulnerability scans, notifications, audit pruning, and applying declarative state (bootstrap admin, chart RBAC policy, seeded repositories). In PostgreSQL mode the Lease no longer gates readiness or routing. It only picks which worker runs these jobs.
 
 ### Why no hash ring
 
@@ -117,17 +117,65 @@ PostgreSQL gets its own migration set. The PostgreSQL client must build statical
 | RBAC and repository config read by handlers | Read from the store | Any in-memory copy needs a short TTL or `LISTEN/NOTIFY` |
 | Concurrent proxy cache fill of one artifact | Cannot happen with one active pod | Accepted. Blobs are content addressed and the index write is an upsert, so the only cost is a duplicate upstream fetch |
 
+### Write contention between blobs and metadata
+
+Two guards that hold today are local to one process and stop working with several active pods.
+
+| Guard today | With several active pods |
+| --- | --- |
+| Atomic blob write (temp file, then rename or one PutObject to the digest key) | Holds. Two pods writing one digest write identical bytes |
+| Bytes first, metadata second | Holds |
+| `UNIQUE(repo_id, path)` with upsert | Holds |
+| `ref_count = ref_count + ?` in one statement | Holds |
+| 24 hour GC grace on `unreferenced_since` and `created_at` | Holds, not sufficient alone |
+| Guarded record delete before the byte delete | Holds |
+| `gc_mu` RwLock: four write paths take the read guard, the sweeper takes the write guard per digest | Broken. The lock lives in one process |
+| SQLite's single writer serializing every write | Gone |
+
+Two races follow.
+
+- GC against upload, which loses data. The worker deletes the record of a digest that has been unreferenced past the grace period. An API pod then stores the same content, finds or writes the bytes, and inserts a fresh record with a reference. The worker then deletes the bytes, and a live artifact points at nothing.
+- Concurrent publish of one path, which corrupts reference counts. Two pods overwrite the same `(repo_id, path)`, both read the old blob, and both decrement it. The old blob drops to zero while another path still references it and becomes a GC candidate.
+
+PostgreSQL mode replaces the two broken guards.
+
+| Safeguard | Replaces | How |
+| --- | --- | --- |
+| GC in one transaction | `gc_mu` write guard | The sweeper runs the guarded `DELETE`, deletes the bytes, then commits. The row lock covers the window between the two deletes |
+| Reserve before bytes | `gc_mu` read guard | Once the digest is known and before the existence check or upload, the writer upserts the blob row and resets `unreferenced_since` to now. A reservation that commits first makes the sweeper's guard miss. A sweeper that locks first makes the reservation wait until the bytes are gone, and the writer then uploads them again |
+| Per-path advisory lock | Single writer | `put_artifact` and the delete paths take `pg_advisory_xact_lock` on a hash of `(repo_id, path)` at the start of the transaction. It also covers a new path, where no row exists to lock, and check-then-insert rules such as redeploy protection |
+| Reference count reconciliation | None, new | The worker periodically recomputes `ref_count` from `artifacts` and exports the mismatch count as a metric |
+
+Both blob backends already learn the digest from a local temp file before anything lands at the digest key, so the reservation fits between hashing and the upload. `BlobStore::put` has to expose that point, since today it also skips the upload when the key already exists.
+
+The Lease is not a strict fence, so two workers can briefly both believe they lead. The guarded `DELETE` is atomic in PostgreSQL, the second worker matches no row, and it leaves the bytes alone.
+
 ### Not needed in PostgreSQL mode
 
 Metadata sync (`objstore/metasync`, WAL shipping), PV replication, snapshot restore on promotion, S3 fencing, and leader pod labels are skipped. The failover data-loss window of the SQLite layouts does not apply, since durability is PostgreSQL's.
 
 ### Chart
 
-- A `database` block for the PostgreSQL connection, with the password from an existing Secret.
+- A `database.type` value selects the metadata backend: `sqlite` (default), `internal`, or `external`.
 - A worker Deployment rendered when the worker target is enabled.
 - In PostgreSQL mode the Service selects all API pods and the leader label and headless Service are not rendered.
 - Schema validation rejects PostgreSQL with `replication.enabled` and rejects more than one replica on an RWO volume.
 - `values.schema.json` is updated in the same commit.
+
+### Bundled PostgreSQL
+
+The chart ships its own PostgreSQL templates under `templates/database/`, the way the Harbor chart does, instead of a subchart. A subchart ties the release to a third-party chart's image and licensing policy, and forklift needs only a small part of what such a chart offers.
+
+| `database.type` | Rendered | Use |
+| --- | --- | --- |
+| `sqlite` | Nothing. Today's layouts | Default |
+| `internal` | StatefulSet with one replica, PVC, Service, Secret | Evaluation and small installs |
+| `external` | Nothing. forklift connects to `database.external.*` | Production |
+
+- `internal` runs the official PostgreSQL image at a pinned version. An empty password generates one into the chart Secret, like the session secret.
+- `internal` is one instance and is not highly available. With several API pods it is the single point of failure, so availability can be worse than the SQLite leader layouts. The chart notes say so.
+- `external` reads the password from an existing Secret and exposes host, port, database, user, and TLS mode.
+- The bundled SeaweedFS stays a subchart, so the chart mixes both styles on purpose.
 
 ## Rollout
 
@@ -145,7 +193,7 @@ Steps 1 to 4 ship without PostgreSQL and each one is independently releasable.
 | Risk | Mitigation |
 | --- | --- |
 | Two implementations drift | One shared test suite run against both backends in CI |
-| PostgreSQL availability is now forklift's availability | Documented as the operator's responsibility (managed service or an operator such as CloudNativePG) |
+| PostgreSQL availability is now forklift's availability | `external` is the production path and is the operator's responsibility (managed service or an operator such as CloudNativePG). `internal` is documented as a single instance |
 | Connection count grows with pods | Bounded pool per pod, PgBouncer for large installs |
 | Query plans differ from SQLite on large indexes | Load test with a production-sized artifact index before release |
 | A transaction that relied on the single writer for isolation | Audit every multi-statement write for explicit transactions and row locks during step 5 |
@@ -154,12 +202,15 @@ Steps 1 to 4 ship without PostgreSQL and each one is independently releasable.
 
 - PostgreSQL client crate: `tokio-postgres` with `deadpool-postgres` keeps hand-written SQL close to the rusqlite code. `sqlx` adds compile-time checks at the cost of a second query style.
 - Whether the worker also serves requests in small installs, which is what target `all` does, or whether the chart always renders a dedicated worker.
-- Whether blob garbage collection needs a stronger guard against a concurrent upload on another pod than the current staged-blob grace period.
+- Which check-then-insert rules besides redeploy protection rely on the single writer today and need the per-path lock.
+- Whether holding a transaction open across one blob delete per digest is acceptable on a slow object store, or whether the sweeper needs a tombstone state instead.
 
 ## Validation
 
 - The existing integration suite passes against both backends.
 - Two API pods under concurrent publish and fetch of the same coordinates return no 404 after a successful publish.
 - An OCI chunked push succeeds with each chunk sent to a different pod.
+- Uploading content whose digest the sweeper is reclaiming on another pod leaves the artifact readable.
+- Concurrent overwrites of one path from two pods leave every `ref_count` equal to the number of artifact rows that reference the blob.
 - Killing the worker moves the Lease and background jobs resume, while API pods keep serving.
 - SQLite mode renders the same manifests as before the change.
