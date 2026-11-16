@@ -10,6 +10,10 @@ Notable changes per release. Container image versions come from the
 
 - The PostgreSQL schema named by `FORKLIFT_DATABASE_SCHEMA` is created at startup when it does not exist, so pointing forklift at a new schema of an existing database needs no manual step. Only the database and the user have to exist beforehand. Pods starting together take turns through the migration lock. Creating a schema needs the `CREATE` privilege on the database, and an existing schema needs nothing extra.
 
+### Fixed
+
+- A metadata restore from the bucket could fail with `not a SQLite database`. The downloaded base was written through an async file handle that was dropped before its last write had reached the disk, so the encoding check could read an empty file, take a zstd base for a plain one, and leave the compressed bytes in place of the database. The download is now flushed and synced before the file is inspected. It showed up as an intermittent test failure on a loaded runner, and on a busy node it would have failed a standby's restore until the next attempt.
+
 ## 0.21.0 (2026-11-16)
 
 ### Added

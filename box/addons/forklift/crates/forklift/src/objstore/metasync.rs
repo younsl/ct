@@ -1205,6 +1205,10 @@ where
     loop {
         let read = src.read(&mut buf).await?;
         if read == 0 {
+            // A tokio file hands each write to a background task and returns.
+            // Without the flush the caller can drop the file and read the
+            // path back while the last write is still on its way.
+            dst.flush().await?;
             return Ok((n, hex::encode(hasher.finalize())));
         }
         hasher.update(&buf[..read]);
@@ -1238,6 +1242,57 @@ pub(crate) fn parse_fence(md: &HashMap<String, String>) -> i64 {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// A writer that, like a tokio file, only makes its bytes visible once it
+    /// is flushed.
+    #[derive(Default)]
+    struct DeferredWriter {
+        pending: Vec<u8>,
+        visible: std::sync::Arc<parking_lot::Mutex<Vec<u8>>>,
+    }
+
+    impl tokio::io::AsyncWrite for DeferredWriter {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            self.pending.extend_from_slice(buf);
+            std::task::Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(
+            mut self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            let pending = std::mem::take(&mut self.pending);
+            self.visible.lock().extend_from_slice(&pending);
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            self.poll_flush(cx)
+        }
+    }
+
+    /// The copy must have flushed by the time it returns: its callers drop
+    /// the file and read the path back right away.
+    #[tokio::test]
+    async fn copy_hashing_flushes_before_it_returns() {
+        let visible = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let mut dst = DeferredWriter {
+            pending: Vec::new(),
+            visible: std::sync::Arc::clone(&visible),
+        };
+        let mut src: &[u8] = b"snapshot bytes";
+        let (n, sha) = super::copy_hashing(&mut src, &mut dst).await.unwrap();
+        assert_eq!(n, 14);
+        assert_eq!(sha.len(), 64);
+        assert_eq!(visible.lock().as_slice(), b"snapshot bytes");
+    }
+
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Arc;

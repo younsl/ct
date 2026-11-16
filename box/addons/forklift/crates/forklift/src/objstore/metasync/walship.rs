@@ -544,7 +544,14 @@ pub async fn fetch_metadata(
         .await
         .map_err(|e| Error::io("stage metadata", e))?;
     let mut body = out.body;
-    let copied = super::copy_hashing(&mut body, &mut f).await;
+    // The bytes must be on disk before the file is inspected and renamed
+    // below. Dropping the handle with a write still in flight let the
+    // encoding check read an empty file, take a compressed object for a plain
+    // one, and leave the compressed bytes where the database belongs.
+    let copied = match super::copy_hashing(&mut body, &mut f).await {
+        Ok(v) => f.sync_all().await.map(|()| v),
+        Err(e) => Err(e),
+    };
     drop(f);
     let (_, sha) = match copied {
         Ok(v) => v,
