@@ -426,7 +426,10 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn prune_once_applies_download_retention() {
         let (rec, store, _dir) = new_recorder().await;
-        let days_ago = |d: i64| Utc::now() - chrono::Duration::days(d);
+        // One instant for every row. Stored timestamps drop trailing zeros, so
+        // rows microseconds apart can sort out of insert order as text.
+        let now = Utc::now();
+        let days_ago = |d: i64| now - chrono::Duration::days(d);
         let entry = |event: &str, status: i64, path: &str, created_at| AuditLog {
             repo_name: "r".into(),
             event: event.into(),

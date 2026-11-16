@@ -1,4 +1,4 @@
-{{- if and .Values.storage.migration.enabled .Values.rbac.create }}
+{{- if and (eq (include "forklift.migrating" .) "true") .Values.rbac.create }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

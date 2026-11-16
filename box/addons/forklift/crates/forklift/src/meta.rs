@@ -798,6 +798,12 @@ async fn run_migrations(write: &Arc<Pool>) -> Result<()> {
     }
 }
 
+/// The schema version a fully migrated SQLite database is at: one row in
+/// `schema_migrations` per embedded migration.
+pub const fn sqlite_schema_version() -> i64 {
+    migrations::MIGRATIONS.len() as i64
+}
+
 /// Session-level advisory lock that keeps pods starting together from
 /// migrating one PostgreSQL database at the same time.
 const MIGRATE_LOCK_KEY: i64 = 0x666f_726b_6d69_6772;

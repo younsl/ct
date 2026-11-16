@@ -258,7 +258,7 @@ The chart ships its own PostgreSQL templates under `templates/database/`, the wa
 | Blob reservation and single-transaction GC | done |
 | OCI chunk staging in the bucket | done |
 | Chart: `installationMode`, `database`, `worker`, bundled PostgreSQL templates | done |
-| SQLite to PostgreSQL data migration | not started. A PostgreSQL install starts empty |
+| SQLite to PostgreSQL data migration (`forklift migrate-database`, chart Job) | done |
 | Reference count check on the worker (`forklift_blob_ref_drift`), repairing undercounts | done |
 | Coverage scanner state synced between pods | done. Each pod reloads settings and the last result from the store once a minute |
 | `meta` as its own crate | not started, optional |
@@ -271,7 +271,7 @@ The chart ships its own PostgreSQL templates under `templates/database/`, the wa
 1. Release the image. SQLite installs behave as before, since nothing changes without `FORKLIFT_DATABASE_HOST`.
 2. Release the chart with `installationMode` empty by default. Existing values render the same manifests.
 3. Try `installationMode=activeActive` on a new install.
-4. Add the SQLite to PostgreSQL migration before recommending the move for existing installs.
+4. Move an existing install with `database.migration.enabled`, after a dry run.
 
 ## Risks
 

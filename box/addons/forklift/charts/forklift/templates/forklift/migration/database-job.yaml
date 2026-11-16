@@ -1,0 +1,85 @@
+{{- if .Values.database.migration.enabled }}
+{{- include "forklift.validateStorage" . }}
+{{- $m := .Values.database.migration }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "forklift.databaseMigrationJobName" . }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "forklift.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-migration
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ $m.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ $m.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      {{- with $m.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        app.kubernetes.io/name: {{ include "forklift.name" . }}-migrate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: database-migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "forklift.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: "{{ include "forklift.image" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          args:
+            - migrate-database
+            - --lease-name={{ include "forklift.leaseName" . }}
+            - --writer-selector=app.kubernetes.io/name={{ include "forklift.name" . }},app.kubernetes.io/instance={{ .Release.Name }}
+            - --wait={{ $m.wait }}
+            - --staging=/staging
+            {{- if $m.dryRun }}
+            - --dry-run
+            {{- end }}
+            {{- if $m.overwrite }}
+            - --overwrite
+            {{- end }}
+            {{- if $m.skipOrphans }}
+            - --skip-orphans
+            {{- end }}
+          env:
+            {{- include "forklift.env" . | nindent 12 }}
+          {{- with $m.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: staging
+              mountPath: /staging
+            {{- include "forklift.outboundVolumeMounts" . | nindent 12 }}
+      volumes:
+        - name: staging
+          emptyDir:
+            {{- with $m.stagingSizeLimit }}
+            sizeLimit: {{ . }}
+            {{- end }}
+        {{- include "forklift.outboundVolumes" . | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $m.extraPodSpec }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+{{- end }}

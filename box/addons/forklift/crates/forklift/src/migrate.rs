@@ -14,6 +14,7 @@ use crate::objstore::{self, ObjectApi, PutBody, PutObjectInput};
 use crate::storage::{self, ClusterAdmin, WalkableStore};
 
 pub mod cli;
+pub mod database;
 pub mod lease;
 pub mod postflight;
 pub mod preflight;

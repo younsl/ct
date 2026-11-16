@@ -59,7 +59,56 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift \
 - An external server needs the database and the user to exist. With `database.schema` set, forklift also creates that schema when it is missing.
 - Under a GitOps tool that renders without cluster access, set `database.internal.password` explicitly. A generated password changes on every render, and the bundled server only reads it when its volume is first initialized.
 - Each pod opens `database.maxConnections` sessions (16 by default). Keep the total under the server's `max_connections`.
-- There is no automatic move of an existing SQLite install to PostgreSQL yet. A new PostgreSQL install starts empty.
+- A new PostgreSQL install starts empty. An existing SQLite install is moved with `forklift migrate-database`, see [Moving an existing install](#moving-an-existing-install).
+
+## Moving an existing install
+
+`forklift migrate-database` copies the metadata of a SQLite install into PostgreSQL: repositories, the artifact index, blob reference counts, users, tokens, roles, approvals, scan results and the audit log. The blob store is not touched, since both layouts read the same blobs by digest.
+
+| Step | What happens |
+| --- | --- |
+| Source | The SQLite metadata is rebuilt from the bucket of the s3 backend (base copy plus WAL segments), or read from a file with `-from-sqlite` |
+| Check | The source must be at this version's schema. Rows pointing at a missing parent row are reported, and the target must be empty |
+| Copy | Every table is written in one PostgreSQL transaction, parents first, so the target ends up complete or untouched |
+| Finish | Identity sequences continue after the copied ids, row counts are compared per table, and the tables are analyzed |
+
+With the chart, the move takes two syncs:
+
+```yaml
+# Sync 1: forklift is scaled to 0, the Job waits for the pods to be gone,
+# holds the Lease and copies.
+installationMode: activeActive
+database:
+  type: external
+  external:
+    host: postgres.example.com
+    existingSecret: forklift-postgres
+  migration:
+    enabled: true
+```
+
+```yaml
+# Sync 2: forklift starts on PostgreSQL.
+database:
+  migration:
+    enabled: false
+```
+
+- Upgrade the SQLite install to the forklift version that will run on PostgreSQL first, and let it start once. The copy refuses a source at another schema version.
+- Run it with `database.migration.dryRun: true` first. It reports row counts and problems and writes nothing.
+- The Job only starts copying once no forklift pod is left, because a leader flushes its last metadata to the bucket while it shuts down.
+- The staging volume holds the rebuilt SQLite file and its download, about twice the database size. Set `database.migration.stagingSizeLimit` accordingly.
+- In-flight OCI upload sessions are not carried over. A push that was running during the move starts again.
+- Text that PostgreSQL cannot store (a NUL byte, invalid UTF-8) is cleaned and counted in the report.
+- Rows that reference a missing parent row stop the copy. `database.migration.skipOrphans: true` leaves them out and reports how many.
+- The bucket keeps the SQLite metadata as it was at the move. Removing the `database` settings takes the install back to that state, without whatever was written to PostgreSQL in between.
+
+Without the chart, on a volume install:
+
+```bash
+FORKLIFT_DATABASE_HOST=postgres.example.com FORKLIFT_DATABASE_PASSWORD=... \
+  forklift migrate-database -from-sqlite /data/forklift.db -dry-run
+```
 
 ## What runs where
 

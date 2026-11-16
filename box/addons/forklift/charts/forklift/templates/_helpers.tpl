@@ -119,8 +119,22 @@ immutable one, and an unchanged one leaves the finished Job alone.
 {{- printf "%s-migrate-%s" (include "forklift.fullname" . | trunc 45 | trimSuffix "-") (toJson $key | sha256sum | trunc 10) -}}
 {{- end -}}
 
+{{/* migrating is true while a migration Job runs, which keeps every forklift pod stopped. */}}
+{{- define "forklift.migrating" -}}
+{{- if or .Values.storage.migration.enabled .Values.database.migration.enabled -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
 {{- define "forklift.replicas" -}}
-{{- if .Values.storage.migration.enabled }}0{{ else }}{{ include "forklift.replicaCount" . }}{{ end }}
+{{- if eq (include "forklift.migrating" .) "true" }}0{{ else }}{{ include "forklift.replicaCount" . }}{{ end }}
+{{- end -}}
+
+{{/*
+Database migration Job name. Hashes the settings for the same reason as the
+storage migration Job: Argo CD renders every sync as revision 1.
+*/}}
+{{- define "forklift.databaseMigrationJobName" -}}
+{{- $key := dict "migration" .Values.database.migration "image" (include "forklift.image" .) "database" (list (include "forklift.databaseType" .) .Values.database.external.host .Values.database.external.name .Values.database.schema) "source" (list (include "forklift.s3Endpoint" .) .Values.storage.s3.bucket .Values.storage.s3.prefix) -}}
+{{- printf "%s-migrate-db-%s" (include "forklift.fullname" . | trunc 42 | trimSuffix "-") (toJson $key | sha256sum | trunc 10) -}}
 {{- end -}}
 
 {{/*
@@ -340,6 +354,12 @@ this guard only acts on installs and upgrades that reach the cluster.
 {{- if or $sts (and $secret $secret.data (hasKey $secret.data "database-password")) -}}
 {{- fail "this release stores its metadata in PostgreSQL, and these values would switch it to an empty SQLite database. Set database.type=internal (or external) to keep PostgreSQL, or database.type=sqlite to confirm the switch" -}}
 {{- end -}}
+{{- end -}}
+{{- if and .Values.database.migration.enabled (not $postgres) -}}
+{{- fail "database.migration.enabled copies SQLite metadata into PostgreSQL; set database.type to internal or external" -}}
+{{- end -}}
+{{- if and .Values.database.migration.enabled (ne (include "forklift.s3Enabled" .) "true") -}}
+{{- fail "database.migration.enabled reads the SQLite metadata from the bucket of the s3 backend; for a volume install run forklift migrate-database -from-sqlite by hand" -}}
 {{- end -}}
 {{- if and (eq $db "external") (not .Values.database.external.host) -}}
 {{- fail "database.external.host is required when database.type is external" -}}

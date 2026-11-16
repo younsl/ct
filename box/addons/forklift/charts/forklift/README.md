@@ -143,6 +143,18 @@ The following table lists the configurable parameters and their default values.
 | database.type | string | `""` | Metadata backend: sqlite, internal (PostgreSQL deployed by this chart) or external. Empty picks internal for installationMode=activeActive and sqlite otherwise. |
 | database.maxConnections | int | `16` | PostgreSQL sessions each forklift pod opens, split between writes and reads. |
 | database.schema | string | `""` | PostgreSQL schema holding the tables, created at startup when missing. Empty uses the server default. |
+| database.migration.enabled | bool | `false` | Run the database migration Job and keep forklift at 0 replicas. |
+| database.migration.runId | string | `""` | Change to rerun a Job whose settings are unchanged. The Job name hashes every setting. |
+| database.migration.dryRun | bool | `false` | Check the source and the target and report without copying. |
+| database.migration.overwrite | bool | `false` | Empty the target tables first instead of refusing a target that already holds rows. |
+| database.migration.skipOrphans | bool | `false` | Leave out rows that reference a missing parent row instead of failing. |
+| database.migration.wait | string | `"3m"` | Wait for forklift pods to exit and the Lease to free. |
+| database.migration.activeDeadlineSeconds | int | `21600` | Job deadline in seconds. |
+| database.migration.ttlSecondsAfterFinished | int | `86400` | Seconds a finished Job is kept. |
+| database.migration.stagingSizeLimit | string | `""` | Staging emptyDir size limit. The rebuilt SQLite file needs about twice its size. |
+| database.migration.resources | object | `{}` | Job resources. |
+| database.migration.podAnnotations | object | `{"karpenter.sh/do-not-disrupt":"true"}` | Job pod annotations. Karpenter must not evict a running copy. |
+| database.migration.extraPodSpec | object | `{}` | Extra Pod spec fields, e.g. runtimeClassName. Fields the chart already renders are rejected. |
 | database.internal.image.registry | string | `"docker.io"` | Image registry host. Empty folds the host into `repository`. |
 | database.internal.image.repository | string | `"postgres"` | Image repository. |
 | database.internal.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |

@@ -261,6 +261,50 @@
           "type": ["string", "null"],
           "pattern": "^[A-Za-z0-9_]*$"
         },
+        "migration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "runId": {
+              "type": ["string", "null"]
+            },
+            "dryRun": {
+              "type": "boolean"
+            },
+            "overwrite": {
+              "type": "boolean"
+            },
+            "skipOrphans": {
+              "type": "boolean"
+            },
+            "wait": {
+              "$ref": "#/definitions/duration"
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ttlSecondsAfterFinished": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stagingSizeLimit": {
+              "type": ["string", "null"]
+            },
+            "resources": {
+              "type": ["object", "null"]
+            },
+            "podAnnotations": {
+              "$ref": "#/definitions/stringMap"
+            },
+            "extraPodSpec": {
+              "type": ["object", "null"]
+            }
+          }
+        },
         "internal": {
           "type": "object",
           "additionalProperties": false,

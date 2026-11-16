@@ -57,6 +57,9 @@ fn main() -> std::process::ExitCode {
     if args.first().map(String::as_str) == Some("migrate-storage") {
         return migrate_storage(&cfg, &args[1..]);
     }
+    if args.first().map(String::as_str) == Some("migrate-database") {
+        return migrate_database(&cfg, &args[1..]);
+    }
     match parse_flags(&mut cfg) {
         Ok(true) => {
             println!("forklift {}", version::string());
@@ -164,6 +167,42 @@ fn migrate_storage(cfg: &config::Config, args: &[String]) -> std::process::ExitC
         Ok(None) => {
             eprintln!("migration cancelled");
             std::process::ExitCode::from(1)
+        }
+        Err(e) => fatal(&e),
+    }
+}
+
+fn migrate_database(cfg: &config::Config, args: &[String]) -> std::process::ExitCode {
+    use forklift::migrate::database;
+    let args = match database::parse_args(args) {
+        Ok(args) => args,
+        Err(e) => {
+            if !e.is_empty() {
+                eprintln!("{e}");
+            }
+            eprintln!("{}", database::USAGE);
+            return std::process::ExitCode::from(2);
+        }
+    };
+    server::logging::init_logging(&cfg.log_level, &cfg.log_format);
+    tracing::info!(
+        version = %version::string(),
+        rust = %version::rust(),
+        dry_run = args.dry_run,
+        "starting forklift migrate-database"
+    );
+    if let Err(e) = init_outbound(cfg) {
+        return fatal(&format!("{e:#}"));
+    }
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(e) => return fatal(&e.to_string()),
+    };
+    match runtime.block_on(database::run(cfg, &args)) {
+        Ok(report) => {
+            eprintln!("{}", database::render(&report));
+            println!("{}", serde_json::to_string(&report).unwrap_or_default());
+            std::process::ExitCode::SUCCESS
         }
         Err(e) => fatal(&e),
     }

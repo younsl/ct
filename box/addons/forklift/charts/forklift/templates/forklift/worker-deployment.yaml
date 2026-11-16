@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "forklift.worker.labels" . | nindent 4 }}
 spec:
-  replicas: {{ if .Values.storage.migration.enabled }}0{{ else }}{{ .Values.worker.replicaCount }}{{ end }}
+  replicas: {{ if eq (include "forklift.migrating" .) "true" }}0{{ else }}{{ .Values.worker.replicaCount }}{{ end }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   strategy:
     type: RollingUpdate

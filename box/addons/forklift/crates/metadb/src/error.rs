@@ -19,11 +19,23 @@ pub enum Error {
     Unsupported(&'static str),
     #[error(transparent)]
     Sqlite(rusqlite::Error),
-    #[error(transparent)]
-    Postgres(tokio_postgres::Error),
+    #[error("{}", postgres_message(.0))]
+    Postgres(#[source] tokio_postgres::Error),
     /// Connection setup failed before a driver error existed.
     #[error("{0}")]
     Connect(String),
+}
+
+/// The driver prints a server error as "db error" and keeps the reason in its
+/// source. An operator needs the reason, so it is spelled out here.
+fn postgres_message(e: &tokio_postgres::Error) -> String {
+    match e.as_db_error() {
+        Some(db) => format!("{} ({})", db.message(), db.code().code()),
+        None => match std::error::Error::source(e) {
+            Some(cause) => format!("{e}: {cause}"),
+            None => e.to_string(),
+        },
+    }
 }
 
 /// Result alias for facade calls.

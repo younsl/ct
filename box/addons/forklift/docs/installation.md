@@ -71,7 +71,7 @@ The IAM role needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:Lis
 
 ## Every pod active (PostgreSQL)
 
-The three layouts above keep one serving pod, since SQLite accepts one writer. `installationMode=activeActive` stores the metadata in PostgreSQL instead, so every API pod serves and a worker runs the background jobs. Installation modes, the bundled and external database, and how to scale back are in [Active-active](active-active.md).
+The three layouts above keep one serving pod, since SQLite accepts one writer. `installationMode=activeActive` stores the metadata in PostgreSQL instead, so every API pod serves and a worker runs the background jobs. Installation modes, the bundled and external database, moving an existing install, and how to scale back are in [Active-active](active-active.md).
 
 ## Supported storage
 
