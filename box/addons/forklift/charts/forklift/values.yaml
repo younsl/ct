@@ -405,8 +405,8 @@ auth:
     # -- (string) ArgoCD-style policy: "p, <role>, <category>, <verb>, <object>, allow" grants the <category>.<verb> permission ("repo, read, team-a-*" is repo.read on team-a-*, "user, read, *" is the global user.read, "*, *, *" is everything) and "g, <group:name|user:name>, <role>" assigns roles.
     policy: |
       # The `administrator` role (*, every permission) is created automatically
-      # for the bootstrap admin on first run, so it is not declared here;
-      # reference it in grant lines below to assign full access to others.
+      # for the bootstrap admin on first run, so it is not declared here.
+      # Reference it in grant lines below to assign full access to others.
       #
       # repo.* permissions take a repository glob as the object. Every other
       # permission is global and takes `*`.
