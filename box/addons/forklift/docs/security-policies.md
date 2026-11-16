@@ -10,6 +10,10 @@ block, and the metrics and audit events it produces.
 Read this when hardening a proxy against malicious or unwanted packages, or when
 calibrating a policy before enforcing it.
 
+Every proxy request passes an ordered pipeline, configured per repository on the Security tab:
+
+![Security controls](assets/policy-pipeline/security-controls-desktop.png)
+
 ## Background
 
 A proxy repository fetches from a public registry, which makes it the natural
