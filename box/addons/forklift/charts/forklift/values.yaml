@@ -312,6 +312,14 @@ worker:
   replicaCount: 1
   # -- (object) Container resource requests and limits. Empty reuses `resources`.
   resources: {}
+  # -- (object) Node selector for worker pods. Empty reuses `nodeSelector`.
+  nodeSelector: {}
+  # -- (object) Affinity rules for worker pods. Empty reuses `affinity`.
+  affinity: {}
+  # -- (list) Tolerations for worker pods. Empty reuses `tolerations`.
+  tolerations: []
+  # -- (list) Topology spread constraints for worker pods. The top-level ones select API pods, so they are not reused.
+  topologySpreadConstraints: []
 
 # Bundled SeaweedFS (all-in-one subchart), auto-wired to the s3 backend. For
 # production disable it and point storage.s3.* at an external store.

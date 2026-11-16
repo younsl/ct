@@ -453,6 +453,18 @@
         },
         "resources": {
           "type": ["object", "null"]
+        },
+        "nodeSelector": {
+          "type": ["object", "null"]
+        },
+        "affinity": {
+          "type": ["object", "null"]
+        },
+        "tolerations": {
+          "$ref": "#/definitions/objectList"
+        },
+        "topologySpreadConstraints": {
+          "$ref": "#/definitions/objectList"
         }
       }
     },

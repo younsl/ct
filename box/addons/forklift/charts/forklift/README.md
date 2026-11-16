@@ -188,6 +188,10 @@ The following table lists the configurable parameters and their default values.
 | database.external.existingSecretKey | string | `"password"` | Key of the password in existingSecret. |
 | worker.replicaCount | int | `1` | Number of worker pods. One is enough, a second only shortens the gap after a node failure. |
 | worker.resources | object | `{}` | Container resource requests and limits. Empty reuses `resources`. |
+| worker.nodeSelector | object | `{}` | Node selector for worker pods. Empty reuses `nodeSelector`. |
+| worker.affinity | object | `{}` | Affinity rules for worker pods. Empty reuses `affinity`. |
+| worker.tolerations | list | `[]` | Tolerations for worker pods. Empty reuses `tolerations`. |
+| worker.topologySpreadConstraints | list | `[]` | Topology spread constraints for worker pods. The top-level ones select API pods, so they are not reused. |
 | seaweedfs.enabled | bool | `true` | Deploy bundled SeaweedFS. |
 | seaweedfs.master.enabled | bool | `false` |  |
 | seaweedfs.volume.enabled | bool | `false` |  |
