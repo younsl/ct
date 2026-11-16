@@ -1,0 +1,25 @@
+[package]
+name = "forklift-metadb"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Connection facade that runs the forklift metadata store on SQLite or PostgreSQL"
+publish = false
+
+[lib]
+name = "forklift_metadb"
+path = "src/lib.rs"
+
+[dependencies]
+tokio.workspace = true
+rusqlite.workspace = true
+tokio-postgres.workspace = true
+postgres-types.workspace = true
+tokio-postgres-rustls.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

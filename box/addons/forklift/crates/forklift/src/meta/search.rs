@@ -5,9 +5,9 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use forklift_metadb::types::Value;
+use forklift_metadb::{params, params_from_iter};
 use regex::Regex;
-use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter};
 
 use super::artifact::scan_artifact;
 use super::repository::query_all;

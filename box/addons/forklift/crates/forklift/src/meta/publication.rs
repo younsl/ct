@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use chrono::Utc;
-use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
+use forklift_metadb::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 
 use super::artifact::{ADJUST_REF_SQL, scan_artifact};
@@ -909,7 +909,7 @@ fn delete_aggregate_artifact(q: &Connection, repo_id: i64, path: &str) -> Result
 fn insert_tombstone(
     q: &Connection,
     tombstone: &ArtifactPublicationTombstone,
-) -> rusqlite::Result<()> {
+) -> forklift_metadb::Result<()> {
     let deleted_at = if is_zero(tombstone.deleted_at) {
         Utc::now()
     } else {
@@ -983,13 +983,20 @@ pub(crate) fn invalidate_group_caches_for_member(
     member_repo_id: i64,
     path: &str,
 ) -> Result<()> {
+    let members = if q.is_postgres() {
+        "json_array_elements_text(CAST(g.config_json AS json) -> 'group' -> 'members') AS member(value)"
+    } else {
+        "json_each(g.config_json, '$.group.members') member"
+    };
     let group_ids: Vec<i64> = query_all(
         q,
         "resolve member groups",
-        "SELECT DISTINCT g.id FROM repositories g
+        &format!(
+            "SELECT DISTINCT g.id FROM repositories g
 		JOIN repositories m ON m.id = ?
-		JOIN json_each(g.config_json, '$.group.members') member ON member.value = m.name
-		WHERE g.type = 'group'",
+		JOIN {members} ON member.value = m.name
+		WHERE g.type = 'group'"
+        ),
         params![member_repo_id],
         |r| r.get(0),
     )?;
@@ -1064,7 +1071,7 @@ pub(crate) fn adjust_ref_runner(q: &Connection, sha: &str, delta: i64) -> Result
     Ok(())
 }
 
-fn scan_upload_request(row: &Row<'_>) -> rusqlite::Result<ArtifactUploadRequest> {
+fn scan_upload_request(row: &Row<'_>) -> forklift_metadb::Result<ArtifactUploadRequest> {
     let created: String = row.get(8)?;
     let updated: String = row.get(9)?;
     let expires: String = row.get(10)?;
@@ -1083,7 +1090,7 @@ fn scan_upload_request(row: &Row<'_>) -> rusqlite::Result<ArtifactUploadRequest>
     })
 }
 
-fn scan_publication(row: &Row<'_>) -> rusqlite::Result<ArtifactPublication> {
+fn scan_publication(row: &Row<'_>) -> forklift_metadb::Result<ArtifactPublication> {
     let created: String = row.get(10)?;
     let updated: String = row.get(11)?;
     Ok(ArtifactPublication {
@@ -1258,7 +1265,7 @@ pub(crate) mod tests {
             .read(move |c| {
                 c.query_row(
                     "SELECT COUNT(*) FROM artifact_upload_staged_blobs WHERE upload_id = ?",
-                    rusqlite::params![upload_id],
+                    forklift_metadb::params![upload_id],
                     |r| r.get(0),
                 )
                 .map_err(|e| Error::sqlite("count leases", e))

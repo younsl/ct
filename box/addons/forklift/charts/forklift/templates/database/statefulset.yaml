@@ -1,0 +1,137 @@
+{{- if eq (include "forklift.databaseType" .) "internal" }}
+{{- $db := .Values.database.internal }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "forklift.database.fullname" . }}
+  labels:
+    {{- include "forklift.database.labels" . | nindent 4 }}
+spec:
+  # One instance, no failover. Use database.type=external for a highly available server.
+  replicas: 1
+  serviceName: {{ include "forklift.database.fullname" . }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "forklift.database.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with $db.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "forklift.database.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: database
+        {{- with $db.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $db.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $db.terminationGracePeriodSeconds }}
+      containers:
+        - name: postgresql
+          image: "{{ include "forklift.database.image" . }}"
+          imagePullPolicy: {{ $db.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $db.securityContext | nindent 12 }}
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: forklift
+            - name: POSTGRES_DB
+              value: forklift
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "forklift.fullname" . }}
+                  key: database-password
+            # A subdirectory, so a volume root holding lost+found does not stop initdb.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          {{- with $db.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "forklift", "-d", "forklift", "-h", "127.0.0.1"]
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "forklift", "-d", "forklift", "-h", "127.0.0.1"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "forklift", "-d", "forklift", "-h", "127.0.0.1"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml $db.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if not $db.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- else if $db.persistence.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $db.persistence.existingClaim }}
+        {{- end }}
+      {{- with $db.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $db.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $db.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+  {{- if and $db.persistence.enabled (not $db.persistence.existingClaim) }}
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+        {{- with $db.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with $db.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $db.persistence.size }}
+  {{- end }}
+{{- end }}

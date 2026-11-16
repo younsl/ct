@@ -875,6 +875,9 @@ mod tests {
     /// a blocking task in flight stops paused time from advancing.
     #[tokio::test]
     async fn mutations_wait_a_bounded_time_for_the_writer() {
+        if crate::testing::meta::on_postgres() {
+            return;
+        }
         use axum::body::Body;
         use tower::ServiceExt as _;
 

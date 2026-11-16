@@ -116,6 +116,9 @@ pub struct Manager {
     /// replicas, see `oci_push.rs`), size caps, and the upstream bearer-token
     /// cache for the proxy path (see `oci_proxy.rs`).
     pub(crate) oci_upload_dir: parking_lot::RwLock<String>,
+    /// Set when several pods serve without sharing a disk: chunks are then
+    /// staged in the object store instead of a local session file.
+    pub(crate) oci_staging: parking_lot::RwLock<Option<Arc<dyn super::oci_staging::PartStaging>>>,
     pub(crate) oci_max_manifest_bytes: AtomicI64,
     pub(crate) oci_max_blob_bytes: AtomicI64,
     pub(crate) oci_tokens: OciTokenCache,
@@ -243,6 +246,7 @@ impl Manager {
                 &["repo", "code"],
             ),
             oci_upload_dir: parking_lot::RwLock::new(String::new()),
+            oci_staging: parking_lot::RwLock::new(None),
             oci_max_manifest_bytes: AtomicI64::new(0),
             oci_max_blob_bytes: AtomicI64::new(0),
             oci_tokens: OciTokenCache::new(),
@@ -354,6 +358,13 @@ impl Manager {
     /// Sets the directory holding in-flight OCI blob push session bytes.
     pub fn set_oci_upload_dir(&self, dir: &str) {
         *self.oci_upload_dir.write() = dir.to_string();
+    }
+
+    /// Stages OCI push chunks in a store every pod reaches, for deployments
+    /// where the upload directory is not shared. The directory still buffers
+    /// one chunk at a time.
+    pub fn set_oci_staging(&self, staging: Arc<dyn super::oci_staging::PartStaging>) {
+        *self.oci_staging.write() = Some(staging);
     }
 
     /// Caps the size of an accepted OCI manifest.

@@ -555,7 +555,7 @@ impl RemotePages {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use rusqlite::params;
+    use forklift_metadb::params;
     use tokio::net::TcpListener;
     use tokio::task::JoinHandle;
 

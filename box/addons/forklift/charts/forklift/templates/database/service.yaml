@@ -1,0 +1,17 @@
+{{- if eq (include "forklift.databaseType" .) "internal" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "forklift.database.fullname" . }}
+  labels:
+    {{- include "forklift.database.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "forklift.database.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+{{- end }}

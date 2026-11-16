@@ -163,7 +163,7 @@ async fn force_delete_removes_broken_managed_artifact() {
 		 upload_id, created_by, created_by_source, yanked, created_at, updated_at)
 		 VALUES('pub-1', ?, 'npm', '@msp/toolkit', '0.6.0', '@msp/toolkit@0.6.0', 'upload-1', ?, 'test', 0,
 		 '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z')",
-                rusqlite::params![repo_id, ADMIN_USER],
+                forklift_metadb::params![repo_id, ADMIN_USER],
             )
             .map_err(|e| meta::Error::sqlite("publication fixture", e))
         })

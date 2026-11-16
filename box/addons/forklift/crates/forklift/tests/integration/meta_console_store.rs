@@ -131,7 +131,7 @@ async fn reads_do_not_wait_for_the_write_connection() {
             .write(move |c| {
                 c.execute(
                     "INSERT INTO blobs(sha256, size, ref_count, created_at) VALUES('sha-held', 1, 0, ?)",
-                    rusqlite::params![now_rfc3339()],
+                    forklift_metadb::params![now_rfc3339()],
                 )
                 .map_err(|e| Error::sqlite("write inside the held statement", e))?;
                 let _ = released.blocking_recv();

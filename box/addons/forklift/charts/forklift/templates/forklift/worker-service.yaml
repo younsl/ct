@@ -1,0 +1,19 @@
+{{- if and (eq (include "forklift.mode" .) "activeActive") .Values.service.metricsPort }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "forklift.fullname" . }}-worker
+  labels:
+    {{- include "forklift.worker.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  # Headless: the worker takes no client traffic, this only exposes each pod's metrics to a scraper.
+  clusterIP: None
+  selector:
+    {{- include "forklift.worker.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

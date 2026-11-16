@@ -7,6 +7,10 @@
     "global": {
       "type": "object"
     },
+    "installationMode": {
+      "type": ["string", "null"],
+      "enum": ["", "standalone", "activePassive", "activeActive", null]
+    },
     "replicaCount": {
       "type": "integer",
       "minimum": 0
@@ -238,6 +242,160 @@
               }
             }
           }
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": ["string", "null"],
+          "enum": ["", "sqlite", "internal", "external", null]
+        },
+        "maxConnections": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "schema": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9_]*$"
+        },
+        "internal": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "registry": {
+                  "type": ["string", "null"]
+                },
+                "repository": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": ["Always", "IfNotPresent", "Never"]
+                },
+                "tag": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "digest": {
+                  "type": ["string", "null"],
+                  "pattern": "^(sha256:[a-f0-9]{64})?$"
+                }
+              }
+            },
+            "password": {
+              "type": ["string", "null"]
+            },
+            "args": {
+              "type": ["array", "null"],
+              "items": {
+                "type": "string"
+              }
+            },
+            "persistence": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "storageClass": {
+                  "type": ["string", "null"]
+                },
+                "size": {
+                  "type": "string"
+                },
+                "annotations": {
+                  "$ref": "#/definitions/stringMap"
+                },
+                "existingClaim": {
+                  "type": ["string", "null"]
+                }
+              }
+            },
+            "resources": {
+              "type": ["object", "null"]
+            },
+            "podSecurityContext": {
+              "type": ["object", "null"]
+            },
+            "securityContext": {
+              "type": ["object", "null"]
+            },
+            "terminationGracePeriodSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "podAnnotations": {
+              "$ref": "#/definitions/stringMap"
+            },
+            "podLabels": {
+              "$ref": "#/definitions/stringMap"
+            },
+            "nodeSelector": {
+              "$ref": "#/definitions/stringMap"
+            },
+            "tolerations": {
+              "$ref": "#/definitions/objectList"
+            },
+            "affinity": {
+              "type": ["object", "null"]
+            }
+          }
+        },
+        "external": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": ["string", "null"]
+            },
+            "port": {
+              "$ref": "#/definitions/port"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "user": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sslMode": {
+              "type": "string",
+              "enum": ["disable", "prefer", "require"]
+            },
+            "password": {
+              "type": ["string", "null"]
+            },
+            "existingSecret": {
+              "type": ["string", "null"]
+            },
+            "existingSecretKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources": {
+          "type": ["object", "null"]
         }
       }
     },
@@ -764,6 +922,104 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "required": ["installationMode"],
+        "properties": {
+          "installationMode": {
+            "const": "activeActive"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "database": {
+            "properties": {
+              "type": {
+                "enum": ["", "internal", "external", null]
+              }
+            }
+          },
+          "replication": {
+            "properties": {
+              "enabled": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["installationMode"],
+        "properties": {
+          "installationMode": {
+            "const": "activePassive"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "database": {
+            "properties": {
+              "type": {
+                "enum": ["", "sqlite", null]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["installationMode"],
+        "properties": {
+          "installationMode": {
+            "const": "standalone"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "replication": {
+            "properties": {
+              "enabled": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["database"],
+        "properties": {
+          "database": {
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["internal", "external"]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "replication": {
+            "properties": {
+              "enabled": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "definitions": {
     "stringMap": {
       "type": ["object", "null"],

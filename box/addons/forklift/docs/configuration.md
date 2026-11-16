@@ -42,6 +42,14 @@ All settings are environment variables (the Helm chart maps values to them).
 | `FORKLIFT_STORAGE_META_SYNC_INTERVAL` | `30s` | s3-mode standby poll cadence; must stay shorter than the fixed 24h blob GC grace period. In `snapshot` mode it is also the upload cadence (failover data-loss window), and uploads are paced to about 4 GiB an hour, so after a large upload the next one can wait up to 15m. In `wal` mode the leader ships every 5s |
 | `FORKLIFT_STORAGE_META_SYNC_MODE` | `wal` | s3-mode metadata publishing: `wal` ships committed WAL frames as append-only segments on a base copy (see [Metadata sync](metadata-sync.md)), `snapshot` uploads a whole snapshot per change. Readers follow either, so it can change between terms |
 | `FORKLIFT_STORAGE_META_COMPRESSION` | `zstd` | s3-mode snapshot and base upload encoding, `zstd` or `none`. Readers detect the encoding. Before rolling back below 0.18.0, set `none` and `FORKLIFT_STORAGE_META_SYNC_MODE=snapshot` and let one upload complete, or the older version cannot restore the metadata |
+| `FORKLIFT_DATABASE_HOST` | (none) | PostgreSQL host. Setting it (or `FORKLIFT_DATABASE_URL`) moves the metadata store from SQLite to PostgreSQL, where every pod serves at once. See [Active-active](active-active.md) |
+| `FORKLIFT_DATABASE_PORT` / `_NAME` / `_USER` | `5432` / `forklift` / `forklift` | PostgreSQL port, database and user |
+| `FORKLIFT_DATABASE_PASSWORD` | (none) | PostgreSQL password. The chart injects it from a Secret |
+| `FORKLIFT_DATABASE_SSLMODE` | `prefer` | `disable`, `prefer` or `require`. The server certificate is verified against the system roots and `FORKLIFT_EXTRA_CA_FILE` |
+| `FORKLIFT_DATABASE_URL` | (none) | A `postgres://` URL, used instead of the discrete settings above |
+| `FORKLIFT_DATABASE_SCHEMA` | (server default) | Schema holding the tables |
+| `FORKLIFT_DATABASE_MAX_CONNECTIONS` | `16` | PostgreSQL sessions this process opens, split between writes and reads. Keep pods times this value under the server's `max_connections` |
+| `FORKLIFT_TARGET` | `all` | What the process runs: `all` (requests and background jobs), `api` (requests only) or `worker` (background jobs only). `api` and `worker` need PostgreSQL |
 | `FORKLIFT_HTTP_ADDR` | `:8080` | API, UI and package endpoints |
 | `FORKLIFT_METRICS_ADDR` | `:8081` | Prometheus metrics |
 | `FORKLIFT_PPROF_ADDR` | `127.0.0.1:6060` | `pprof`-compatible CPU profile listener (`/debug/pprof/profile`), loopback-only so it is reachable through `kubectl port-forward` but not through the Service; empty disables it |

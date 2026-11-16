@@ -61,6 +61,10 @@ spec:
           args:
             {{- include "forklift.args" . | nindent 12 }}
           env:
+            {{- if eq (include "forklift.mode" .) "activeActive" }}
+            - name: FORKLIFT_TARGET
+              value: api
+            {{- end }}
             {{- include "forklift.env" . | nindent 12 }}
           {{- with .Values.resizePolicy }}
           resizePolicy:

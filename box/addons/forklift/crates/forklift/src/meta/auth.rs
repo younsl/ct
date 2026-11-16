@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{Row, params, params_from_iter};
+use forklift_metadb::{Row, params, params_from_iter};
 
 use super::time::{format_time_opt, now_rfc3339, parse_time, parse_time_opt};
 use super::{Error, GroupMapping, Permission, Result, Role, SOURCE_LOCAL, Store, Token, User};
@@ -26,9 +26,9 @@ impl Store {
         }
         let id = self
             .write(move |conn| {
-                conn.execute(
-                    "INSERT INTO users(username, password_hash, source, email, disabled, robot, created_at, updated_at)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                conn.query_row(
+"INSERT INTO users(username, password_hash, source, email, disabled, robot, created_at, updated_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                     params![
                         u.username,
                         u.password_hash,
@@ -39,9 +39,9 @@ impl Store {
                         now,
                         now
                     ],
-                )
-                .map_err(|e| Error::sqlite("create user", e))?;
-                Ok(conn.last_insert_rowid())
+                |r| r.get::<_, i64>(0),
+)
+.map_err(|e| Error::sqlite("create user", e))
             })
             .await?;
         self.get_user(id).await
@@ -100,7 +100,7 @@ impl Store {
             let out = stmt
                 .query_map([], scan_user)
                 .map_err(|e| Error::sqlite("list users", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list users", e))?;
             Ok(out)
         })
@@ -230,12 +230,12 @@ impl Store {
         let (name, description) = (r.name.clone(), r.description.clone());
         let id = self
             .write(move |conn| {
-                conn.execute(
-                    "INSERT INTO roles(name, description, created_at) VALUES(?, ?, ?)",
+                conn.query_row(
+                    "INSERT INTO roles(name, description, created_at) VALUES(?, ?, ?) RETURNING id",
                     params![name, description, now_rfc3339()],
+                    |r| r.get::<_, i64>(0),
                 )
-                .map_err(|e| Error::sqlite("create role", e))?;
-                Ok(conn.last_insert_rowid())
+                .map_err(|e| Error::sqlite("create role", e))
             })
             .await?;
         r.id = id;
@@ -267,7 +267,7 @@ impl Store {
             let out = stmt
                 .query_map([], scan_role)
                 .map_err(|e| Error::sqlite("list roles", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list roles", e))?;
             Ok(out)
         })
@@ -290,12 +290,12 @@ impl Store {
         let (role_id, pattern, actions) = (p.role_id, p.repo_pattern.clone(), p.actions.clone());
         let id = self
             .write(move |conn| {
-                conn.execute(
-                    "INSERT INTO role_permissions(role_id, repo_pattern, actions) VALUES(?, ?, ?)",
+                conn.query_row(
+"INSERT INTO role_permissions(role_id, repo_pattern, actions) VALUES(?, ?, ?) RETURNING id",
                     params![role_id, pattern, actions],
-                )
-                .map_err(|e| Error::sqlite("add permission", e))?;
-                Ok(conn.last_insert_rowid())
+                |r| r.get::<_, i64>(0),
+)
+.map_err(|e| Error::sqlite("add permission", e))
             })
             .await?;
         p.id = id;
@@ -478,7 +478,7 @@ impl Store {
                     })
                 })
                 .map_err(|e| Error::sqlite("list group mappings", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list group mappings", e))?;
             Ok(out)
         })
@@ -520,7 +520,7 @@ impl Store {
             let out = stmt
                 .query_map(params_from_iter(groups.iter()), |r| r.get::<_, String>(0))
                 .map_err(|e| Error::sqlite("role names for groups", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("role names for groups", e))?;
             Ok(out)
         })
@@ -536,9 +536,9 @@ impl Store {
         let row = t.clone();
         let id = self
             .write(move |conn| {
-                conn.execute(
-                    "INSERT INTO tokens(user_id, name, description, hash, scopes_json, expires_at, created_at)
-         VALUES(?, ?, ?, ?, ?, ?, ?)",
+                conn.query_row(
+"INSERT INTO tokens(user_id, name, description, hash, scopes_json, expires_at, created_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?) RETURNING id",
                     params![
                         row.user_id,
                         row.name,
@@ -548,9 +548,9 @@ impl Store {
                         format_time_opt(row.expires_at),
                         now_rfc3339()
                     ],
-                )
-                .map_err(|e| Error::sqlite("create token", e))?;
-                Ok(conn.last_insert_rowid())
+                |r| r.get::<_, i64>(0),
+)
+.map_err(|e| Error::sqlite("create token", e))
             })
             .await?;
         t.id = id;
@@ -595,7 +595,7 @@ impl Store {
             let out = stmt
                 .query_map(params![user_id], scan_token_listing)
                 .map_err(|e| Error::sqlite("list tokens", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list tokens", e))?;
             Ok(out)
         })
@@ -648,7 +648,7 @@ impl Store {
             let out = stmt
                 .query_map([], scan_token_listing)
                 .map_err(|e| Error::sqlite("list all tokens", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list all tokens", e))?;
             Ok(out)
         })
@@ -717,7 +717,7 @@ impl Store {
 // --- scan helpers ---
 
 /// Reads one row of the 13-column users projection.
-fn scan_user(r: &Row<'_>) -> rusqlite::Result<User> {
+fn scan_user(r: &Row<'_>) -> forklift_metadb::Result<User> {
     let disabled: i64 = r.get(5)?;
     let created: String = r.get(6)?;
     let updated: String = r.get(7)?;
@@ -742,7 +742,7 @@ fn scan_user(r: &Row<'_>) -> rusqlite::Result<User> {
     })
 }
 
-fn scan_role(r: &Row<'_>) -> rusqlite::Result<Role> {
+fn scan_role(r: &Row<'_>) -> forklift_metadb::Result<Role> {
     let created: String = r.get(3)?;
     let managed: i64 = r.get(4)?;
     Ok(Role {
@@ -754,7 +754,7 @@ fn scan_role(r: &Row<'_>) -> rusqlite::Result<Role> {
     })
 }
 
-fn scan_permission(r: &Row<'_>) -> rusqlite::Result<Permission> {
+fn scan_permission(r: &Row<'_>) -> forklift_metadb::Result<Permission> {
     let managed: i64 = r.get(4)?;
     Ok(Permission {
         id: r.get(0)?,
@@ -766,16 +766,16 @@ fn scan_permission(r: &Row<'_>) -> rusqlite::Result<Permission> {
 }
 
 fn collect_permissions<'a>(
-    rows: impl Iterator<Item = rusqlite::Result<Permission>> + 'a,
+    rows: impl Iterator<Item = forklift_metadb::Result<Permission>> + 'a,
     op: &'static str,
 ) -> Result<Vec<Permission>> {
-    rows.collect::<rusqlite::Result<Vec<_>>>()
+    rows.collect::<forklift_metadb::Result<Vec<_>>>()
         .map_err(|e| Error::sqlite(op, e))
 }
 
 /// Reads the 9-column listing projection whose fifth column is the literal `''`
 /// standing in for the hash, so listings never carry the secret's digest.
-fn scan_token_listing(r: &Row<'_>) -> rusqlite::Result<Token> {
+fn scan_token_listing(r: &Row<'_>) -> forklift_metadb::Result<Token> {
     let expires: Option<String> = r.get(6)?;
     let last_used: Option<String> = r.get(7)?;
     let created: String = r.get(8)?;

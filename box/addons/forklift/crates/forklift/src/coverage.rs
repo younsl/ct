@@ -346,9 +346,37 @@ impl Scanner {
         sched.next(now)
     }
 
-    pub(crate) async fn restore_last_result(&self) -> Res<()> {
-        let Some(stored) = self.store.read_coverage_result().await? else {
+    /// Brings this process in line with what another pod saved: settings,
+    /// muted projects and the last scan result. The scanner keeps all three
+    /// in memory, so when several pods serve, a scan run by the worker or a
+    /// setting saved through one API pod would otherwise stay invisible to the
+    /// others until they restart. Skipped while a scan runs here, since that
+    /// scan is about to replace the result.
+    pub async fn sync_from_store(&self) -> Res<()> {
+        if self.scanning() {
             return Ok(());
+        }
+        self.refresh_settings().await?;
+        self.refresh_muted().await?;
+        self.apply_stored_result().await.map(|_| ())
+    }
+
+    pub(crate) async fn restore_last_result(&self) -> Res<()> {
+        if let Some((projects, scanned_at)) = self.apply_stored_result().await? {
+            tracing::info!(
+                projects,
+                scanned_at = %crate::meta::time::format_time(scanned_at),
+                "coverage: restored last scan"
+            );
+        }
+        Ok(())
+    }
+
+    /// Loads the stored scan result into memory and returns its project count
+    /// and scan time, or `None` when nothing was stored yet.
+    async fn apply_stored_result(&self) -> Res<Option<(usize, DateTime<Utc>)>> {
+        let Some(stored) = self.store.read_coverage_result().await? else {
+            return Ok(None);
         };
         let projects_len = stored.projects.len();
         let scanned_at = stored.scanned_at;
@@ -370,12 +398,7 @@ impl Scanner {
             state.last_duration_ms = stored.duration_ms;
             state.last_triggered_by = stored.triggered_by;
         }
-        tracing::info!(
-            projects = projects_len,
-            scanned_at = %crate::meta::time::format_time(scanned_at),
-            "coverage: restored last scan"
-        );
-        Ok(())
+        Ok(Some((projects_len, scanned_at)))
     }
 
     pub(crate) fn new_client(&self) -> GitLabClient {

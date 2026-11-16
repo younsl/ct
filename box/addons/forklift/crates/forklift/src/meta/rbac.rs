@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{Transaction, params, params_from_iter};
+use forklift_metadb::{Transaction, params, params_from_iter};
 
 use super::time::now_rfc3339;
 use super::{Error, Permission, Result, SOURCE_LOCAL, SOURCE_OIDC, Store};
@@ -228,7 +228,7 @@ impl Store {
         self.read(
             move |conn| match conn.query_row(query, params![id], |r| r.get::<_, i64>(0)) {
                 Ok(managed) => Ok(managed != 0),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+                Err(forklift_metadb::Error::QueryReturnedNoRows) => Ok(false),
                 Err(e) => Err(Error::sqlite("managed flag", e)),
             },
         )
@@ -245,7 +245,7 @@ impl Store {
                 |r| r.get::<_, i64>(0),
             ) {
                 Ok(managed) => Ok(managed != 0),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+                Err(forklift_metadb::Error::QueryReturnedNoRows) => Ok(false),
                 Err(e) => Err(Error::sqlite("is managed user role", e)),
             }
         })
@@ -288,7 +288,7 @@ fn ensure_user(
         |r| r.get::<_, i64>(0),
     ) {
         Ok(_) => return Ok(()),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {}
+        Err(forklift_metadb::Error::QueryReturnedNoRows) => {}
         Err(e) => return Err(Error::sqlite("lookup managed user", e)),
     }
     tx.execute(
@@ -364,7 +364,7 @@ fn group_role_ids(tx: &Transaction<'_>, groups: &[String]) -> Result<Vec<i64>> {
     let ids = stmt
         .query_map(params_from_iter(groups.iter()), |r| r.get::<_, i64>(0))
         .map_err(|e| Error::sqlite("group role ids", e))?
-        .collect::<rusqlite::Result<Vec<_>>>()
+        .collect::<forklift_metadb::Result<Vec<_>>>()
         .map_err(|e| Error::sqlite("group role ids", e))?;
     Ok(ids)
 }

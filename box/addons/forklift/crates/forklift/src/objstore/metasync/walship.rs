@@ -621,7 +621,17 @@ impl MetaSync {
                 (st.ship.cursor, st.ship.known_end, st.ship.restart_ok);
             let cap = self
                 .store
-                .write(move |conn| capture(conn, &wal, cursor, known_end, restart_ok, rotate, read))
+                .write(move |conn| {
+                    capture(
+                        conn.as_sqlite()?,
+                        &wal,
+                        cursor,
+                        known_end,
+                        restart_ok,
+                        rotate,
+                        read,
+                    )
+                })
                 .await
                 .map_err(|e| Error::Meta(e).context("capture wal"))?;
             st.ship.cursor = cap.cursor;
@@ -1324,7 +1334,10 @@ mod tests {
                 for i in from..from + n {
                     tx.execute(
                         "INSERT INTO wal_test(id, v) VALUES (?1, ?2)",
-                        rusqlite::params![i, format!("{i}-{}", "v".repeat((i % 50) as usize))],
+                        forklift_metadb::params![
+                            i,
+                            format!("{i}-{}", "v".repeat((i % 50) as usize))
+                        ],
                     )
                     .map_err(|e| meta::Error::sqlite("insert", e))?;
                 }
@@ -1346,7 +1359,7 @@ mod tests {
                     .map_err(|e| meta::Error::sqlite("prepare", e))?;
                 stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
                     .map_err(|e| meta::Error::sqlite("query", e))?
-                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .collect::<forklift_metadb::Result<Vec<_>>>()
                     .map_err(|e| meta::Error::sqlite("read", e))
             })
             .await
@@ -1717,7 +1730,7 @@ mod tests {
                     let v = format!("{i}:{}", "z".repeat(512 * 1024));
                     tx.execute(
                         "INSERT INTO wal_test(id, v) VALUES (?1, ?2)",
-                        rusqlite::params![from + i, v],
+                        forklift_metadb::params![from + i, v],
                     )
                     .map_err(|e| meta::Error::sqlite("insert", e))?;
                 }

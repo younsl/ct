@@ -40,6 +40,15 @@ pub struct Config {
     /// Selects the blob + metadata backend (filesystem or S3).
     pub storage: StorageConfig,
 
+    /// Moves the metadata store from embedded SQLite to PostgreSQL, which lets
+    /// every pod serve at once. Unset keeps SQLite.
+    pub database: DatabaseConfig,
+
+    /// What this process runs: "all" (requests and background jobs), "api"
+    /// (requests only) or "worker" (background jobs only). The split targets
+    /// need PostgreSQL.
+    pub target: String,
+
     /// The listen address for the API + UI + package protocols.
     pub http_addr: String,
     /// The listen address for Prometheus metrics.
@@ -385,6 +394,62 @@ pub struct InsightsConfig {
     pub interval: Duration,
 }
 
+/// Connects the metadata store to PostgreSQL. Either `url` or `host` selects
+/// it. The discrete fields exist so a chart can inject the password from a
+/// Secret without templating it into a URL.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DatabaseConfig {
+    /// A `postgres://` URL. Takes precedence over the discrete fields.
+    pub url: String,
+    pub host: String,
+    pub port: i64,
+    pub name: String,
+    pub user: String,
+    pub password: String,
+    /// One of disable, prefer, require.
+    pub sslmode: String,
+    /// Schema holding the tables. Empty uses the server default.
+    pub schema: String,
+    /// Sessions this process opens, split between writes and reads.
+    pub max_connections: i64,
+}
+
+impl DatabaseConfig {
+    /// True when PostgreSQL is configured.
+    pub const fn enabled(&self) -> bool {
+        !self.url.is_empty() || !self.host.is_empty()
+    }
+
+    /// The connection string for the driver, or `None` for SQLite.
+    pub fn connection_string(&self) -> Option<String> {
+        if !self.url.is_empty() {
+            return Some(self.url.clone());
+        }
+        if self.host.is_empty() {
+            return None;
+        }
+        // Key-value form: values are single-quoted with backslash escapes, so
+        // a password may hold any character.
+        let quote = |v: &str| format!("'{}'", v.replace('\\', "\\\\").replace('\'', "\\'"));
+        let mut parts = vec![
+            format!("host={}", quote(&self.host)),
+            format!("port={}", self.port),
+            format!("dbname={}", quote(&self.name)),
+            format!("user={}", quote(&self.user)),
+            format!("sslmode={}", self.sslmode),
+        ];
+        if !self.password.is_empty() {
+            parts.push(format!("password={}", quote(&self.password)));
+        }
+        Some(parts.join(" "))
+    }
+}
+
+/// The values `target` accepts.
+pub const TARGET_ALL: &str = "all";
+pub const TARGET_API: &str = "api";
+pub const TARGET_WORKER: &str = "worker";
+
 /// Configures PV-based replication between two replicas.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReplicationConfig {
@@ -559,6 +624,18 @@ impl Config {
                 prune_interval: env_duration("FORKLIFT_OCI_PRUNE_INTERVAL", HOUR),
             },
             seed_default_repos: env_bool("FORKLIFT_SEED_DEFAULT_REPOS", true),
+            database: DatabaseConfig {
+                url: env("FORKLIFT_DATABASE_URL", ""),
+                host: env("FORKLIFT_DATABASE_HOST", ""),
+                port: env_int64("FORKLIFT_DATABASE_PORT", 5432),
+                name: env("FORKLIFT_DATABASE_NAME", "forklift"),
+                user: env("FORKLIFT_DATABASE_USER", "forklift"),
+                password: env("FORKLIFT_DATABASE_PASSWORD", ""),
+                sslmode: env("FORKLIFT_DATABASE_SSLMODE", "prefer"),
+                schema: env("FORKLIFT_DATABASE_SCHEMA", ""),
+                max_connections: env_int64("FORKLIFT_DATABASE_MAX_CONNECTIONS", 16),
+            },
+            target: env("FORKLIFT_TARGET", TARGET_ALL),
         };
         c.validate()?;
         Ok(c)
@@ -574,6 +651,44 @@ impl Config {
         match self.log_level.as_str() {
             "debug" | "info" | "warn" | "error" => {}
             other => return invalid(format!("invalid log level {other:?}")),
+        }
+        match self.target.as_str() {
+            // An empty target is a Config built in code without the field.
+            "" | TARGET_ALL => {}
+            TARGET_API | TARGET_WORKER => {
+                if !self.database.enabled() {
+                    return invalid(format!(
+                        "target {:?} needs the PostgreSQL metadata backend (set FORKLIFT_DATABASE_HOST or FORKLIFT_DATABASE_URL)",
+                        self.target
+                    ));
+                }
+            }
+            other => {
+                return invalid(format!(
+                    "invalid target {other:?} (want all, api or worker)"
+                ));
+            }
+        }
+        if self.database.enabled() {
+            match self.database.sslmode.as_str() {
+                "disable" | "prefer" | "require" => {}
+                other => {
+                    return invalid(format!(
+                        "invalid database sslmode {other:?} (want disable, prefer or require)"
+                    ));
+                }
+            }
+            if self.database.max_connections < 2 {
+                return invalid("database max connections must be at least 2".into());
+            }
+            // PV replication copies the SQLite file between pods, and there
+            // is no such file to copy.
+            if self.replication.enabled {
+                return invalid(
+                    "the PostgreSQL metadata backend is incompatible with replication; disable one"
+                        .into(),
+                );
+            }
         }
         match self.log_format.as_str() {
             "json" | "text" => {}

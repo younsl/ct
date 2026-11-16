@@ -1,7 +1,7 @@
 //! Repository rows: create, lookup, list, config/description/rename updates, the online/offline
 //! toggle and cascading delete.
 
-use rusqlite::{Connection, Row, params};
+use forklift_metadb::{Connection, Row, params};
 
 use super::publication::{clear_group_metadata_cache, invalidate_group_caches_for_member};
 use super::{Error, Repository, Result, Store, now_rfc3339, parse_time};
@@ -15,9 +15,9 @@ impl Store {
                 if r.config_json.is_empty() {
                     r.config_json = "{}".to_string();
                 }
-                conn.execute(
-                    "INSERT INTO repositories(name, format, type, upstream_url, config_json, description, created_at, updated_at)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                conn.query_row(
+"INSERT INTO repositories(name, format, type, upstream_url, config_json, description, created_at, updated_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                     params![
                         r.name,
                         r.format,
@@ -28,9 +28,9 @@ impl Store {
                         now,
                         now
                     ],
-                )
-                .map_err(|e| Error::sqlite("create repository", e))?;
-                Ok(conn.last_insert_rowid())
+                |r| r.get::<_, i64>(0),
+)
+.map_err(|e| Error::sqlite("create repository", e))
             })
             .await?;
         self.get_repository(id).await
@@ -199,7 +199,7 @@ impl Store {
 }
 
 /// Decodes one row in the column order every repository SELECT uses.
-fn scan_repository(row: &Row<'_>) -> rusqlite::Result<Repository> {
+fn scan_repository(row: &Row<'_>) -> forklift_metadb::Result<Repository> {
     let created: String = row.get(7)?;
     let updated: String = row.get(8)?;
     let disabled: i64 = row.get(9)?;
@@ -236,13 +236,13 @@ pub(crate) fn query_all<T, P, F>(
     f: F,
 ) -> Result<Vec<T>>
 where
-    P: rusqlite::Params,
-    F: FnMut(&Row<'_>) -> rusqlite::Result<T>,
+    P: forklift_metadb::Params,
+    F: FnMut(&Row<'_>) -> forklift_metadb::Result<T>,
 {
     let mut stmt = conn.prepare(sql).map_err(|e| Error::sqlite(op, e))?;
     let rows = stmt
         .query_map(params, f)
         .map_err(|e| Error::sqlite(op, e))?;
-    rows.collect::<rusqlite::Result<Vec<T>>>()
+    rows.collect::<forklift_metadb::Result<Vec<T>>>()
         .map_err(|e| Error::sqlite(op, e))
 }

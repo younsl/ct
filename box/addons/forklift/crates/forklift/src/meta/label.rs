@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Row, params};
+use forklift_metadb::{Row, params};
 
 use super::search::like_contains;
 use super::time::{now_rfc3339, parse_time};
@@ -160,7 +160,7 @@ impl Store {
             let out = stmt
                 .query_map(params![repo_id, path], scan_artifact_label)
                 .map_err(|e| Error::sqlite("list artifact labels", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan artifact label", e))?;
             Ok(out)
         })
@@ -222,7 +222,7 @@ impl Store {
                     })
                 })
                 .map_err(|e| Error::sqlite("search artifact labels", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan artifact label hit", e))?;
             Ok(out)
         })
@@ -262,7 +262,7 @@ impl Store {
     }
 }
 
-fn scan_artifact_label(r: &Row<'_>) -> rusqlite::Result<ArtifactLabel> {
+fn scan_artifact_label(r: &Row<'_>) -> forklift_metadb::Result<ArtifactLabel> {
     let created: String = r.get(4)?;
     Ok(ArtifactLabel {
         repo_id: r.get(0)?,
@@ -277,7 +277,7 @@ fn scan_artifact_label(r: &Row<'_>) -> rusqlite::Result<ArtifactLabel> {
 pub(crate) mod tests {
     //! Artifact label persistence and bulk operation tests.
 
-    use rusqlite::params;
+    use forklift_metadb::params;
 
     use crate::meta::time::now_rfc3339;
     use crate::meta::*;
@@ -299,13 +299,13 @@ pub(crate) mod tests {
         let kind = r#type.to_string();
         s.write(move |conn| {
         let now = now_rfc3339();
-        conn.execute(
+        conn.query_row(
             "INSERT INTO repositories(name, format, type, upstream_url, config_json, created_at, updated_at)
-             VALUES(?, ?, ?, '', '{}', ?, ?)",
+             VALUES(?, ?, ?, '', '{}', ?, ?) RETURNING id",
             params![name, format, kind, now, now],
+            |r| r.get::<_, i64>(0),
         )
-        .map_err(|e| Error::sqlite("seed repository", e))?;
-        Ok(conn.last_insert_rowid())
+        .map_err(|e| Error::sqlite("seed repository", e))
     })
     .await
     .expect("seed repository")
@@ -320,7 +320,7 @@ pub(crate) mod tests {
         let now = now_rfc3339();
         conn.execute(
             "INSERT INTO blobs(sha256, size, ref_count, created_at) VALUES(?, ?, 1, ?)
-             ON CONFLICT(sha256) DO UPDATE SET ref_count = ref_count + 1",
+             ON CONFLICT(sha256) DO UPDATE SET ref_count = blobs.ref_count + 1",
             params![sha, size, now],
         )
         .map_err(|e| Error::sqlite("seed blob", e))?;

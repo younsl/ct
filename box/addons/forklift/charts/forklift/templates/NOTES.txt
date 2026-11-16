@@ -1,12 +1,25 @@
 forklift {{ .Chart.AppVersion }} installed as {{ include "forklift.fullname" . }}.
 
+{{- if eq (include "forklift.postgres" .) "true" }}
+Metadata is in PostgreSQL ({{ include "forklift.databaseType" . }}). Every forklift pod serves requests.
+{{- if eq (include "forklift.databaseType" .) "internal" }}
+  The bundled PostgreSQL is ONE pod with no failover. If it is down, forklift is down.
+  For production set database.type=external and point it at a highly available server.
+{{- end }}
+{{- if eq (include "forklift.mode" .) "activeActive" }}
+  {{ include "forklift.replicaCount" . }} API pods serve traffic and {{ .Values.worker.replicaCount }} worker pod(s) run the background jobs.
+{{- end }}
+
+{{- end }}
 High availability:
-{{- if .Values.replication.enabled }}
-  PV-BASED REPLICATION is ENABLED ({{ .Values.replicaCount }} replicas, StatefulSet, per-pod RWO PVC).
+{{- if eq (include "forklift.postgres" .) "true" }}
+  Leader election via Lease "{{ include "forklift.leaseName" . }}" only picks the pod that runs background jobs.
+{{- else if .Values.replication.enabled }}
+  PV-BASED REPLICATION is ENABLED ({{ include "forklift.replicaCount" . }} replicas, StatefulSet, per-pod RWO PVC).
   The standby pulls the leader's data every {{ .Values.replication.interval }}; writes within
   one interval can be lost on failover. Traffic follows the forklift.io/role=leader pod label.
 {{- else if eq (include "forklift.haEnabled" .) "true" }}
-  HA is ENABLED ({{ .Values.replicaCount }} replicas, leader election via Lease "{{ include "forklift.leaseName" . }}").
+  HA is ENABLED ({{ include "forklift.replicaCount" . }} replicas, leader election via Lease "{{ include "forklift.leaseName" . }}").
   Ensure persistence.accessModes is ReadWriteMany so all replicas share the volume.
   No RWX storage available? Set replication.enabled=true for per-pod RWO volumes.
 {{- else }}

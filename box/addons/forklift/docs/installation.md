@@ -69,6 +69,10 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift \
 
 The IAM role needs `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` and `s3:ListBucket` on the bucket and its prefix. Enabling bucket versioning is recommended for metadata-snapshot point-in-time recovery.
 
+## Every pod active (PostgreSQL)
+
+The three layouts above keep one serving pod, since SQLite accepts one writer. `installationMode=activeActive` stores the metadata in PostgreSQL instead, so every API pod serves and a worker runs the background jobs. Installation modes, the bundled and external database, and how to scale back are in [Active-active](active-active.md).
+
 ## Supported storage
 
 Verified end to end on kind for chart 0.14.0: boot, the conditional-write probe, artifact upload and download by digest, the Storage page and admin API, failover where HA applies, and `migrate-storage` in both directions.

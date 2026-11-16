@@ -78,6 +78,9 @@ const DEFAULT_SESSION_TTL: Duration = Duration::from_hours(12);
 /// for the full session lifetime.
 pub const IMPERSONATION_TTL: Duration = Duration::from_hours(1);
 
+/// How stale a token's `last_used_at` may get before a request refreshes it.
+const TOKEN_TOUCH_INTERVAL: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+
 /// Configures the auth [`Service`].
 #[derive(Default)]
 pub struct Options {
@@ -339,7 +342,14 @@ impl Service {
         if !t.scopes_json.is_empty() {
             scopes = serde_json::from_str(&t.scopes_json).unwrap_or_default();
         }
-        let _ = self.store.touch_token(t.id).await;
+        // `last_used_at` is shown to operators at a coarse grain, so a token
+        // used on every request is stamped once per interval, not per request.
+        let stale = t
+            .last_used_at
+            .is_none_or(|used| chrono::Utc::now() - used >= TOKEN_TOUCH_INTERVAL);
+        if stale {
+            let _ = self.store.touch_token(t.id).await;
+        }
         Ok(Some(Arc::new(
             self.build_principal(&u, &[], true, scopes).await?,
         )))

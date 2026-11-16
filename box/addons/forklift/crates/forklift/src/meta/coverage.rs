@@ -2,7 +2,7 @@
 //! mutes. The domain types live in [`crate::coverage`].
 
 use chrono::{Duration, Utc};
-use rusqlite::params;
+use forklift_metadb::params;
 
 use crate::coverage::{self, HISTORY_RETENTION_DAYS, MuteScopes, MutedProject, Settings, Snapshot};
 
@@ -54,7 +54,7 @@ impl Store {
             );
             match res {
                 Ok(s) => Ok(Some(s)),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                Err(forklift_metadb::Error::QueryReturnedNoRows) => Ok(None),
                 Err(e) => Err(Error::sqlite("read coverage settings", e)),
             }
         })
@@ -124,7 +124,7 @@ impl Store {
             );
             let (payload, scanned_at, duration_ms) = match res {
                 Ok(v) => v,
-                Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+                Err(forklift_metadb::Error::QueryReturnedNoRows) => return Ok(None),
                 Err(e) => return Err(Error::sqlite("read coverage result", e)),
             };
             let Ok(mut out) = serde_json::from_str::<coverage::Result>(&payload) else {
@@ -219,7 +219,7 @@ impl Store {
                     })
                 })
                 .map_err(|e| Error::sqlite("list coverage history", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list coverage history", e))?;
             Ok(out)
         })
@@ -255,7 +255,7 @@ impl Store {
                     })
                 })
                 .map_err(|e| Error::sqlite("list muted coverage projects", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list muted coverage projects", e))?;
             Ok(out)
         })
@@ -323,7 +323,7 @@ fn decode_string_list(s: &str) -> Vec<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use chrono::{Duration, SubsecRound, Utc};
-    use rusqlite::params;
+    use forklift_metadb::params;
 
     use crate::coverage;
 

@@ -1,6 +1,6 @@
 # forklift
 
-![Version: 0.23.0](https://img.shields.io/badge/Version-0.23.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.20.0](https://img.shields.io/badge/AppVersion-0.20.0-informational?style=flat-square)
+![Version: 0.24.0](https://img.shields.io/badge/Version-0.24.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.21.0](https://img.shields.io/badge/AppVersion-0.21.0-informational?style=flat-square)
 
 Lightweight Kubernetes-native artifact repository (Maven, npm, Cargo, Go, PyPI) with proxy caching and supply-chain controls (age policy, package approval, vulnerability scanning)
 
@@ -45,7 +45,7 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift -f values.yaml
 Install a specific version:
 
 ```console
-helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.23.0
+helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.24.0
 ```
 
 ### Install from local chart
@@ -53,7 +53,7 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.23.0
 Download forklift chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/forklift --untar --version 0.23.0
+helm pull oci://ghcr.io/younsl/charts/forklift --untar --version 0.24.0
 helm install forklift ./forklift
 ```
 
@@ -79,7 +79,8 @@ The following table lists the configurable parameters and their default values.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| replicaCount | int | `2` | Number of replicas. With 2+ replicas, enable ha to elect a single active writer. |
+| installationMode | string | `""` | Topology preset: "", standalone, activePassive or activeActive. |
+| replicaCount | int | `2` | Number of server pods. standalone forces 1, activePassive raises it to at least 2, and in activeActive it is the number of API pods. |
 | revisionHistoryLimit | int | `10` | Number of old ReplicaSets to retain for rollback. |
 | strategy | object | `{}` | Deployment update strategy. Empty auto-selects: RollingUpdate for the s3 backend, Recreate for fs. |
 | image.registry | string | `"ghcr.io"` | Image registry host. Empty folds the host into `repository`. |
@@ -139,6 +140,40 @@ The following table lists the configurable parameters and their default values.
 | storage.migration.resources | object | `{}` | Job resources. |
 | storage.migration.podAnnotations | object | `{"karpenter.sh/do-not-disrupt":"true"}` | Job pod annotations. Karpenter must not evict a running copy. |
 | storage.migration.extraPodSpec | object | `{}` | Extra Pod spec fields, e.g. runtimeClassName. Fields the chart already renders are rejected. |
+| database.type | string | `""` | Metadata backend: sqlite, internal (PostgreSQL deployed by this chart) or external. Empty picks internal for installationMode=activeActive and sqlite otherwise. |
+| database.maxConnections | int | `16` | PostgreSQL sessions each forklift pod opens, split between writes and reads. |
+| database.schema | string | `""` | PostgreSQL schema holding the tables. Empty uses the server default. |
+| database.internal.image.registry | string | `"docker.io"` | Image registry host. Empty folds the host into `repository`. |
+| database.internal.image.repository | string | `"postgres"` | Image repository. |
+| database.internal.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
+| database.internal.image.tag | string | `"17.12"` | Image tag. |
+| database.internal.image.digest | string | `""` | Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence. |
+| database.internal.password | string | `""` | Password of the forklift database user. Empty generates one into the chart Secret and keeps it across upgrades. Set it explicitly under GitOps tools that render without cluster access, since the server only reads it when the volume is first initialized. |
+| database.internal.args | list | `[]` | Extra arguments for the postgres server, for example ["-c", "max_connections=200"]. |
+| database.internal.persistence.enabled | bool | `true` | Keep the database on a PersistentVolume. When false, metadata is lost on pod restart. |
+| database.internal.persistence.storageClass | string | `""` | StorageClass for the PVC. Uses the cluster default when empty. |
+| database.internal.persistence.size | string | `"8Gi"` | PVC storage size. |
+| database.internal.persistence.annotations | object | `{}` | Annotations to add to the PVC. |
+| database.internal.persistence.existingClaim | string | `""` | Use an existing PVC instead of creating one. |
+| database.internal.resources | object | `{"limits":{"memory":"512Mi"},"requests":{"cpu":"100m","memory":"256Mi"}}` | Container resource requests and limits. |
+| database.internal.podSecurityContext | object | `{"fsGroup":999,"runAsGroup":999,"runAsNonRoot":true,"runAsUser":999}` | Pod-level security context. The image runs as the postgres user (999). |
+| database.internal.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Container-level security context. |
+| database.internal.terminationGracePeriodSeconds | int | `60` | Seconds the server gets to shut down cleanly. |
+| database.internal.podAnnotations | object | `{}` | Annotations to add to the pod. |
+| database.internal.podLabels | object | `{}` | Labels to add to the pod. |
+| database.internal.nodeSelector | object | `{}` | Node selector for the pod. |
+| database.internal.tolerations | list | `[]` | Tolerations for the pod. |
+| database.internal.affinity | object | `{}` | Affinity for the pod. |
+| database.external.host | string | `""` | Server host name. Required when type is external. |
+| database.external.port | int | `5432` | Server port. |
+| database.external.name | string | `"forklift"` | Database name. |
+| database.external.user | string | `"forklift"` | Database user. |
+| database.external.sslMode | string | `"prefer"` | TLS mode: disable, prefer or require. The server certificate is verified against the system roots and outbound.caBundle. |
+| database.external.password | string | `""` | Password given inline, stored in the chart Secret. Prefer existingSecret. |
+| database.external.existingSecret | string | `""` | Existing Secret holding the password. |
+| database.external.existingSecretKey | string | `"password"` | Key of the password in existingSecret. |
+| worker.replicaCount | int | `1` | Number of worker pods. One is enough, a second only shortens the gap after a node failure. |
+| worker.resources | object | `{}` | Container resource requests and limits. Empty reuses `resources`. |
 | seaweedfs.enabled | bool | `true` | Deploy bundled SeaweedFS. |
 | seaweedfs.master.enabled | bool | `false` |  |
 | seaweedfs.volume.enabled | bool | `false` |  |

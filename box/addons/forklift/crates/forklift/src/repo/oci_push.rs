@@ -218,9 +218,11 @@ impl Manager {
         let mut raw = [0u8; 16];
         rand::fill(&mut raw);
         let id = hex::encode(raw);
-        if tokio::fs::write(self.oci_session_file(&id), b"")
-            .await
-            .is_err()
+        // With shared staging there is no session file: the parts are objects.
+        if self.oci_staging.read().is_none()
+            && tokio::fs::write(self.oci_session_file(&id), b"")
+                .await
+                .is_err()
         {
             return write_oci_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -234,7 +236,7 @@ impl Manager {
             .await
             .is_err()
         {
-            let _ = tokio::fs::remove_file(self.oci_session_file(&id)).await;
+            self.oci_discard_session_bytes(&id).await;
             return write_oci_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "BLOB_UPLOAD_INVALID",
@@ -255,6 +257,33 @@ impl Manager {
 
     fn oci_session_file(&self, id: &str) -> PathBuf {
         PathBuf::from(self.oci_upload_dir_value()).join(id)
+    }
+
+    /// Removes a session's staged bytes, wherever they are.
+    pub(crate) async fn oci_discard_session_bytes(&self, id: &str) {
+        let staging = self.oci_staging.read().clone();
+        if let Some(staging) = staging {
+            if let Err(err) = staging.remove(id).await {
+                tracing::warn!(id, err = %err, "oci session parts remove failed");
+            }
+            return;
+        }
+        if let Err(err) = tokio::fs::remove_file(self.oci_session_file(id)).await
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(id, err = %err, "oci session file remove failed");
+        }
+    }
+
+    /// Opens everything appended to the session so far.
+    async fn oci_open_session_bytes(&self, id: &str) -> std::io::Result<super::StoreBody> {
+        let staging = self.oci_staging.read().clone();
+        match staging {
+            Some(staging) => staging.open(id).await,
+            None => Ok(Box::pin(
+                tokio::fs::File::open(self.oci_session_file(id)).await?,
+            )),
+        }
     }
 
     /// Validates and loads the session addressed by the request, returning the
@@ -315,12 +344,16 @@ impl Manager {
                 return resp;
             }
         }
-        let Ok(n) = self.oci_append_session(&sess, body).await else {
-            return write_oci_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "BLOB_UPLOAD_INVALID",
-                "append failed",
-            );
+        let n = match self.oci_append_session(&sess, body).await {
+            Ok(n) => n,
+            Err(err) => {
+                tracing::warn!(id = %sess.id, offset = sess.offset, err = %err, "oci chunk append failed");
+                return write_oci_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "BLOB_UPLOAD_INVALID",
+                    "append failed",
+                );
+            }
         };
         if self
             .store
@@ -357,10 +390,47 @@ impl Manager {
         sess: &OCIUploadSession,
         body: Body,
     ) -> Result<i64, std::io::Error> {
-        let mut file = tokio::fs::OpenOptions::new()
-            .append(true)
-            .open(self.oci_session_file(&sess.id))
-            .await?;
+        let staging = self.oci_staging.read().clone();
+        let Some(staging) = staging else {
+            let mut file = tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(self.oci_session_file(&sess.id))
+                .await?;
+            return self.oci_copy_chunk(sess, body, &mut file).await;
+        };
+        // Buffer the chunk locally to learn its length under the size cap,
+        // then hand it to the shared store as the part at this offset. The
+        // session may have been opened on another pod, so this one may never
+        // have created its scratch directory.
+        let dir = PathBuf::from(self.oci_upload_dir_value());
+        tokio::fs::create_dir_all(&dir).await?;
+        let part = dir.join(format!(
+            "{}.{}.part",
+            sess.id,
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut file = tokio::fs::File::create(&part).await?;
+        let copied = self.oci_copy_chunk(sess, body, &mut file).await;
+        drop(file);
+        let stored = match copied {
+            Ok(n) if n > 0 => staging
+                .put_part(&sess.id, sess.offset, &part, n)
+                .await
+                .map(|()| n),
+            other => other,
+        };
+        let _ = tokio::fs::remove_file(&part).await;
+        stored
+    }
+
+    /// Copies one request body into `file`, enforcing the per-blob size cap
+    /// across the session's accumulated total.
+    async fn oci_copy_chunk(
+        &self,
+        sess: &OCIUploadSession,
+        body: Body,
+        file: &mut tokio::fs::File,
+    ) -> Result<i64, std::io::Error> {
         let cap = self.oci_max_blob_bytes_value();
         let mut reader = request_body(body);
         if cap > 0 {
@@ -369,7 +439,7 @@ impl Manager {
                 return Err(std::io::Error::other("blob size cap exceeded"));
             }
             let mut limited = tokio::io::AsyncReadExt::take(reader, remaining as u64);
-            let n = tokio::io::copy(&mut limited, &mut file).await? as i64;
+            let n = tokio::io::copy(&mut limited, file).await? as i64;
             // Anything left in body means the cap was hit mid-chunk.
             let mut reader = limited.into_inner();
             let mut probe = [0u8; 1];
@@ -379,7 +449,7 @@ impl Manager {
             file.flush().await?;
             return Ok(n);
         }
-        let n = tokio::io::copy(&mut reader, &mut file).await? as i64;
+        let n = tokio::io::copy(&mut reader, file).await? as i64;
         file.flush().await?;
         Ok(n)
     }
@@ -404,7 +474,8 @@ impl Manager {
             return write_oci_error(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "invalid digest");
         }
         match self.oci_append_session(&sess, body).await {
-            Err(_) => {
+            Err(err) => {
+                tracing::warn!(id = %sess.id, offset = sess.offset, err = %err, "oci final chunk append failed");
                 return write_oci_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "BLOB_UPLOAD_INVALID",
@@ -427,20 +498,18 @@ impl Manager {
             }
             Ok(_) => {}
         }
-        let Ok(file) = tokio::fs::File::open(self.oci_session_file(&sess.id)).await else {
+        let Ok(staged) = self.oci_open_session_bytes(&sess.id).await else {
             return write_oci_error(
                 StatusCode::NOT_FOUND,
                 "BLOB_UPLOAD_UNKNOWN",
                 "upload session unknown",
             );
         };
-        let resp = self
-            .oci_store_blob(parts, res, req, &digest, Box::pin(file))
-            .await;
+        let resp = self.oci_store_blob(parts, res, req, &digest, staged).await;
         // Session cleanup regardless of outcome: a digest mismatch discards the
         // upload (the client restarts the push), it does not resume.
         let _ = self.store.delete_oci_upload_session(&sess.id).await;
-        let _ = tokio::fs::remove_file(self.oci_session_file(&sess.id)).await;
+        self.oci_discard_session_bytes(&sess.id).await;
         resp
     }
 
@@ -545,7 +614,7 @@ impl Manager {
             Err(resp) => return resp,
         };
         let _ = self.store.delete_oci_upload_session(&sess.id).await;
-        let _ = tokio::fs::remove_file(self.oci_session_file(&sess.id)).await;
+        self.oci_discard_session_bytes(&sess.id).await;
         StatusCode::NO_CONTENT.into_response()
     }
 

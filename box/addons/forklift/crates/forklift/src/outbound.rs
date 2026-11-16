@@ -45,6 +45,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct ExtraRoots {
     /// The bundle as read, handed to the S3 connector, which parses PEM itself.
     pem: Vec<u8>,
+    ders: Vec<CertificateDer<'static>>,
     certs: Vec<reqwest::Certificate>,
 }
 
@@ -83,7 +84,7 @@ impl ExtraRoots {
                 path: path.to_string(),
                 source,
             })?;
-        Ok(Self { pem, certs })
+        Ok(Self { pem, ders, certs })
     }
 
     /// The number of certificates in the bundle.
@@ -120,6 +121,14 @@ fn with_roots(
         Some(roots) => builder.tls_certs_merge(roots.certs.iter().cloned()),
         None => builder,
     }
+}
+
+/// The installed bundle as DER certificates, for clients that build their own
+/// rustls root store (the PostgreSQL metadata backend).
+pub fn extra_root_ders() -> Vec<CertificateDer<'static>> {
+    EXTRA_ROOTS
+        .get()
+        .map_or_else(Vec::new, |roots| roots.ders.clone())
 }
 
 /// The installed bundle in PEM form, for clients that take PEM.

@@ -1045,6 +1045,99 @@ pub(crate) mod tests {
         }
     }
 
+    /// With shared staging a chunked push does not depend on any one pod's
+    /// disk: every request here runs against a fresh, empty upload directory,
+    /// the way consecutive requests land on different pods.
+    #[tokio::test]
+    async fn oci_chunked_push_survives_changing_pods() {
+        use crate::objstore::ObjectApi;
+        use crate::repo::oci_staging::tests::MemBucket;
+
+        let tm = new_test_manager().await;
+        let bucket = Arc::new(MemBucket::default());
+        tm.manager
+            .set_oci_staging(Arc::new(crate::repo::ObjectStaging::new(
+                Arc::clone(&bucket) as Arc<dyn ObjectApi>,
+                "bucket",
+                "blobs",
+            )));
+        mk_oci_repo(
+            &tm.store,
+            "oci-shared",
+            meta::TYPE_HOSTED,
+            "",
+            repoconfig::default(),
+        )
+        .await;
+        let h = mux(&tm.manager);
+        let layer = b"LAYERBYTES-ACROSS-PODS".to_vec();
+
+        let _pod_a = temp_upload_dir(&tm.manager);
+        let resp = call(&h, Method::POST, "/v2/oci-shared/app/blobs/uploads/", "").await;
+        assert_eq!(resp.status, StatusCode::ACCEPTED, "open session");
+        let loc = resp.header("Location");
+
+        let mut offset = 0;
+        for chunk in [&layer[..5], &layer[5..11], &layer[11..]] {
+            // A pod that never opened a session has no scratch directory yet.
+            let next_pod = tempfile::tempdir().expect("temp dir");
+            tm.manager
+                .set_oci_upload_dir(&next_pod.path().join("oci-uploads").to_string_lossy());
+            let request = Request::builder()
+                .method(Method::PATCH)
+                .uri(&loc)
+                .header(
+                    "Content-Range",
+                    format!("{offset}-{}", offset + chunk.len() - 1),
+                )
+                .body(Body::from(chunk.to_vec()))
+                .expect("build request");
+            let resp = send(&h, request).await;
+            assert_eq!(resp.status, StatusCode::ACCEPTED, "patch at {offset}");
+            offset += chunk.len();
+        }
+        assert_eq!(bucket.objects.lock().len(), 3, "one staged part per chunk");
+
+        let _last_pod = temp_upload_dir(&tm.manager);
+        let digest = oci_digest_of(&layer);
+        let resp = call(&h, Method::PUT, &format!("{loc}?digest={digest}"), "").await;
+        assert_eq!(
+            resp.status,
+            StatusCode::CREATED,
+            "finalize body={}",
+            resp.text()
+        );
+        assert_eq!(
+            bucket.objects.lock().len(),
+            0,
+            "parts removed after finalize"
+        );
+
+        let resp = call(
+            &h,
+            Method::GET,
+            &format!("/v2/oci-shared/app/blobs/{digest}"),
+            "",
+        )
+        .await;
+        assert_eq!(resp.status, StatusCode::OK, "blob get");
+        assert_eq!(resp.body.as_ref(), layer.as_slice());
+
+        // A cancelled session leaves no parts behind either.
+        let resp = call(&h, Method::POST, "/v2/oci-shared/app/blobs/uploads/", "").await;
+        let loc = resp.header("Location");
+        let request = Request::builder()
+            .method(Method::PATCH)
+            .uri(&loc)
+            .body(Body::from("abandoned"))
+            .expect("build request");
+        assert_eq!(send(&h, request).await.status, StatusCode::ACCEPTED);
+        assert_eq!(bucket.objects.lock().len(), 1);
+        let resp = call(&h, Method::DELETE, &loc, "").await;
+        assert_eq!(resp.status, StatusCode::NO_CONTENT, "cancel");
+        assert_eq!(bucket.objects.lock().len(), 0, "parts removed after cancel");
+    }
+
     #[tokio::test]
     async fn oci_hosted_push_pull_round_trip() {
         let tm = new_test_manager().await;
@@ -1563,12 +1656,12 @@ pub(crate) mod tests {
             .write(move |conn| {
                 conn.execute(
                     "UPDATE oci_tags SET updated_at = ?1 WHERE repo_id = ?2 AND name = ?3 AND tag = ?4",
-                    rusqlite::params![at, repo_id, name, tag],
+                    forklift_metadb::params![at, repo_id, name, tag],
                 )
                 .map_err(|e| meta::Error::sqlite("backdate tag", e))?;
                 conn.execute(
                     "UPDATE artifacts SET last_accessed_at = ?1 WHERE repo_id = ?2 AND path = ?3",
-                    rusqlite::params![at, repo_id, oci_manifest_path(&name, &digest)],
+                    forklift_metadb::params![at, repo_id, oci_manifest_path(&name, &digest)],
                 )
                 .map_err(|e| meta::Error::sqlite("backdate manifest", e))?;
                 Ok(())

@@ -63,6 +63,7 @@ mod oci_images;
 mod oci_proxy;
 mod oci_prune;
 mod oci_push;
+mod oci_staging;
 mod pypi;
 mod uiupload;
 mod uiupload_archive;
@@ -82,6 +83,7 @@ pub use oci::oci_manifest_ref;
 pub use oci_detail::OCIArtifactDetail;
 pub use oci_idle::idle_expiry;
 pub use oci_images::OCITagInfo;
+pub use oci_staging::{ObjectStaging, PartStaging};
 pub use reaper::{RetentionPreview, RetentionPreviewItem};
 pub use seed::{DEFAULT_REPOSITORIES, DefaultRepo, is_default_repo, seed_defaults};
 pub use upload::{UploadError, UploadPlan, UploadResult, UploadValidationError};
@@ -234,6 +236,10 @@ pub struct Engine {
     pub(crate) gate_inflight: Gauge,
     pub(crate) gate_queued: Gauge,
     pub(crate) gate_capacity: Gauge,
+    /// Blobs whose reference count disagreed with the rows referencing them at
+    /// the last check, and how many undercounts the check repaired.
+    pub(crate) ref_drift: prometheus::GaugeVec,
+    pub(crate) ref_repaired: prometheus::Counter,
     /// Remembers references found to be missing their bytes, so the UI can mark
     /// the affected artifacts instead of leaving users to discover it as a 5xx
     /// mid-build.
@@ -401,6 +407,23 @@ impl Engine {
                 "metadata_rewrite_capacity",
                 "Total rewrite slots (see MAX_CONCURRENT_REWRITES); inflight/capacity is gate saturation.",
             ),
+            ref_drift: prometheus::GaugeVec::new(
+                Opts::new(
+                    "blob_ref_drift",
+                    "Blobs whose reference count disagreed with the rows referencing them at the last check, by direction (under is repaired, over leaks storage).",
+                )
+                .namespace("forklift"),
+                &["direction"],
+            )
+            .expect("valid gauge"),
+            ref_repaired: prometheus::Counter::with_opts(
+                Opts::new(
+                    "blob_ref_repaired_total",
+                    "Blob reference undercounts raised to the actual count.",
+                )
+                .namespace("forklift"),
+            )
+            .expect("valid counter"),
             dangling: DanglingRegistry::new(system_clock()),
             stale_served: counter_vec(
                 "stale_served_total",
@@ -428,6 +451,8 @@ impl Engine {
             Box::new(e.gate_inflight.clone()),
             Box::new(e.gate_queued.clone()),
             Box::new(e.gate_capacity.clone()),
+            Box::new(e.ref_drift.clone()),
+            Box::new(e.ref_repaired.clone()),
             Box::new(e.render_cache_ops.clone()),
             Box::new(e.stale_served.clone()),
             Box::new(e.revalidations.clone()),

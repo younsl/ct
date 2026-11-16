@@ -115,13 +115,144 @@ immutable one, and an unchanged one leaves the finished Job alone.
 */}}
 {{- define "forklift.migrationJobName" -}}
 {{- $m := .Values.storage.migration -}}
-{{- $key := dict "migration" $m "image" (include "forklift.image" .) "target" (list (include "forklift.s3Endpoint" .) (include "forklift.s3Bucket" .) .Values.storage.s3.prefix (include "forklift.s3CredSecret" .)) "ha" (gt (int .Values.replicaCount) 1) "scheduling" (list .Values.nodeSelector .Values.tolerations .Values.podSecurityContext .Values.securityContext) -}}
+{{- $key := dict "migration" $m "image" (include "forklift.image" .) "target" (list (include "forklift.s3Endpoint" .) (include "forklift.s3Bucket" .) .Values.storage.s3.prefix (include "forklift.s3CredSecret" .)) "ha" (gt (int (include "forklift.replicaCount" .)) 1) "scheduling" (list .Values.nodeSelector .Values.tolerations .Values.podSecurityContext .Values.securityContext) -}}
 {{- printf "%s-migrate-%s" (include "forklift.fullname" . | trunc 45 | trimSuffix "-") (toJson $key | sha256sum | trunc 10) -}}
 {{- end -}}
 
 {{- define "forklift.replicas" -}}
-{{- if .Values.storage.migration.enabled }}0{{ else }}{{ .Values.replicaCount }}{{ end }}
+{{- if .Values.storage.migration.enabled }}0{{ else }}{{ include "forklift.replicaCount" . }}{{ end }}
 {{- end -}}
+
+{{/*
+installationMode is the topology preset: "" keeps the values-derived layout,
+standalone is one pod, activePassive is a SQLite leader with standbys, and
+activeActive is API pods plus a worker on PostgreSQL.
+*/}}
+{{- define "forklift.mode" -}}
+{{- .Values.installationMode | default "" -}}
+{{- end -}}
+
+{{/*
+replicaCount resolves the server pod count for the mode: one for standalone, at
+least two for activePassive, and replicaCount as given otherwise (the API pods
+in activeActive).
+*/}}
+{{- define "forklift.replicaCount" -}}
+{{- $mode := include "forklift.mode" . -}}
+{{- if eq $mode "standalone" -}}
+1
+{{- else if eq $mode "activePassive" -}}
+{{- max 2 (int .Values.replicaCount) -}}
+{{- else -}}
+{{- int .Values.replicaCount -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+databaseType resolves the metadata backend: an explicit database.type wins,
+activeActive defaults to the bundled PostgreSQL, and everything else is SQLite.
+*/}}
+{{- define "forklift.databaseType" -}}
+{{- if .Values.database.type -}}
+{{- .Values.database.type -}}
+{{- else if eq (include "forklift.mode" .) "activeActive" -}}
+internal
+{{- else -}}
+sqlite
+{{- end -}}
+{{- end -}}
+
+{{- define "forklift.postgres" -}}
+{{- if ne (include "forklift.databaseType" .) "sqlite" -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- define "forklift.database.fullname" -}}
+{{- printf "%s-database" (include "forklift.fullname" . | trunc 54 | trimSuffix "-") -}}
+{{- end -}}
+
+{{- define "forklift.database.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "forklift.name" . }}-database
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{- define "forklift.database.labels" -}}
+helm.sh/chart: {{ include "forklift.chart" . }}
+{{ include "forklift.database.selectorLabels" . }}
+app.kubernetes.io/version: {{ .Values.database.internal.image.tag | quote }}
+app.kubernetes.io/component: database
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "forklift.database.image" -}}
+{{- $i := .Values.database.internal.image -}}
+{{- if $i.registry -}}
+{{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- else -}}
+{{- printf "%s:%s" $i.repository $i.tag -}}
+{{- end -}}
+{{- with $i.digest -}}
+@{{ . }}
+{{- end -}}
+{{- end }}
+
+{{/* Secret and key holding the PostgreSQL password forklift connects with. */}}
+{{- define "forklift.database.secretName" -}}
+{{- if and (eq (include "forklift.databaseType" .) "external") .Values.database.external.existingSecret -}}
+{{- .Values.database.external.existingSecret -}}
+{{- else -}}
+{{- include "forklift.fullname" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "forklift.database.secretKey" -}}
+{{- if and (eq (include "forklift.databaseType" .) "external") .Values.database.external.existingSecret -}}
+{{- .Values.database.external.existingSecretKey -}}
+{{- else -}}
+database-password
+{{- end -}}
+{{- end -}}
+
+{{/* PostgreSQL connection environment, shared by the server and the worker. */}}
+{{- define "forklift.databaseEnv" -}}
+{{- if eq (include "forklift.postgres" .) "true" }}
+{{- $internal := eq (include "forklift.databaseType" .) "internal" }}
+{{- $ext := .Values.database.external }}
+- name: FORKLIFT_DATABASE_HOST
+  value: {{ ternary (include "forklift.database.fullname" .) $ext.host $internal | quote }}
+- name: FORKLIFT_DATABASE_PORT
+  value: {{ ternary 5432 (int $ext.port) $internal | quote }}
+- name: FORKLIFT_DATABASE_NAME
+  value: {{ ternary "forklift" $ext.name $internal | quote }}
+- name: FORKLIFT_DATABASE_USER
+  value: {{ ternary "forklift" $ext.user $internal | quote }}
+- name: FORKLIFT_DATABASE_SSLMODE
+  value: {{ ternary "disable" $ext.sslMode $internal | quote }}
+- name: FORKLIFT_DATABASE_MAX_CONNECTIONS
+  value: {{ .Values.database.maxConnections | quote }}
+{{- with .Values.database.schema }}
+- name: FORKLIFT_DATABASE_SCHEMA
+  value: {{ . | quote }}
+{{- end }}
+- name: FORKLIFT_DATABASE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "forklift.database.secretName" . }}
+      key: {{ include "forklift.database.secretKey" . }}
+{{- end }}
+{{- end }}
+
+{{- define "forklift.worker.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "forklift.name" . }}-worker
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{- define "forklift.worker.labels" -}}
+helm.sh/chart: {{ include "forklift.chart" . }}
+{{ include "forklift.worker.selectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/component: worker
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
 
 {{- define "forklift.s3Provider" -}}
 {{- if .Values.storage.s3.provider -}}
@@ -177,6 +308,47 @@ peer replication is redundant and would compete for the metadata snapshot.
 {{- if not (has .Values.storage.backend (list "fs" "s3")) -}}
 {{- fail (printf "storage.backend must be \"fs\" or \"s3\", got %q" .Values.storage.backend) -}}
 {{- end -}}
+{{- $mode := include "forklift.mode" . -}}
+{{- $db := include "forklift.databaseType" . -}}
+{{- $postgres := eq (include "forklift.postgres" .) "true" -}}
+{{- if and (eq $mode "activeActive") (not $postgres) -}}
+{{- fail "installationMode=activeActive needs PostgreSQL; set database.type to internal or external, or leave it empty for the bundled one" -}}
+{{- end -}}
+{{- if and (eq $mode "activePassive") $postgres -}}
+{{- fail "installationMode=activePassive is the SQLite leader layout; use installationMode=activeActive with PostgreSQL" -}}
+{{- end -}}
+{{- if and (eq $mode "standalone") .Values.replication.enabled -}}
+{{- fail "installationMode=standalone runs one pod and cannot use replication.enabled=true" -}}
+{{- end -}}
+{{- if and $postgres .Values.replication.enabled -}}
+{{- fail "PostgreSQL (database.type) is incompatible with replication.enabled=true; PV replication copies the SQLite file" -}}
+{{- end -}}
+{{- if and $postgres .Values.storage.migration.enabled -}}
+{{- fail "storage.migration.enabled moves a SQLite snapshot and is not supported with PostgreSQL (database.type)" -}}
+{{- end -}}
+{{- /*
+Leaving PostgreSQL by accident. database.type is derived from the mode when
+empty, so changing only installationMode away from activeActive would start
+forklift on an empty SQLite database and drop the bundled server. When the
+release already runs on PostgreSQL, the move to SQLite has to be spelled out.
+lookup returns nothing without cluster access (helm template, Argo CD), so
+this guard only acts on installs and upgrades that reach the cluster.
+*/ -}}
+{{- if and (not $postgres) (not .Values.database.type) -}}
+{{- $sts := lookup "apps/v1" "StatefulSet" .Release.Namespace (include "forklift.database.fullname" .) -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (include "forklift.fullname" .) -}}
+{{- if or $sts (and $secret $secret.data (hasKey $secret.data "database-password")) -}}
+{{- fail "this release stores its metadata in PostgreSQL, and these values would switch it to an empty SQLite database. Set database.type=internal (or external) to keep PostgreSQL, or database.type=sqlite to confirm the switch" -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq $db "external") (not .Values.database.external.host) -}}
+{{- fail "database.external.host is required when database.type is external" -}}
+{{- end -}}
+{{- $several := or (eq $mode "activeActive") (gt (int (include "forklift.replicaCount" .)) 1) -}}
+{{- $shared := or (eq (include "forklift.s3Enabled" .) "true") (has "ReadWriteMany" .Values.persistence.accessModes) -}}
+{{- if and $postgres $several (not $shared) -}}
+{{- fail "several pods on PostgreSQL need a blob store they all share: set storage.backend=s3 (or seaweedfs.enabled=true) or a ReadWriteMany persistence.accessModes" -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -186,12 +358,18 @@ leadership: replication mode, or the s3 backend in HA. The main Service selects
 the leader label and the leader gets RBAC to patch pod labels.
 */}}
 {{- define "forklift.labelRouting" -}}
-{{- if or .Values.replication.enabled (and (eq (include "forklift.s3Enabled" .) "true") (eq (include "forklift.haEnabled" .) "true")) -}}true{{- else -}}false{{- end -}}
+{{- if eq (include "forklift.postgres" .) "true" -}}false
+{{- else if or .Values.replication.enabled (and (eq (include "forklift.s3Enabled" .) "true") (eq (include "forklift.haEnabled" .) "true")) -}}true{{- else -}}false{{- end -}}
 {{- end -}}
 
 {{/* haEnabled resolves the HA toggle: explicit value, else replicaCount > 1. */}}
 {{- define "forklift.haEnabled" -}}
-{{- if kindIs "bool" .Values.ha.enabled }}
+{{- $mode := include "forklift.mode" . -}}
+{{- if eq $mode "standalone" }}
+{{- false }}
+{{- else if or (eq $mode "activePassive") (eq $mode "activeActive") }}
+{{- true }}
+{{- else if kindIs "bool" .Values.ha.enabled }}
 {{- .Values.ha.enabled }}
 {{- else }}
 {{- gt (int .Values.replicaCount) 1 }}
@@ -317,6 +495,7 @@ credential chain (EKS IRSA / Pod Identity).
 - name: FORKLIFT_HA_RETRY_PERIOD
   value: {{ .Values.ha.retryPeriod | quote }}
 {{- end }}
+{{- include "forklift.databaseEnv" . }}
 {{- if .Values.replication.enabled }}
 - name: FORKLIFT_REPLICATION_ENABLED
   value: "true"

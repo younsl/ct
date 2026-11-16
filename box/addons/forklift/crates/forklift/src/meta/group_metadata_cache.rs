@@ -2,7 +2,7 @@
 //! blob table like any artifact.
 
 use chrono::Utc;
-use rusqlite::{OptionalExtension, params};
+use forklift_metadb::{OptionalExtension, params};
 
 use super::publication::{adjust_ref_runner, with_immediate_tx};
 use super::{Error, GroupMetadataCache, Result, Store, format_time, now_rfc3339, parse_time};

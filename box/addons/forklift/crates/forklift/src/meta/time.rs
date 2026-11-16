@@ -3,6 +3,19 @@
 use chrono::{DateTime, TimeZone, Utc};
 pub use forklift_common::time::{format_time, now_rfc3339};
 
+/// SQL that is true when the timestamp expression `lhs` is at or before
+/// `rhs`. Stored timestamps vary in fractional digits, so they are compared
+/// as instants, not as text, and each backend has its own conversion.
+pub(crate) fn sql_time_le(postgres: bool, lhs: &str, rhs: &str) -> String {
+    if postgres {
+        format!(
+            "CAST(CAST({lhs} AS TEXT) AS timestamptz) <= CAST(CAST({rhs} AS TEXT) AS timestamptz)"
+        )
+    } else {
+        format!("julianday({lhs}) <= julianday({rhs})")
+    }
+}
+
 /// Formats an optional timestamp; `None` becomes SQL NULL.
 pub fn format_time_opt<Tz: TimeZone>(t: Option<DateTime<Tz>>) -> Option<String> {
     t.map(format_time)

@@ -65,7 +65,24 @@ client  ->  Service  ->  leader pod ---- blobs (read/write) ----> S3 bucket
 
 A split into separate frontend and backend pods has been considered and is not implemented; see [designs/fe-be-pod-split.md](designs/fe-be-pod-split.md).
 
-Running every pod active at once on a PostgreSQL metadata backend is proposed and not implemented, see [designs/active-active-postgres.md](designs/active-active-postgres.md).
+## Active-active on PostgreSQL
+
+The three layouts above keep one serving pod because SQLite has one writer. With PostgreSQL as the metadata store (`installationMode=activeActive`, or `database.type` set to `internal` or `external`) every pod serves requests against the same database and the same blob store, and the Lease only picks the worker that runs the background jobs.
+
+```
+client  ->  Service  ->  API pod 1..N  ---+-->  PostgreSQL (metadata)
+                                          +-->  S3 or RWX volume (blobs)
+                         worker pod    ---+
+                         (Lease holder: blob GC, retention, scans, notifications)
+```
+
+- The metadata store is written once and runs on both databases through a small connection facade (`crates/metadb`), so the two backends cannot drift apart.
+- A multi-statement write takes a PostgreSQL advisory lock for its transaction, which keeps the isolation SQLite's single writer gave. Artifact writes lock one path, so different artifacts are written in parallel.
+- Blob garbage collection deletes a blob's record and its bytes in one transaction, and every blob write reserves its digest first, so a sweep on the worker cannot remove bytes an API pod is about to reference.
+- With the s3 backend, the chunks of an OCI push are staged in the bucket, since the requests of one push can reach different pods.
+- Metadata sync, WAL shipping and PV replication do not run. PostgreSQL owns durability and failover of the metadata.
+
+How to install and operate it: [Active-active](active-active.md). Design and reasoning: [designs/active-active-postgres.md](designs/active-active-postgres.md).
 
 ## Related documents
 

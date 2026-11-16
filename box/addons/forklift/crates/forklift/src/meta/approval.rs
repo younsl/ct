@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use forklift_metadb::{Row, params, params_from_iter, types::Value};
 use regex::Regex;
-use rusqlite::{Row, params, params_from_iter, types::Value};
 
 use super::search::{like_contains, search_time, search_time_expr};
 use super::time::{is_zero, now_rfc3339, parse_time, parse_time_opt};
@@ -105,7 +105,7 @@ impl Store {
                 "INSERT INTO package_approvals(repo_name, package, status, requested_by, last_requested_version, first_requested_at, last_requested_at)
          VALUES(?, ?, 'pending', ?, ?, ?, ?)
          ON CONFLICT(repo_name, package) DO UPDATE SET
-             request_count = request_count + 1,
+             request_count = package_approvals.request_count + 1,
              last_requested_at = excluded.last_requested_at,
              last_requested_version = CASE
                  WHEN excluded.last_requested_version != '' THEN excluded.last_requested_version
@@ -117,7 +117,7 @@ impl Store {
             ) {
                 Ok(count) => Ok(count == 1),
                 // The DO UPDATE WHERE clause skipped an approved row.
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+                Err(forklift_metadb::Error::QueryReturnedNoRows) => Ok(false),
                 Err(e) => Err(Error::sqlite("upsert pending approval", e)),
             }
         })
@@ -169,7 +169,7 @@ impl Store {
             let out = stmt
                 .query_map(params_from_iter(args.iter()), scan_approval)
                 .map_err(|e| Error::sqlite("list approvals", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan approval", e))?;
             Ok(out)
         })
@@ -277,7 +277,7 @@ impl Store {
                     scan_approval,
                 )
                 .map_err(|e| Error::sqlite("approve all pending", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan approval", e))?;
             Ok(out)
         })
@@ -351,7 +351,7 @@ impl Store {
                     scan_approval,
                 )
                 .map_err(|e| Error::sqlite("approve all pending clean", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan approval", e))?;
             Ok(out)
         })
@@ -540,7 +540,7 @@ impl Store {
             let out = stmt
                 .query_map(params_from_iter(page_args.iter()), scan_approval)
                 .map_err(|e| Error::sqlite("search approvals page", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan approval match", e))?;
             Ok((out, total))
         })
@@ -616,7 +616,7 @@ impl Store {
             let out = stmt
                 .query_map(params![pat, pat, limit], scan_approval)
                 .map_err(|e| Error::sqlite("search approvals", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan approval", e))?;
             Ok(out)
         })
@@ -625,7 +625,7 @@ impl Store {
 }
 
 /// Reads one approval row (the `APPROVAL_COLS` projection).
-fn scan_approval(r: &Row<'_>) -> rusqlite::Result<PackageApproval> {
+fn scan_approval(r: &Row<'_>) -> forklift_metadb::Result<PackageApproval> {
     let first: String = r.get(9)?;
     let last: String = r.get(10)?;
     let decided: Option<String> = r.get(11)?;

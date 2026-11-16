@@ -1343,11 +1343,20 @@ pub(crate) mod tests {
 
         // A fresh scanner over the same store shows the previous picture, which is
         // what keeps a restart from emptying the page.
-        let restored = new_test_scanner(store, &srv, None);
+        let restored = new_test_scanner(store.clone(), &srv, None);
         restored.load().await.expect("Load");
         let got = restored.overview();
         assert!(got.last_scanned_at.is_some());
         assert_eq!(got.projects.len(), 1, "want the stored scan");
+
+        // A second pod that booted before the scan picks it up on its next
+        // sync, without a restart.
+        let other_pod = new_test_scanner(store, &srv, None);
+        assert!(other_pod.overview().last_scanned_at.is_none());
+        other_pod.sync_from_store().await.expect("sync");
+        let synced = other_pod.overview();
+        assert_eq!(synced.last_scanned_at, got.last_scanned_at);
+        assert_eq!(synced.projects.len(), 1, "want the other pod's scan");
     }
 
     #[tokio::test]

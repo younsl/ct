@@ -20,7 +20,7 @@ use axum::routing::get;
 use chrono::Utc;
 use forklift::{
     api, audit, auth, cluster, config, coverage, insights, license, memlimit, meta, metrics,
-    notify, openapi, outbound, replication, repo, server, storage, version, vuln, webui,
+    notify, objstore, openapi, outbound, replication, repo, server, storage, version, vuln, webui,
 };
 use prometheus::{GaugeVec, IntCounter, Opts, Registry};
 use tokio_util::sync::CancellationToken;
@@ -214,20 +214,7 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
     // so they are already detached from cancellation; the timeout keeps a stuck step from
     // hanging boot forever.
     let data_dir = PathBuf::from(&cfg.data_dir);
-    let store = Arc::new(
-        tokio::time::timeout(
-            INIT_TIMEOUT,
-            meta::Store::open_with(
-                data_dir.join("forklift.db"),
-                meta::OpenOptions {
-                    manual_checkpoint: cfg.storage.manual_checkpoint(),
-                },
-            ),
-        )
-        .await
-        .context("open metadata store: timed out")?
-        .context("open metadata store")?,
-    );
+    let store = Arc::new(open_store(&cfg, &data_dir).await?);
 
     let reg = Registry::new();
     register_core_metrics(&reg, &store)?;
@@ -421,8 +408,11 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
         );
     }
 
+    // The api target never runs the singleton jobs, so it stays out of the
+    // election and a worker always holds the Lease.
+    let runs_jobs = cfg.target != config::TARGET_API;
     let mut elector: Option<Arc<cluster::Elector>> = None;
-    if cfg.ha.enabled {
+    if cfg.ha.enabled && runs_jobs {
         elector = Some(cluster::Elector::new(cfg.ha.clone()).context("init leader election")?);
     }
 
@@ -444,6 +434,19 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
     }
 
     wire_storage_backend(&cfg, &api_handler, &backend, &reg, &shutdown);
+
+    // Several pods serve on PostgreSQL, and with the s3 backend their data
+    // directories are per-pod scratch space. The requests of one chunked OCI
+    // push can land on different pods, so its chunks go to the bucket.
+    if store.is_postgres()
+        && let Some(client) = &backend.s3_client
+    {
+        manager.set_oci_staging(Arc::new(repo::ObjectStaging::new(
+            Arc::new(objstore::S3Api::new(client.clone())),
+            &cfg.storage.s3.bucket,
+            &cfg.storage.s3.prefix,
+        )));
+    }
 
     // PV-based replication: the leader serves token-gated snapshot/blob
     // endpoints; the standby pulls them onto its own volume and promotes that
@@ -501,6 +504,13 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
         srv.set_ready(true);
     }
 
+    // On PostgreSQL there is no single writer to protect: every pod serves,
+    // and leadership only picks the pod that runs the singleton jobs.
+    let serve_always = store.is_postgres();
+    if serve_always {
+        srv.set_ready(true);
+    }
+
     // The embedded React SPA serves the UI and handles client-side routing for
     // any path not matched above.
     *srv.router_mut() = std::mem::take(srv.router_mut()).fallback(webui::handler);
@@ -523,9 +533,21 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
         leader_transitions,
         leader_state: Arc::clone(&leader_state),
         label_routing,
+        serve_always,
     });
 
-    if let Some(elector) = elector.clone() {
+    if serve_always {
+        leadership.spawn_queue_workers(&shutdown);
+        if coverage_scanner.enabled() {
+            tokio::spawn(sync_coverage(
+                Arc::clone(&coverage_scanner),
+                shutdown.clone(),
+            ));
+        }
+    }
+    if !runs_jobs {
+        tracing::info!(target: LOG_TARGET, "target api: serving requests, background jobs run on the worker");
+    } else if let Some(elector) = elector.clone() {
         let start = {
             let leadership = Arc::clone(&leadership);
             move |lead_cancel: CancellationToken| {
@@ -559,6 +581,74 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
     }
     store.close();
     result
+}
+
+/// How often a pod picks up coverage settings and results another pod saved.
+const COVERAGE_SYNC_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Keeps this pod's coverage scanner in step with the metadata store. Only
+/// needed when several pods serve: the scheduled scan runs on the worker and
+/// an administrator saves settings through whichever API pod took the request.
+async fn sync_coverage(scanner: Arc<coverage::Scanner>, cancel: CancellationToken) {
+    let mut ticker = tokio::time::interval(COVERAGE_SYNC_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ticker.tick().await;
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            _ = ticker.tick() => {
+                if let Err(err) = scanner.sync_from_store().await {
+                    tracing::warn!(target: LOG_TARGET, err = %err, "coverage: sync from store failed");
+                }
+            }
+        }
+    }
+}
+
+/// How long a PostgreSQL server gets to accept connections at boot, e.g. a
+/// bundled one that starts alongside forklift. It stays under the chart's
+/// startupProbe budget so a database that never comes up ends in a restart.
+const DATABASE_BOOT_BUDGET: Duration = Duration::from_secs(240);
+
+/// Opens the metadata store: PostgreSQL when configured, otherwise the SQLite
+/// file in the data directory.
+async fn open_store(
+    cfg: &config::Config,
+    data_dir: &std::path::Path,
+) -> anyhow::Result<meta::Store> {
+    let Some(conn_str) = cfg.database.connection_string() else {
+        return tokio::time::timeout(
+            INIT_TIMEOUT,
+            meta::Store::open_with(
+                data_dir.join("forklift.db"),
+                meta::OpenOptions {
+                    manual_checkpoint: cfg.storage.manual_checkpoint(),
+                },
+            ),
+        )
+        .await
+        .context("open metadata store: timed out")?
+        .context("open metadata store");
+    };
+    let opts = meta::PostgresOptions {
+        max_connections: usize::try_from(cfg.database.max_connections).unwrap_or(2),
+        schema: cfg.database.schema.clone(),
+        extra_roots: outbound::extra_root_ders(),
+    };
+    let deadline = tokio::time::Instant::now() + DATABASE_BOOT_BUDGET;
+    loop {
+        match meta::Store::open_postgres(&conn_str, opts.clone()).await {
+            Ok(store) => {
+                tracing::info!(target: LOG_TARGET, target_role = %cfg.target, "metadata backend: postgresql");
+                return Ok(store);
+            }
+            Err(err) if tokio::time::Instant::now() < deadline => {
+                tracing::warn!(target: LOG_TARGET, err = %err, "postgresql not ready, retrying");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            Err(err) => return Err(err).context("open postgresql metadata store"),
+        }
+    }
 }
 
 /// Registers the process, build, inventory and connection-pool metrics, none

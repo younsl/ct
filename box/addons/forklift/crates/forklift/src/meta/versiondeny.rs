@@ -1,7 +1,7 @@
 //! Per-version deny list (quarantine v2) for proxy repositories.
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Row, params, params_from_iter, types::Value};
+use forklift_metadb::{Row, params, params_from_iter, types::Value};
 
 use super::time::{now_rfc3339, parse_time};
 use super::{Error, Result, Store};
@@ -49,7 +49,7 @@ impl Store {
                 |r| r.get::<_, i64>(0),
             ) {
                 Ok(_) => Ok(true),
-                Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+                Err(forklift_metadb::Error::QueryReturnedNoRows) => Ok(false),
                 Err(e) => Err(Error::sqlite("is version denied", e)),
             }
         })
@@ -127,7 +127,7 @@ impl Store {
             let out = stmt
                 .query_map(params_from_iter(args.iter()), scan_version_deny)
                 .map_err(|e| Error::sqlite("list version denies", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan version deny", e))?;
             Ok(out)
         })
@@ -183,7 +183,7 @@ impl Store {
 }
 
 /// Reads one deny row (the `DENY_COLS` projection).
-fn scan_version_deny(r: &Row<'_>) -> rusqlite::Result<VersionDeny> {
+fn scan_version_deny(r: &Row<'_>) -> forklift_metadb::Result<VersionDeny> {
     let created: String = r.get(6)?;
     Ok(VersionDeny {
         id: r.get(0)?,

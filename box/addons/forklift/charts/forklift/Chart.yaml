@@ -3,8 +3,8 @@ name: forklift
 description: Lightweight Kubernetes-native artifact repository (Maven, npm, Cargo, Go, PyPI) with proxy caching and supply-chain controls (age policy, package approval, vulnerability scanning)
 type: application
 deprecated: false
-version: 0.23.0
-appVersion: "0.20.0"
+version: 0.24.0
+appVersion: "0.21.0"
 home: https://github.com/younsl/ct/tree/main/box/addons/forklift
 sources:
   - https://github.com/younsl/ct/tree/main/box/addons/forklift/charts/forklift
@@ -28,5 +28,13 @@ keywords:
   - nexus
 annotations:
   artifacthub.io/changes: |
+    - kind: added
+      description: "installationMode selects the topology with one value: standalone, activePassive or activeActive. Empty keeps the layout derived from the existing values, so current installs render the same manifests"
+    - kind: added
+      description: "database block for a PostgreSQL metadata store. internal deploys a single PostgreSQL pod from the chart's own templates, external connects to a server you run. activeActive defaults to internal"
+    - kind: added
+      description: "worker Deployment for installationMode=activeActive, with a headless metrics Service and its own ServiceMonitor when serviceMonitor.enabled is set"
+    - kind: added
+      description: "helm upgrade refuses values that would move a release from PostgreSQL to an empty SQLite database unless database.type is set explicitly"
     - kind: changed
-      description: "Bundled SeaweedFS subchart bumped from 4.48.0 to 4.52.0 (image chrislusf/seaweedfs:4.52). The all-in-one Deployment uses the Recreate strategy, so object storage is briefly unavailable during the upgrade"
+      description: "appVersion 0.21.0"

@@ -19,11 +19,13 @@ pub mod admin;
 pub mod diskusage;
 pub mod health;
 pub mod instrument;
+pub mod reserve;
 pub mod s3;
 
 pub use admin::{AdminConfig, ClusterAdmin, ClusterInfo, ProviderSpec, cluster_admin};
 pub use diskusage::{Disk, disk_usage};
 pub use instrument::{InstrumentedStore, instrument};
+pub use reserve::ReservingStore;
 pub use s3::{
     DEFAULT_READ_TIMEOUT, S3BlobStore, S3Config, is_not_found, is_precondition_failed,
     new_s3_client,

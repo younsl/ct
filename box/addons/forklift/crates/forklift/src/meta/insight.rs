@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{OptionalExtension, params};
+use forklift_metadb::{OptionalExtension, params};
 
 use super::repository::query_all;
 use super::time::{format_time, parse_time};
@@ -266,8 +266,12 @@ impl Store {
             .map_err(|e| Error::sqlite("insert insight report", e))?;
             for point in &checks {
                 tx.execute(
-                    "INSERT OR REPLACE INTO insight_check_history(check_id, generated_at, status, severity, flagged)
-                     VALUES(?, ?, ?, ?, ?)",
+                    "INSERT INTO insight_check_history(check_id, generated_at, status, severity, flagged)
+                     VALUES(?, ?, ?, ?, ?)
+                     ON CONFLICT(check_id, generated_at) DO UPDATE SET
+                       status = excluded.status,
+                       severity = excluded.severity,
+                       flagged = excluded.flagged",
                     params![
                         point.check_id,
                         format_time(point.generated_at),

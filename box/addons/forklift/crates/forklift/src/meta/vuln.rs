@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Row, params};
+use forklift_metadb::{Row, params};
 use serde::{Deserialize, Serialize};
 
 use super::time::{format_time, now_rfc3339, parse_time};
@@ -136,7 +136,7 @@ impl Store {
             let out = stmt
                 .query_map(params![format_time(before), limit], scan_vuln)
                 .map_err(|e| Error::sqlite("list stale vuln scans", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list stale vuln scans", e))?;
             Ok(out)
         })
@@ -205,7 +205,7 @@ impl Store {
 }
 
 /// Reads one scan row.
-fn scan_vuln(r: &Row<'_>) -> rusqlite::Result<VulnScan> {
+fn scan_vuln(r: &Row<'_>) -> forklift_metadb::Result<VulnScan> {
     let ids: String = r.get(4)?;
     let counts: String = r.get(5)?;
     let advisories: String = r.get(6)?;

@@ -1,7 +1,7 @@
 //! OCI tags (mutable pointers onto immutable manifest artifacts) and blob push sessions.
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Row, params};
+use forklift_metadb::{Row, params};
 
 use super::repository::query_all;
 use super::{Error, Result, Store, format_time, now_rfc3339, parse_time};
@@ -199,7 +199,7 @@ impl Store {
         self.write(move |conn| {
             let now = now_rfc3339();
             conn.execute(
-                "INSERT INTO oci_upload_sessions(id, repo_id, name, offset, created_at, updated_at)
+                "INSERT INTO oci_upload_sessions(id, repo_id, name, \"offset\", created_at, updated_at)
          VALUES(?, ?, ?, 0, ?, ?)",
                 params![id, repo_id, name, now, now],
             )
@@ -215,7 +215,7 @@ impl Store {
         let id = id.to_string();
         self.read(move |conn| {
             conn.query_row(
-                "SELECT id, repo_id, name, offset, created_at, updated_at FROM oci_upload_sessions WHERE id = ?",
+                "SELECT id, repo_id, name, \"offset\", created_at, updated_at FROM oci_upload_sessions WHERE id = ?",
                 params![id],
                 scan_oci_upload_session,
             )
@@ -233,7 +233,7 @@ impl Store {
         self.write(move |conn| {
             let n = conn
                 .execute(
-                    "UPDATE oci_upload_sessions SET offset = ?, updated_at = ? WHERE id = ? AND offset = ?",
+                    "UPDATE oci_upload_sessions SET \"offset\" = ?, updated_at = ? WHERE id = ? AND \"offset\" = ?",
                     params![to, now_rfc3339(), id, from],
                 )
                 .map_err(|e| Error::sqlite("update oci upload session", e))?;
@@ -279,7 +279,7 @@ impl Store {
             query_all(
                 conn,
                 "list expired oci upload sessions",
-                "SELECT id, repo_id, name, offset, created_at, updated_at FROM oci_upload_sessions
+                "SELECT id, repo_id, name, \"offset\", created_at, updated_at FROM oci_upload_sessions
          WHERE updated_at < ? ORDER BY updated_at LIMIT ?",
                 params![cutoff, limit],
                 scan_oci_upload_session,
@@ -289,7 +289,7 @@ impl Store {
     }
 }
 
-fn scan_oci_tag(row: &Row<'_>) -> rusqlite::Result<OCITag> {
+fn scan_oci_tag(row: &Row<'_>) -> forklift_metadb::Result<OCITag> {
     let updated: String = row.get(4)?;
     Ok(OCITag {
         repo_id: row.get(0)?,
@@ -300,7 +300,7 @@ fn scan_oci_tag(row: &Row<'_>) -> rusqlite::Result<OCITag> {
     })
 }
 
-fn scan_oci_upload_session(row: &Row<'_>) -> rusqlite::Result<OCIUploadSession> {
+fn scan_oci_upload_session(row: &Row<'_>) -> forklift_metadb::Result<OCIUploadSession> {
     let created: String = row.get(4)?;
     let updated: String = row.get(5)?;
     Ok(OCIUploadSession {

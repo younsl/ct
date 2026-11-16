@@ -1,7 +1,7 @@
 //! The single site-wide announcement row.
 
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use forklift_metadb::params;
 
 use super::time::format_time;
 use super::{Error, Result, Store, now_rfc3339, parse_time};

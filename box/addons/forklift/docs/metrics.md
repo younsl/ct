@@ -13,7 +13,9 @@ replication are healthy. Basic familiarity with Prometheus and PromQL is enough.
 
 ## Background
 
-forklift runs as a single Rust process. The application (API, UI, package
+forklift is a single Rust binary, and each pod runs one process of it. With
+PostgreSQL the pods split into API and worker processes (see
+[Metrics by process](#metrics-by-process)). The application (API, UI, package
 endpoints) serves on `FORKLIFT_HTTP_ADDR` (`:8080` by default). Metrics are
 served separately on `FORKLIFT_METRICS_ADDR` (`:8081` by default) at the
 `/metrics` path, so a scrape never competes with package traffic.
@@ -45,46 +47,27 @@ A short reminder on metric types:
 - A **histogram** records observations into buckets, used here for request
   latency.
 
-## Metrics
+## Metrics by process
 
-### forklift_build_info
+forklift is one binary that runs as up to two kinds of process, selected by `FORKLIFT_TARGET`. Which metrics a pod reports depends on what it runs.
 
-- Type: Gauge
-- Labels: `version`, `commit`, `rust_version`
+| Layout | Processes | What to read |
+| --- | --- | --- |
+| `installationMode=activeActive` | API pods (`api`) and worker pods (`worker`) | [API metrics](#api-metrics) from the API pods, [Worker metrics](#worker-metrics) from the worker, [Metrics on every process](#metrics-on-every-process) from both |
+| PostgreSQL without a mode, several pods | Every pod runs `all` | Every pod reports the API metrics. The pod holding the Lease also reports the worker metrics |
+| `standalone`, `activePassive` and the default SQLite layouts | One serving process (`all`) | All sections come from the leader. Standbys report the process-wide metrics and the [SQLite high availability metrics](#sqlite-high-availability-metrics) |
 
-Build metadata exposed as a constant gauge whose value is always `1`. The labels
-carry the running binary version, the Git commit it was built from, and the Rust
-toolchain version. Use it to confirm which build is live and to join other
-metrics against a version during a rollout.
+Every process registers every metric, so a series that belongs to the other kind of process exists and stays at zero. The chart scrapes the API pods through the main Service and the workers through a headless `<release>-worker` Service, each with its own ServiceMonitor.
 
-### forklift_leader
+When aggregating across pods:
 
-- Type: Gauge
-- Labels: none
+- Counters and histograms are per process. Add them up with `sum`.
+- The inventory gauges (`forklift_repositories`, `forklift_artifacts`, `forklift_blobs`, `forklift_storage_bytes`, `forklift_approval_pending`, `forklift_oci_upload_sessions_active`) are read from the shared metadata store, so every pod reports the same number. Use `max`, not `sum`.
+- `forklift_leader` adds up to `1` across all pods in every layout.
 
-`1` if this instance currently holds leadership, otherwise `0`. In a
-single-instance deployment the process is always leader and reports `1`. In HA
-mode exactly one pod reports `1` at a time, decided by
-[Kubernetes](https://github.com/kubernetes/kubernetes) Lease leader election.
-The leader runs the gated background work (blob sweeper, audit retention) and,
-with PV-based replication, serves snapshots to standbys.
+## API metrics
 
-Use it to confirm that exactly one leader exists. A sum across pods that is not
-`1` points to a split brain or a stalled election.
-
-### forklift_leader_transitions_total
-
-- Type: Counter
-- Labels: none
-
-The number of times this instance acquired leadership since it started. A
-single-instance deployment records exactly one transition at startup. In HA
-mode, sum the rate across pods: leadership should change hands only on a
-deliberate failover or a pod restart, so a rising sum with no rollout in
-progress means the Lease is flapping. Because replication is asynchronous,
-every unplanned transition can lose the writes of the last sync interval, which
-makes flapping worth an alert of its own even when `forklift_leader` always
-sums to `1`.
+Updated on the request path: traffic, caching, upstream fetches and the policy gates. A worker serves no client traffic, so these stay at zero there apart from its own health probes.
 
 ### forklift_http_requests_total
 
@@ -129,49 +112,6 @@ or fail before the lookup completes, are not counted, so clients cannot grow the
 label set by inventing names. They still appear in
 `forklift_http_requests_total`.
 
-### forklift_db_connections_open / forklift_db_connections_in_use / forklift_db_connections_idle / forklift_db_connections_max
-
-- Type: Gauge
-- Labels: `pool` (`write`, `read`)
-
-Connection-pool state for the metadata database. The `write` pool is deliberately
-capped at one connection (SQLite tolerates a single writer), so
-`forklift_db_connections_in_use{pool="write"}` sitting at 1 is normal; the
-interesting signal is how long callers wait for it, below.
-
-### forklift_db_connection_waits_total / forklift_db_connection_wait_seconds_total
-
-- Type: Counter
-- Labels: `pool` (`write`, `read`)
-
-How often, and for how long in total, a caller had to wait for a free
-connection. This is the saturation signal for the metadata store: because every
-write shares one connection, an overloaded instance does not show up as CPU or
-query volume but as waiting. Sustained growth on `pool="write"` means writes are
-queueing, which is what makes the console, package traffic and the readiness
-probe slow at the same time.
-
-### forklift_readyz_failures_total
-
-- Type: Counter
-- Labels: `reason` (`not_leader`, `database`)
-
-Readiness refusals by reason. A pod dropped from the Service looks identical from
-outside whichever way it happened, so this separates a standby (or a step-down)
-from an instance that could not reach the database within
-`readyzTimeout`.
-
-### forklift_readyz_duration_seconds
-
-- Type: Histogram
-- Labels: none
-
-Readiness probe handler latency, database check included. The probe's own
-timeout is short (one second by default in the chart), so rising percentiles here
-are the early warning that the database is congested, before
-`forklift_readyz_failures_total{reason="database"}` starts moving and the pod
-leaves the Service.
-
 ### forklift_scan_ratio_lookups_total / forklift_scan_ratio_refresh_seconds
 
 - Type: Counter (`result` = `hit`, `miss`) / Histogram
@@ -182,148 +122,6 @@ versioned artifact and the whole scan table, so it is cached and recomputed at
 most once per window: `result="miss"` counts the recomputations and the histogram
 their cost. A miss rate that tracks request rate means the cache is not holding,
 and a growing refresh duration is inventory growth showing up in that scan.
-
-### forklift_coverage_percent / forklift_coverage_target / forklift_coverage_projects
-
-- Type: Gauge
-- Labels: none / none / `state`
-
-How much of the organisation's source builds through this forklift, as measured
-by the GitLab scan (see [Coverage](coverage.md)). `target` is the denominator:
-in-scope projects that have CI. `percent` is applied over target.
-
-| `state` | Meaning |
-|---------|---------|
-| `applied` | Every check still being asked for is present, which is both halves unless one was muted |
-| `partial` | Only one of the two does, with neither muted |
-| `not_applied` | Has CI, references forklift nowhere |
-| `error` | The scan could not read the project |
-| `no_ci` | No GitLab CI at all, so out of the denominator |
-| `muted` | Every check silenced from the console, or a GitLab topic |
-
-A `target` of zero is worth alerting on by itself: it almost always means the
-access token can no longer see the projects, not that they disappeared.
-
-### forklift_coverage_last_scan_timestamp_seconds / forklift_coverage_last_scan_duration_seconds
-
-- Type: Gauge
-- Labels: none
-
-When the last scan completed, and how long it took. The timestamp is zero before
-the first scan.
-
-This is the metric to alert on. A scan that stops running is invisible from
-outside: the console keeps showing the last result, so the number simply stops
-moving and nobody notices. Alert on the age of the timestamp rather than on the
-coverage number:
-
-```promql
-time() - forklift_coverage_last_scan_timestamp_seconds > 172800
-  and forklift_coverage_enabled == 1
-```
-
-### forklift_coverage_scans_total
-
-- Type: Counter
-- Labels: `result` (`success`, `failure`)
-
-Scan attempts since process start. Counted per process, so a restart resets
-them; the timestamp above is what survives.
-
-A rising `failure` count alongside a stale timestamp separates the two ways this
-breaks: the schedule is firing but the crawl is failing, which is the access
-token or the GitLab instance, not the cron expression.
-
-### forklift_coverage_enabled / forklift_coverage_scanning
-
-- Type: Gauge
-- Labels: none
-
-`enabled` is 1 when coverage scanning is switched on and has a GitLab
-connection. It is exported even when off, so a dashboard can say "off" instead
-of showing a gap that reads as broken, and so an age alert can exclude the
-deployments that never turned it on. `scanning` is 1 while a crawl is in flight.
-
-### forklift_coverage_gitlab_concurrency / forklift_coverage_gitlab_concurrency_peak
-
-- Type: Gauge
-- Labels: none
-
-The in-flight request limit the adaptive controller settled on during the last
-crawl, and the highest it reached. The crawl has no rate setting: it raises the
-limit while GitLab answers promptly and cuts it on a 429, a 5xx, or a latency
-spike. These two are therefore the only way to see what rate the instance turned
-out to tolerate, and a limit that collapses to 1 between scans is the instance
-pushing back.
-
-### forklift_repositories
-
-- Type: Gauge
-- Labels: `format`, `type`
-
-The number of configured repositories, grouped by package family and
-repository type.
-
-| Label | Values |
-|-------|--------|
-| `format` | `maven`, `npm`, `cargo`, `go`, `pypi`, `raw`, `oci` |
-| `type` | `hosted`, `proxy`, `group` |
-
-Use it to track repository inventory and to confirm that expected repositories
-exist after a config change.
-
-### forklift_artifacts
-
-- Type: Gauge
-- Labels: none
-
-The total number of logical artifacts indexed across all repositories. This is a
-metadata count, not physical storage. Two repositories that reference the same
-content count as two artifacts even though the bytes are stored once.
-
-### forklift_blobs
-
-- Type: Gauge
-- Labels: none
-
-The number of deduplicated content-addressed blobs in the blob store. Each blob
-is unique by SHA-256, so this is always less than or equal to
-`forklift_artifacts`. The ratio between the two shows how effective
-deduplication is.
-
-### forklift_storage_bytes
-
-- Type: Gauge
-- Labels: none
-
-Physical bytes used by the deduplicated blobs on the PersistentVolume. Use it to
-watch storage growth and to size or alert on the volume.
-
-### forklift_blobstore_operation_duration_seconds
-
-- Type: Histogram
-- Labels: `backend`, `op`, `result`
-
-Latency of blob store backend operations. The `backend` label is `fs` for the
-filesystem store or `s3` for the S3 store, `op` is one of `put`, `open`,
-`open_seekable`, `exists`, or `delete`, and `result` is `success`,
-`not_found` (an expected missing blob, not a failure), or `error`.
-
-`put` includes streaming the whole source body (an upstream response or a
-client upload), so its duration reflects transfer size as much as backend
-speed; the read paths (`open`, `exists`) are the cleaner backend health signal.
-This metric matters most with the S3 backend, where a bucket outage, throttling
-or IAM regression would otherwise be invisible until downloads start failing.
-On `fs` it surfaces a degraded volume (for example an exhausted burst balance).
-
-### forklift_storage_up / forklift_storage_check_duration_seconds
-
-- Type: Gauge
-- Labels: none
-
-`forklift_storage_up` is `1` if the object store answered the most recent `HeadBucket` on the configured bucket, `0` if it failed (transport error, 5 second timeout, or an error status such as `403` from revoked credentials). `forklift_storage_check_duration_seconds` is how long that check took, failed checks included. Checks run once a minute on every pod and only with the S3 backend, and both series stay absent until the first check finishes, so a fresh pod never reads as down.
-
-Unlike `forklift_blobstore_operation_duration_seconds`, which only moves when artifacts are read or written, this detects an unreachable or misconfigured bucket on an idle deployment. The Storage admin page draws the last hour of the same checks, but keeps them in memory per pod; Prometheus is where the history survives restarts and rollouts.
 
 ### forklift_bytes_transferred_total
 
@@ -386,20 +184,6 @@ Conditional revalidations of expired metadata documents. When a cached document 
 - Labels: `repo`
 
 Latency of upstream fetches per proxy repository, measured from sending the request until the response headers arrive (or the transport fails). It does not include the body, so a large document that arrives slowly looks healthy here. The buckets extend to 60 seconds, past the 30 second read timeout, so a slow-but-alive upstream shows up in the tail long before requests start failing. Errors and timeouts are observed too, which is why the error rate and this histogram move together when an upstream degrades. Use it to tell "upstream is slow" from "upstream is down": builds that hang usually show tail latency growth here first.
-
-### forklift_upstream_up
-
-- Type: Gauge
-- Labels: `repo`
-
-`1` if the proxy repository's upstream answered the most recent background
-probe with any HTTP response (even a 4xx), `0` if the probe failed at the
-transport level (DNS, connect, TLS, timeout). Probes run once a minute on every
-pod with a 5 second timeout, mirroring the reachability semantics of the
-console's upstream health check. Unlike `forklift_upstream_errors_total`, which
-only moves when clients request packages, this gauge detects a dead upstream
-even on an idle repository. Repositories deleted from the configuration drop
-out of the gauge on the next probe cycle.
 
 ### forklift_upstream_fetches_inflight / forklift_upstream_fetch_oldest_seconds
 
@@ -499,15 +283,6 @@ is `enforce` when the request was blocked pending an admin decision, or `audit`
 when it was only counted (audit-only mode lets the request through). Use it to
 size the approval workload before switching a repo into enforce mode.
 
-### forklift_approval_pending
-
-- Type: Gauge
-- Labels: none
-
-Package approval requests currently waiting for an admin decision. Computed at
-scrape time. Alert on a value that stays high, which means the approval queue is
-not being worked.
-
 ### forklift_version_deny_blocked_total
 
 - Type: Counter
@@ -517,30 +292,6 @@ Requests blocked by the per-version deny list, which blocks one exact package
 version (for example a poisoned release or a known IOC) while the package itself
 stays approved. A spike after adding a deny entry confirms clients are still
 trying to pull the bad version.
-
-### forklift_oci_prune_deleted_total
-
-- Type: Counter
-- Labels: `repo`
-
-OCI artifact rows deleted by the reachability prune: untagged manifests and the
-blobs no live manifest references. The OCI format is exempt from LRU cache
-eviction, and the idle retention reaper removes only idle tags (deleting rows
-would break still-tagged images), so this counter is the format's only automated
-row deletion. The freed bytes are reclaimed by the ordinary blob sweeper after its
-grace period.
-
-### forklift_oci_upload_sessions_active
-
-- Type: Gauge
-
-OCI blob push sessions currently in flight: opened with a POST but not yet
-finalized, cancelled or expired. Counted from the sessions table, so the value
-is correct across replicas; each scrape publishes the count taken at the
-previous scrape, so the series trails by one scrape interval. A value that only
-grows means clients are opening pushes and never completing them; the prune
-expires such sessions after `FORKLIFT_OCI_UPLOAD_SESSION_TTL`. Reports -1 on
-the first scrape after start and when the count query fails.
 
 ### forklift_vuln_blocked_total
 
@@ -553,15 +304,6 @@ package version against [OSV](https://github.com/google/osv.dev) advisories
 (direct dependency only) and triggers when the highest non-ignored severity
 meets the configured threshold. A spike indicates clients pulling versions with
 known advisories.
-
-### forklift_vuln_scans_total
-
-- Type: Counter
-- Labels: `result` (`clean`, `vulnerable`, `error`)
-
-Vulnerability scans performed by the background worker against OSV. `error`
-growth means OSV lookups are failing (unreachable endpoint, rate limit), in
-which case unscanned coordinates fail open unless `block_unscanned` is set.
 
 ### forklift_npm_audit_requests_total
 
@@ -589,6 +331,321 @@ package version's resolved SPDX license(s) against the per-repository `deny` and
 versions whose license is denied (or outside a non-empty allow list). See
 [License scanning](license-scanning.md).
 
+## Worker metrics
+
+Produced by the background jobs: leadership, blob garbage collection checks, pruning and the scheduled coverage scan. In a single-process layout the leader reports them.
+
+The coverage result gauges (`forklift_coverage_percent`, `_target`, `_projects`, `_last_scan_*`) are also reported by API pods on PostgreSQL, which copy the stored result once a minute. The scan counters and the in-flight gauges count on the process that ran the scan: the worker for the schedule, and the API pod that took the request for a scan started from the console.
+
+### forklift_leader
+
+- Type: Gauge
+- Labels: none
+
+`1` if this instance currently holds leadership, otherwise `0`. In a
+single-instance deployment the process is always leader and reports `1`. In HA
+mode exactly one pod reports `1` at a time, decided by
+[Kubernetes](https://github.com/kubernetes/kubernetes) Lease leader election.
+The leader runs the gated background work (blob sweeper, audit retention) and,
+with PV-based replication, serves snapshots to standbys.
+
+In `installationMode=activeActive` the API pods never hold the Lease and report `0`. The active worker reports `1`, and it is the pod that runs the background jobs, not the one that serves traffic.
+
+Use it to confirm that exactly one leader exists. A sum across pods that is not
+`1` points to a split brain or a stalled election.
+
+### forklift_leader_transitions_total
+
+- Type: Counter
+- Labels: none
+
+The number of times this instance acquired leadership since it started. A
+single-instance deployment records exactly one transition at startup. In HA
+mode, sum the rate across pods: leadership should change hands only on a
+deliberate failover or a pod restart, so a rising sum with no rollout in
+progress means the Lease is flapping. Because replication is asynchronous,
+every unplanned transition can lose the writes of the last sync interval, which
+makes flapping worth an alert of its own even when `forklift_leader` always
+sums to `1`.
+
+### forklift_coverage_percent / forklift_coverage_target / forklift_coverage_projects
+
+- Type: Gauge
+- Labels: none / none / `state`
+
+How much of the organisation's source builds through this forklift, as measured
+by the GitLab scan (see [Coverage](coverage.md)). `target` is the denominator:
+in-scope projects that have CI. `percent` is applied over target.
+
+| `state` | Meaning |
+|---------|---------|
+| `applied` | Every check still being asked for is present, which is both halves unless one was muted |
+| `partial` | Only one of the two does, with neither muted |
+| `not_applied` | Has CI, references forklift nowhere |
+| `error` | The scan could not read the project |
+| `no_ci` | No GitLab CI at all, so out of the denominator |
+| `muted` | Every check silenced from the console, or a GitLab topic |
+
+A `target` of zero is worth alerting on by itself: it almost always means the
+access token can no longer see the projects, not that they disappeared.
+
+### forklift_coverage_last_scan_timestamp_seconds / forklift_coverage_last_scan_duration_seconds
+
+- Type: Gauge
+- Labels: none
+
+When the last scan completed, and how long it took. The timestamp is zero before
+the first scan.
+
+This is the metric to alert on. A scan that stops running is invisible from
+outside: the console keeps showing the last result, so the number simply stops
+moving and nobody notices. Alert on the age of the timestamp rather than on the
+coverage number:
+
+```promql
+time() - forklift_coverage_last_scan_timestamp_seconds > 172800
+  and forklift_coverage_enabled == 1
+```
+
+### forklift_coverage_scans_total
+
+- Type: Counter
+- Labels: `result` (`success`, `failure`)
+
+Scan attempts since process start. Counted per process, so a restart resets
+them; the timestamp above is what survives.
+
+A rising `failure` count alongside a stale timestamp separates the two ways this
+breaks: the schedule is firing but the crawl is failing, which is the access
+token or the GitLab instance, not the cron expression.
+
+### forklift_coverage_enabled / forklift_coverage_scanning
+
+- Type: Gauge
+- Labels: none
+
+`enabled` is 1 when coverage scanning is switched on and has a GitLab
+connection. It is exported even when off, so a dashboard can say "off" instead
+of showing a gap that reads as broken, and so an age alert can exclude the
+deployments that never turned it on. `scanning` is 1 while a crawl is in flight.
+
+### forklift_coverage_gitlab_concurrency / forklift_coverage_gitlab_concurrency_peak
+
+- Type: Gauge
+- Labels: none
+
+The in-flight request limit the adaptive controller settled on during the last
+crawl, and the highest it reached. The crawl has no rate setting: it raises the
+limit while GitLab answers promptly and cuts it on a 429, a 5xx, or a latency
+spike. These two are therefore the only way to see what rate the instance turned
+out to tolerate, and a limit that collapses to 1 between scans is the instance
+pushing back.
+
+### forklift_oci_prune_deleted_total
+
+- Type: Counter
+- Labels: `repo`
+
+OCI artifact rows deleted by the reachability prune: untagged manifests and the
+blobs no live manifest references. The OCI format is exempt from LRU cache
+eviction, and the idle retention reaper removes only idle tags (deleting rows
+would break still-tagged images), so this counter is the format's only automated
+row deletion. The freed bytes are reclaimed by the ordinary blob sweeper after its
+grace period.
+
+### forklift_blob_ref_drift
+
+- Type: Gauge
+- Labels: `direction`
+
+Blobs whose stored reference count disagreed with the rows that reference them (artifacts and group metadata cache entries) at the last hourly check. The count and the referencing row always change in one transaction, so both values are expected to stay at `0`.
+
+| `direction` | Meaning |
+|-------------|---------|
+| `under` | The count was lower than the real references. The check raises it at once, since an undercount lets the sweeper delete bytes still in use |
+| `over` | The count is higher than the real references. The bytes are never reclaimed. It is reported and not changed |
+
+The check reads at most 1,000 blobs per pass, so a value at that size means "at least". Alert on any value above `0`.
+
+### forklift_blob_ref_repaired_total
+
+- Type: Counter
+- Labels: none
+
+Reference undercounts the check raised to the real count. Any growth means the bookkeeping drifted and was caught before the sweeper acted on it. Look for `blob ref count was too low` in the worker log for the digests.
+
+## Metrics on every process
+
+Reported with meaningful values by API pods and workers alike: the build, the database pools, readiness, inventory, the blob store and the scan queues each pod drains.
+
+### forklift_build_info
+
+- Type: Gauge
+- Labels: `version`, `commit`, `rust_version`
+
+Build metadata exposed as a constant gauge whose value is always `1`. The labels
+carry the running binary version, the Git commit it was built from, and the Rust
+toolchain version. Use it to confirm which build is live and to join other
+metrics against a version during a rollout.
+
+### forklift_db_connections_open / forklift_db_connections_in_use / forklift_db_connections_idle / forklift_db_connections_max
+
+- Type: Gauge
+- Labels: `pool` (`write`, `read`)
+
+Connection-pool state for the metadata database. The `write` pool is deliberately
+capped at one connection (SQLite tolerates a single writer), so
+`forklift_db_connections_in_use{pool="write"}` sitting at 1 is normal; the
+interesting signal is how long callers wait for it, below.
+
+On PostgreSQL there is no single writer. Each pool holds half of `FORKLIFT_DATABASE_MAX_CONNECTIONS` (8 and 8 by default), and `write` saturating means the pod wants more sessions, not that one statement is holding the database.
+
+### forklift_db_connection_waits_total / forklift_db_connection_wait_seconds_total
+
+- Type: Counter
+- Labels: `pool` (`write`, `read`)
+
+How often, and for how long in total, a caller had to wait for a free
+connection. This is the saturation signal for the metadata store: because every
+write shares one connection, an overloaded instance does not show up as CPU or
+query volume but as waiting. Sustained growth on `pool="write"` means writes are
+queueing, which is what makes the console, package traffic and the readiness
+probe slow at the same time.
+
+### forklift_readyz_failures_total
+
+- Type: Counter
+- Labels: `reason` (`not_leader`, `database`)
+
+Readiness refusals by reason. A pod dropped from the Service looks identical from
+outside whichever way it happened, so this separates a standby (or a step-down)
+from an instance that could not reach the database within
+`readyzTimeout`.
+
+### forklift_readyz_duration_seconds
+
+- Type: Histogram
+- Labels: none
+
+Readiness probe handler latency, database check included. The probe's own
+timeout is short (one second by default in the chart), so rising percentiles here
+are the early warning that the database is congested, before
+`forklift_readyz_failures_total{reason="database"}` starts moving and the pod
+leaves the Service.
+
+### forklift_repositories
+
+- Type: Gauge
+- Labels: `format`, `type`
+
+The number of configured repositories, grouped by package family and
+repository type.
+
+| Label | Values |
+|-------|--------|
+| `format` | `maven`, `npm`, `cargo`, `go`, `pypi`, `raw`, `oci` |
+| `type` | `hosted`, `proxy`, `group` |
+
+Use it to track repository inventory and to confirm that expected repositories
+exist after a config change.
+
+### forklift_artifacts
+
+- Type: Gauge
+- Labels: none
+
+The total number of logical artifacts indexed across all repositories. This is a
+metadata count, not physical storage. Two repositories that reference the same
+content count as two artifacts even though the bytes are stored once.
+
+### forklift_blobs
+
+- Type: Gauge
+- Labels: none
+
+The number of deduplicated content-addressed blobs in the blob store. Each blob
+is unique by SHA-256, so this is always less than or equal to
+`forklift_artifacts`. The ratio between the two shows how effective
+deduplication is.
+
+### forklift_storage_bytes
+
+- Type: Gauge
+- Labels: none
+
+Physical bytes used by the deduplicated blobs on the PersistentVolume. Use it to
+watch storage growth and to size or alert on the volume.
+
+### forklift_blobstore_operation_duration_seconds
+
+- Type: Histogram
+- Labels: `backend`, `op`, `result`
+
+Latency of blob store backend operations. The `backend` label is `fs` for the
+filesystem store or `s3` for the S3 store, `op` is one of `put`, `open`,
+`open_seekable`, `exists`, or `delete`, and `result` is `success`,
+`not_found` (an expected missing blob, not a failure), or `error`.
+
+`put` includes streaming the whole source body (an upstream response or a
+client upload), so its duration reflects transfer size as much as backend
+speed; the read paths (`open`, `exists`) are the cleaner backend health signal.
+This metric matters most with the S3 backend, where a bucket outage, throttling
+or IAM regression would otherwise be invisible until downloads start failing.
+On `fs` it surfaces a degraded volume (for example an exhausted burst balance).
+
+### forklift_storage_up / forklift_storage_check_duration_seconds
+
+- Type: Gauge
+- Labels: none
+
+`forklift_storage_up` is `1` if the object store answered the most recent `HeadBucket` on the configured bucket, `0` if it failed (transport error, 5 second timeout, or an error status such as `403` from revoked credentials). `forklift_storage_check_duration_seconds` is how long that check took, failed checks included. Checks run once a minute on every pod and only with the S3 backend, and both series stay absent until the first check finishes, so a fresh pod never reads as down.
+
+Unlike `forklift_blobstore_operation_duration_seconds`, which only moves when artifacts are read or written, this detects an unreachable or misconfigured bucket on an idle deployment. The Storage admin page draws the last hour of the same checks, but keeps them in memory per pod; Prometheus is where the history survives restarts and rollouts.
+
+### forklift_upstream_up
+
+- Type: Gauge
+- Labels: `repo`
+
+`1` if the proxy repository's upstream answered the most recent background
+probe with any HTTP response (even a 4xx), `0` if the probe failed at the
+transport level (DNS, connect, TLS, timeout). Probes run once a minute on every
+pod with a 5 second timeout, mirroring the reachability semantics of the
+console's upstream health check. Unlike `forklift_upstream_errors_total`, which
+only moves when clients request packages, this gauge detects a dead upstream
+even on an idle repository. Repositories deleted from the configuration drop
+out of the gauge on the next probe cycle.
+
+### forklift_approval_pending
+
+- Type: Gauge
+- Labels: none
+
+Package approval requests currently waiting for an admin decision. Computed at
+scrape time. Alert on a value that stays high, which means the approval queue is
+not being worked.
+
+### forklift_oci_upload_sessions_active
+
+- Type: Gauge
+
+OCI blob push sessions currently in flight: opened with a POST but not yet
+finalized, cancelled or expired. Counted from the sessions table, so the value
+is correct across replicas; each scrape publishes the count taken at the
+previous scrape, so the series trails by one scrape interval. A value that only
+grows means clients are opening pushes and never completing them; the prune
+expires such sessions after `FORKLIFT_OCI_UPLOAD_SESSION_TTL`. Reports -1 on
+the first scrape after start and when the count query fails.
+
+### forklift_vuln_scans_total
+
+- Type: Counter
+- Labels: `result` (`clean`, `vulnerable`, `error`)
+
+Vulnerability scans performed by the background worker against OSV. `error`
+growth means OSV lookups are failing (unreachable endpoint, rate limit), in
+which case unscanned coordinates fail open unless `block_unscanned` is set.
+
 ### forklift_license_resolves_total
 
 - Type: Counter
@@ -609,6 +666,10 @@ which case unresolved coordinates fail open unless `block_unresolved` is set.
 Audit events dropped because the recorder's write buffer was full. This should
 stay flat at zero. Any growth means audit writes cannot keep up with traffic and
 the audit log is incomplete, so alert on `increase() > 0`.
+
+## SQLite high availability metrics
+
+Only for the SQLite layouts, where a standby follows the leader through PV replication or metadata sync to S3. On PostgreSQL neither runs and these stay at zero.
 
 ### Replication metrics
 
@@ -720,6 +781,18 @@ Confirm exactly one leader across all pods:
 
 ```promql
 sum(forklift_leader)
+```
+
+Blob reference counts that drifted from the rows referencing them. Anything above zero needs a look at the worker log:
+
+```promql
+max by (direction) (forklift_blob_ref_drift) > 0
+```
+
+Request rate per API pod, to see whether the Service spreads traffic evenly:
+
+```promql
+sum by (pod) (rate(forklift_http_requests_total{route!~"/readyz|/healthz"}[5m]))
 ```
 
 HTTP 5xx ratio over the last 5 minutes, excluding probe routes (`status` holds
@@ -898,6 +971,7 @@ The metrics answer a few core questions about a forklift deployment:
   `vuln_blocked_total`, `vuln_scans_total`, `npm_audit_requests_total`, `license_blocked_total`,
   `license_resolves_total`
 - Is auditing complete? `audit_events_dropped_total`
+- Is the blob bookkeeping intact? `blob_ref_drift`, `blob_ref_repaired_total`
 - In HA, are standbys keeping up? `replication_*`
 
 A good starting point is one dashboard row per group above, plus alerts on

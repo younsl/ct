@@ -2,10 +2,13 @@
 //! and the guarded record delete.
 
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use forklift_metadb::params;
 
 use super::repository::query_all;
-use super::{Blob, Error, FormatUsage, Result, Store, format_time, parse_time};
+use super::time::sql_time_le;
+use super::{
+    Blob, BlobRefDrift, Error, FormatUsage, Result, Store, format_time, now_rfc3339, parse_time,
+};
 
 impl Store {
     /// Returns blob metadata by digest.
@@ -99,14 +102,20 @@ impl Store {
     ) -> Result<Vec<String>> {
         let cutoff = format_time(before);
         self.read(move |conn| {
+            let pg = conn.is_postgres();
+            let sql = format!(
+                "SELECT sha256 FROM blobs
+           WHERE ref_count <= 0
+             AND unreferenced_since IS NOT NULL AND {}
+             AND {}
+           LIMIT ?",
+                sql_time_le(pg, "unreferenced_since", "?"),
+                sql_time_le(pg, "created_at", "?"),
+            );
             query_all(
                 conn,
                 "list unreferenced blobs",
-                "SELECT sha256 FROM blobs
-           WHERE ref_count <= 0
-             AND unreferenced_since IS NOT NULL AND julianday(unreferenced_since) <= julianday(?)
-             AND julianday(created_at) <= julianday(?)
-           LIMIT ?",
+                &sql,
                 params![cutoff, cutoff, limit],
                 |r| r.get(0),
             )
@@ -145,17 +154,149 @@ impl Store {
         let sha = sha.to_string();
         let cutoff = format_time(before);
         self.write(move |conn| {
-            let n = conn
-                .execute(
-                    "DELETE FROM blobs
+            let pg = conn.is_postgres();
+            let sql = format!(
+                "DELETE FROM blobs
            WHERE sha256 = ?
              AND ref_count <= 0
-             AND unreferenced_since IS NOT NULL AND julianday(unreferenced_since) <= julianday(?)
-             AND julianday(created_at) <= julianday(?)",
-                    params![sha, cutoff, cutoff],
-                )
+             AND unreferenced_since IS NOT NULL AND {}
+             AND {}",
+                sql_time_le(pg, "unreferenced_since", "?"),
+                sql_time_le(pg, "created_at", "?"),
+            );
+            let n = conn
+                .execute(&sql, params![sha, cutoff, cutoff])
                 .map_err(|e| Error::sqlite("delete blob record", e))?;
             Ok(n > 0)
+        })
+        .await
+    }
+
+    /// [`Store::delete_blob_record`] for a store several pods write to: the
+    /// guarded delete and `delete_bytes` run inside one transaction, and the
+    /// record only goes if the bytes did.
+    ///
+    /// The row lock taken by the delete is what excludes writers on other
+    /// pods. [`Store::reserve_blob`] for the same digest waits on it until the
+    /// bytes are gone, so a writer can never keep a record whose bytes this
+    /// call is about to remove. A failed byte delete rolls the record back and
+    /// the next sweep retries it.
+    pub async fn reclaim_blob_record<F>(
+        &self,
+        sha: &str,
+        before: DateTime<Utc>,
+        delete_bytes: F,
+    ) -> Result<bool>
+    where
+        F: FnOnce() -> std::result::Result<(), String> + Send + 'static,
+    {
+        let sha = sha.to_string();
+        let cutoff = format_time(before);
+        self.write(move |conn| {
+            let pg = conn.is_postgres();
+            let sql = format!(
+                "DELETE FROM blobs
+           WHERE sha256 = ?
+             AND ref_count <= 0
+             AND unreferenced_since IS NOT NULL AND {}
+             AND {}",
+                sql_time_le(pg, "unreferenced_since", "?"),
+                sql_time_le(pg, "created_at", "?"),
+            );
+            let tx = conn
+                .transaction_unlocked()
+                .map_err(|e| Error::sqlite("begin blob reclaim", e))?;
+            let n = tx
+                .execute(&sql, params![sha, cutoff, cutoff])
+                .map_err(|e| Error::sqlite("delete blob record", e))?;
+            if n == 0 {
+                return Ok(false);
+            }
+            delete_bytes().map_err(|e| Error::Other(format!("delete blob bytes: {e}")))?;
+            tx.commit()
+                .map_err(|e| Error::sqlite("commit blob reclaim", e))?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Returns blobs whose `ref_count` disagrees with the rows referencing
+    /// them, capped by `limit`. Every code path changes the count and the
+    /// referencing row in one transaction, so a committed state never
+    /// disagrees and anything listed here is real drift.
+    pub async fn list_blob_ref_drift(&self, limit: i64) -> Result<Vec<BlobRefDrift>> {
+        self.read(move |conn| {
+            query_all(
+                conn,
+                "list blob ref drift",
+                "SELECT b.sha256, b.ref_count, COALESCE(a.n, 0) + COALESCE(g.n, 0)
+                   FROM blobs b
+                   LEFT JOIN (SELECT blob_sha256, COUNT(*) AS n FROM artifacts GROUP BY blob_sha256) a
+                     ON a.blob_sha256 = b.sha256
+                   LEFT JOIN (SELECT blob_sha256, COUNT(*) AS n FROM group_metadata_cache GROUP BY blob_sha256) g
+                     ON g.blob_sha256 = b.sha256
+                  WHERE b.ref_count <> COALESCE(a.n, 0) + COALESCE(g.n, 0)
+                  ORDER BY b.sha256
+                  LIMIT ?",
+                params![limit],
+                |r| {
+                    Ok(BlobRefDrift {
+                        sha256: r.get(0)?,
+                        recorded: r.get(1)?,
+                        actual: r.get(2)?,
+                    })
+                },
+            )
+        })
+        .await
+    }
+
+    /// Raises a blob's `ref_count` to the number of rows referencing it and
+    /// reports whether it changed. Only an undercount is repaired: it is the
+    /// direction that lets the sweeper delete bytes still in use. The count
+    /// is taken again inside the transaction, which excludes every writer, so
+    /// a reference added since the drift was listed is not lost.
+    pub async fn raise_blob_ref_count(&self, sha: &str) -> Result<bool> {
+        const ACTUAL: &str = "(SELECT COUNT(*) FROM artifacts WHERE blob_sha256 = blobs.sha256)
+             + (SELECT COUNT(*) FROM group_metadata_cache WHERE blob_sha256 = blobs.sha256)";
+        let sha = sha.to_string();
+        self.write(move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| Error::sqlite("begin raise blob ref", e))?;
+            let n = tx
+                .execute(
+                    &format!(
+                        "UPDATE blobs SET ref_count = {ACTUAL}, unreferenced_since = NULL
+                          WHERE sha256 = ? AND ref_count < {ACTUAL}"
+                    ),
+                    params![sha],
+                )
+                .map_err(|e| Error::sqlite("raise blob ref", e))?;
+            tx.commit()
+                .map_err(|e| Error::sqlite("commit raise blob ref", e))?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    /// Records that `sha` was just written to the blob store and may be
+    /// referenced shortly. A new digest gets a record, and an unreferenced one
+    /// has its grace period restarted, so the sweeper leaves it alone until an
+    /// artifact row takes its reference. A referenced blob is untouched.
+    pub async fn reserve_blob(&self, sha: &str, size: i64) -> Result<()> {
+        let sha = sha.to_string();
+        self.write(move |conn| {
+            let now = now_rfc3339();
+            conn.execute(
+                "INSERT INTO blobs(sha256, size, ref_count, created_at, unreferenced_since)
+                 VALUES(?, ?, 0, ?, ?)
+                 ON CONFLICT(sha256) DO UPDATE SET unreferenced_since = excluded.unreferenced_since
+                 WHERE blobs.ref_count <= 0",
+                params![sha, size, now, now],
+            )
+            .map(|_| ())
+            .map_err(|e| Error::sqlite("reserve blob", e))
         })
         .await
     }
@@ -227,5 +368,99 @@ mod tests {
         );
         let (_, total) = s.blob_stats().await.unwrap();
         assert_eq!(parts.iter().map(|p| p.bytes).sum::<i64>(), total);
+    }
+
+    /// A failed byte delete keeps the record, so the next sweep retries the
+    /// digest instead of leaking bytes nothing points at.
+    #[tokio::test]
+    async fn reclaim_keeps_the_record_when_the_bytes_survive() {
+        let (s, _dir) = test_store().await;
+        s.reserve_blob("sha-keep", 3).await.unwrap();
+        let cutoff = chrono::Utc::now() + chrono::Duration::hours(48);
+
+        let err = s
+            .reclaim_blob_record("sha-keep", cutoff, || Err("disk on fire".into()))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("disk on fire"), "{err}");
+        assert_eq!(s.get_blob("sha-keep").await.unwrap().size, 3);
+
+        assert!(
+            s.reclaim_blob_record("sha-keep", cutoff, || Ok(()))
+                .await
+                .unwrap()
+        );
+        assert!(s.get_blob("sha-keep").await.unwrap_err().is_not_found());
+        // Nothing left to reclaim: the byte delete must not run.
+        assert!(
+            !s.reclaim_blob_record("sha-keep", cutoff, || Err("must not run".into()))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn reserve_restarts_grace_only_while_unreferenced() {
+        let (s, _dir) = test_store().await;
+        s.reserve_blob("sha-res", 1).await.unwrap();
+        let soon = chrono::Utc::now() + chrono::Duration::hours(48);
+        assert_eq!(
+            s.list_unreferenced_blobs(10, soon).await.unwrap(),
+            vec!["sha-res".to_string()]
+        );
+        // Reserving again re-stamps it, so a cutoff before now no longer matches.
+        s.reserve_blob("sha-res", 1).await.unwrap();
+        let past = chrono::Utc::now() - chrono::Duration::seconds(1);
+        assert!(!s.delete_blob_record("sha-res", past).await.unwrap());
+    }
+
+    /// The cross-pod guarantee: while a sweeper holds a digest's record inside
+    /// its reclaim transaction, a writer's reservation of the same digest
+    /// waits, and only proceeds once the bytes are gone. Row locks provide it,
+    /// so it is PostgreSQL only.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reservation_waits_for_an_in_flight_reclaim() {
+        if !crate::testing::meta::on_postgres() {
+            return;
+        }
+        let (s, _dir) = test_store().await;
+        let s = std::sync::Arc::new(s);
+        s.reserve_blob("sha-race", 1).await.unwrap();
+        let cutoff = chrono::Utc::now() + chrono::Duration::hours(48);
+
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let sweeper = std::sync::Arc::clone(&s);
+        let reclaim = tokio::spawn(async move {
+            sweeper
+                .reclaim_blob_record("sha-race", cutoff, move || {
+                    entered_tx.send(()).map_err(|e| e.to_string())?;
+                    release_rx.recv().map_err(|e| e.to_string())
+                })
+                .await
+        });
+        tokio::task::spawn_blocking(move || entered_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let writer = std::sync::Arc::clone(&s);
+        let reserve = tokio::spawn(async move { writer.reserve_blob("sha-race", 1).await });
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert!(
+            !reserve.is_finished(),
+            "the reservation must wait for the sweeper's row lock"
+        );
+
+        release_tx.send(()).unwrap();
+        assert!(
+            reclaim.await.unwrap().unwrap(),
+            "sweeper reclaimed the digest"
+        );
+        reserve.await.unwrap().unwrap();
+        // The writer ends up with a fresh record inside its grace period.
+        assert_eq!(s.get_blob("sha-race").await.unwrap().ref_count, 0);
+        let past = chrono::Utc::now() - chrono::Duration::seconds(1);
+        assert!(!s.delete_blob_record("sha-race", past).await.unwrap());
     }
 }

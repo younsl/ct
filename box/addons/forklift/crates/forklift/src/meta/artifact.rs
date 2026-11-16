@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use forklift_metadb::{Connection, OptionalExtension, Row, params};
 
 use super::models::{MANAGED_BY_UI_UPLOAD, MANAGED_BY_UI_UPLOAD_AGGREGATE, UpstreamValidators};
 use super::publication::invalidate_group_caches_for_member;
@@ -78,8 +78,11 @@ impl Store {
                 format_time(a.last_accessed_at)
             };
 
+            // The writes below touch this path's row and atomic blob counters
+            // only, so on PostgreSQL the transaction excludes writers of the
+            // same path instead of every writer.
             let tx = conn
-                .transaction()
+                .transaction_keyed(&format!("artifact/{}/{}", a.repo_id, a.path))
                 .map_err(|e| Error::sqlite("begin put artifact", e))?;
 
             // Ensure the blob record exists (ref_count starts at 0, adjusted
@@ -292,10 +295,10 @@ impl Store {
                 let mut stmt = conn
                     .prepare(&sql)
                     .map_err(|e| Error::sqlite("existing paths", e))?;
-                let args = std::iter::once(&repo_id as &dyn rusqlite::ToSql)
-                    .chain(chunk.iter().map(|p| p as &dyn rusqlite::ToSql));
+                let args = std::iter::once(&repo_id as &dyn forklift_metadb::ToSql)
+                    .chain(chunk.iter().map(|p| p as &dyn forklift_metadb::ToSql));
                 let rows = stmt
-                    .query_map(rusqlite::params_from_iter(args), |row| {
+                    .query_map(forklift_metadb::params_from_iter(args), |row| {
                         row.get::<_, String>(0)
                     })
                     .map_err(|e| Error::sqlite("existing paths", e))?;
@@ -745,7 +748,7 @@ fn managed_by_metadata(value: &str) -> String {
 
 /// Decodes one row in the column order every artifact SELECT uses (see
 /// `search::ARTIFACT_COLS`).
-pub(crate) fn scan_artifact(row: &Row<'_>) -> rusqlite::Result<Artifact> {
+pub(crate) fn scan_artifact(row: &Row<'_>) -> forklift_metadb::Result<Artifact> {
     let published: Option<String> = row.get(8)?;
     let cached: String = row.get(9)?;
     let accessed: String = row.get(10)?;

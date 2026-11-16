@@ -281,12 +281,7 @@ impl Manager {
             .await?;
         for sess in sessions {
             self.store.delete_oci_upload_session(&sess.id).await?;
-            let path = std::path::PathBuf::from(self.oci_upload_dir_value()).join(&sess.id);
-            if let Err(err) = tokio::fs::remove_file(&path).await
-                && err.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(id = %sess.id, err = %err, "oci session file remove failed");
-            }
+            self.oci_discard_session_bytes(&sess.id).await;
         }
         Ok(())
     }

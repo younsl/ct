@@ -504,7 +504,7 @@ pub(crate) mod tests {
                     conn.execute(
                         "INSERT INTO audit_logs(repo_name, event, path, method, status, created_at)
                          VALUES('r', 'download', ?1, ?2, ?3, ?4)",
-                        rusqlite::params![path, method, status, yesterday],
+                        forklift_metadb::params![path, method, status, yesterday],
                     )
                     .map_err(|e| meta::Error::sqlite("insert legacy row", e))?;
                 }
@@ -545,11 +545,13 @@ pub(crate) mod tests {
         assert_eq!(counts, std::collections::HashMap::from([("a".into(), 3)]));
         let index: i64 = store
             .read(|conn| {
-                conn.query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_audit_artifact_downloads'",
-                    [],
-                    |r| r.get(0),
-                )
+                let catalog = if conn.is_postgres() {
+                    "SELECT COUNT(*) FROM pg_indexes
+                      WHERE schemaname = current_schema() AND indexname = 'idx_audit_artifact_downloads'"
+                } else {
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_audit_artifact_downloads'"
+                };
+                conn.query_row(catalog, [], |r| r.get(0))
                 .map_err(|e| meta::Error::sqlite("read index", e))
             })
             .await

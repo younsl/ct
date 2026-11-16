@@ -1,7 +1,7 @@
 //! Notification receivers (webhook channels fired when a package is quarantined).
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Row, params};
+use forklift_metadb::{Row, params};
 
 use super::repository::query_all;
 use super::{Error, Result, Store, now_rfc3339, parse_time, parse_time_opt};
@@ -170,7 +170,7 @@ impl Store {
 }
 
 /// Decodes one row in [`RECEIVER_COLS`] order.
-fn scan_receiver(row: &Row<'_>) -> rusqlite::Result<Receiver> {
+fn scan_receiver(row: &Row<'_>) -> forklift_metadb::Result<Receiver> {
     let enabled: i64 = row.get(4)?;
     let created: String = row.get(6)?;
     let updated: String = row.get(7)?;
@@ -189,13 +189,8 @@ fn scan_receiver(row: &Row<'_>) -> rusqlite::Result<Receiver> {
 
 /// Reports whether `err` is a SQLite UNIQUE (or PRIMARY KEY, which SQLite reports with the same
 /// "UNIQUE constraint failed" message) violation.
-pub(crate) const fn is_unique_violation(err: &rusqlite::Error) -> bool {
-    matches!(
-        err,
-        rusqlite::Error::SqliteFailure(e, _)
-            if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
-                || e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
-    )
+pub(crate) const fn is_unique_violation(err: &forklift_metadb::Error) -> bool {
+    err.is_unique_violation()
 }
 
 #[cfg(test)]

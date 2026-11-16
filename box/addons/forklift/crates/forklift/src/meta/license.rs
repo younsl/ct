@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Row, params};
+use forklift_metadb::{Row, params};
 
 use super::time::{format_time, now_rfc3339, parse_time};
 use super::{Error, Result, Store};
@@ -99,7 +99,7 @@ impl Store {
             let out = stmt
                 .query_map(params![format_time(before), limit], scan_license)
                 .map_err(|e| Error::sqlite("list stale license scans", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("list stale license scans", e))?;
             Ok(out)
         })
@@ -135,7 +135,7 @@ impl Store {
 }
 
 /// Reads one license row.
-fn scan_license(r: &Row<'_>) -> rusqlite::Result<LicenseScan> {
+fn scan_license(r: &Row<'_>) -> forklift_metadb::Result<LicenseScan> {
     let licenses: String = r.get(3)?;
     let resolved: String = r.get(5)?;
     Ok(LicenseScan {

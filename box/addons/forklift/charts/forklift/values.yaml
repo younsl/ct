@@ -1,6 +1,16 @@
 # Default values for forklift.
 
-# -- (int) Number of replicas. With 2+ replicas, enable ha to elect a single active writer.
+# Topology preset. One value picks the layout and supplies the settings that
+# depend on it, and the keys below still override them.
+#   standalone     one pod on SQLite, no leader election
+#   activePassive  one serving leader plus standbys on SQLite (at least 2 pods)
+#   activeActive   every API pod serves, one worker runs the background jobs,
+#                  metadata in PostgreSQL (bundled unless database.type=external)
+# Empty keeps the layout derived from replicaCount, ha, replication and storage.
+# -- (string) Topology preset: "", standalone, activePassive or activeActive.
+installationMode: ""
+
+# -- (int) Number of server pods. standalone forces 1, activePassive raises it to at least 2, and in activeActive it is the number of API pods.
 replicaCount: 2
 # -- (int) Number of old ReplicaSets to retain for rollback.
 revisionHistoryLimit: 10
@@ -163,6 +173,108 @@ storage:
       karpenter.sh/do-not-disrupt: "true"
     # -- (object) Extra Pod spec fields, e.g. runtimeClassName. Fields the chart already renders are rejected.
     extraPodSpec: {}
+
+# Metadata database. SQLite is embedded and accepts one writer, which is why the
+# default layouts elect a leader. PostgreSQL removes that limit, so every pod
+# can serve at once. Blobs are unaffected and still need a store all pods share
+# (the s3 backend or a ReadWriteMany volume) once there is more than one pod.
+database:
+  # -- (string) Metadata backend: sqlite, internal (PostgreSQL deployed by this chart) or external. Empty picks internal for installationMode=activeActive and sqlite otherwise.
+  type: ""
+  # -- (int) PostgreSQL sessions each forklift pod opens, split between writes and reads.
+  maxConnections: 16
+  # -- (string) PostgreSQL schema holding the tables. Empty uses the server default.
+  schema: ""
+  # PostgreSQL deployed by this chart as one StatefulSet pod. It is a single
+  # instance with no failover, so it suits evaluation and small installs. With
+  # several API pods it is the one component whose loss stops the service.
+  internal:
+    image:
+      # -- (string) Image registry host. Empty folds the host into `repository`.
+      registry: docker.io
+      # -- (string) Image repository.
+      repository: postgres
+      # -- (string) Image pull policy.
+      pullPolicy: IfNotPresent
+      # -- (string) Image tag.
+      tag: "17.12"
+      # -- (string) Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence.
+      digest: ""
+    # -- (string) Password of the forklift database user. Empty generates one into the chart Secret and keeps it across upgrades. Set it explicitly under GitOps tools that render without cluster access, since the server only reads it when the volume is first initialized.
+    password: ""
+    # -- (list) Extra arguments for the postgres server, for example ["-c", "max_connections=200"].
+    args: []
+    persistence:
+      # -- (bool) Keep the database on a PersistentVolume. When false, metadata is lost on pod restart.
+      enabled: true
+      # -- (string) StorageClass for the PVC. Uses the cluster default when empty.
+      storageClass: ""
+      # -- (string) PVC storage size.
+      size: 8Gi
+      # -- (object) Annotations to add to the PVC.
+      annotations: {}
+      # -- (string) Use an existing PVC instead of creating one.
+      existingClaim: ""
+    # -- (object) Container resource requests and limits.
+    resources:
+      limits:
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    # -- (object) Pod-level security context. The image runs as the postgres user (999).
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 999
+      runAsGroup: 999
+      fsGroup: 999
+    # -- (object) Container-level security context.
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+    # -- (int) Seconds the server gets to shut down cleanly.
+    terminationGracePeriodSeconds: 60
+    # -- (object) Annotations to add to the pod.
+    podAnnotations: {}
+    # -- (object) Labels to add to the pod.
+    podLabels: {}
+    # -- (object) Node selector for the pod.
+    nodeSelector: {}
+    # -- (list) Tolerations for the pod.
+    tolerations: []
+    # -- (object) Affinity for the pod.
+    affinity: {}
+  # A PostgreSQL server managed outside this chart (a managed service or an
+  # operator such as CloudNativePG). This is the production form.
+  external:
+    # -- (string) Server host name. Required when type is external.
+    host: ""
+    # -- (int) Server port.
+    port: 5432
+    # -- (string) Database name.
+    name: forklift
+    # -- (string) Database user.
+    user: forklift
+    # -- (string) TLS mode: disable, prefer or require. The server certificate is verified against the system roots and outbound.caBundle.
+    sslMode: prefer
+    # -- (string) Password given inline, stored in the chart Secret. Prefer existingSecret.
+    password: ""
+    # -- (string) Existing Secret holding the password.
+    existingSecret: ""
+    # -- (string) Key of the password in existingSecret.
+    existingSecretKey: password
+
+# Worker pods, rendered for installationMode=activeActive only. They run the
+# background jobs (blob garbage collection, retention, scans, notifications)
+# and take no client traffic. A Lease picks the active one when there are several.
+worker:
+  # -- (int) Number of worker pods. One is enough, a second only shortens the gap after a node failure.
+  replicaCount: 1
+  # -- (object) Container resource requests and limits. Empty reuses `resources`.
+  resources: {}
 
 # Bundled SeaweedFS (all-in-one subchart), auto-wired to the s3 backend. For
 # production disable it and point storage.s3.* at an external store.

@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, TimeDelta, Utc};
-use rusqlite::{OptionalExtension, Row, Transaction, params, params_from_iter, types::Value};
+use forklift_metadb::{
+    OptionalExtension, Row, Transaction, params, params_from_iter, types::Value,
+};
 
 use super::time::{format_time, is_zero, parse_time};
 use super::{Error, Result, Store};
@@ -59,7 +61,7 @@ const INSERT_AUDIT_LOG: &str = "INSERT INTO audit_logs(repo_name, event, path, u
 
 const UPSERT_DOWNLOAD_DAY: &str = "INSERT INTO artifact_download_daily(repo_name, path, day, count)
 		 VALUES(?, ?, ?, ?)
-		 ON CONFLICT(repo_name, path, day) DO UPDATE SET count = count + excluded.count";
+		 ON CONFLICT(repo_name, path, day) DO UPDATE SET count = artifact_download_daily.count + excluded.count";
 
 /// The span the artifact page's rolling download counts cover. Daily counts
 /// older than this are never read and are pruned.
@@ -157,7 +159,7 @@ impl Store {
         }
         self.write(move |conn| {
             let tx = conn
-                .transaction()
+                .transaction_unlocked()
                 .map_err(|e| Error::sqlite("begin audit batch", e))?;
             let mut days = DayCounts::new();
             {
@@ -234,7 +236,7 @@ impl Store {
                 Ok((r.get(0)?, r.get(1)?))
             })
             .map_err(|e| Error::sqlite("query artifact downloads", e))?
-            .collect::<rusqlite::Result<std::collections::HashMap<String, i64>>>()
+            .collect::<forklift_metadb::Result<std::collections::HashMap<String, i64>>>()
             .map_err(|e| Error::sqlite("read artifact downloads", e))
         })
         .await
@@ -271,7 +273,7 @@ impl Store {
             let out = stmt
                 .query_map(params_from_iter(args.iter()), scan_audit_log)
                 .map_err(|e| Error::sqlite("list audit logs", e))?
-                .collect::<rusqlite::Result<Vec<_>>>()
+                .collect::<forklift_metadb::Result<Vec<_>>>()
                 .map_err(|e| Error::sqlite("scan audit log", e))?;
             Ok(out)
         })
@@ -346,12 +348,19 @@ impl Store {
                         .transaction()
                         .map_err(|e| Error::sqlite("begin download prune", e))?;
                     let ids = {
+                        // PostgreSQL has no unary plus on text and plans the
+                        // id range by itself.
+                        let sql = if tx.is_postgres() {
+                            SELECT_EXPIRED_DOWNLOADS.replace('+', "")
+                        } else {
+                            SELECT_EXPIRED_DOWNLOADS.to_owned()
+                        };
                         let mut stmt = tx
-                            .prepare(SELECT_EXPIRED_DOWNLOADS)
+                            .prepare(&sql)
                             .map_err(|e| Error::sqlite("prepare download prune", e))?;
                         stmt.query_map(params![after, last, cutoff, limit], |r| r.get::<_, i64>(0))
                             .map_err(|e| Error::sqlite("select expired downloads", e))?
-                            .collect::<rusqlite::Result<Vec<_>>>()
+                            .collect::<forklift_metadb::Result<Vec<_>>>()
                             .map_err(|e| Error::sqlite("select expired downloads", e))?
                     };
                     {
@@ -508,7 +517,7 @@ impl Store {
     }
 }
 
-fn scan_audit_log(r: &Row<'_>) -> rusqlite::Result<AuditLog> {
+fn scan_audit_log(r: &Row<'_>) -> forklift_metadb::Result<AuditLog> {
     let created: String = r.get(11)?;
     Ok(AuditLog {
         id: r.get(0)?,
@@ -795,6 +804,9 @@ pub(crate) mod tests {
     /// index restarts at the oldest kept entry on every batch.
     #[tokio::test]
     async fn expired_download_scan_uses_the_rowid_range() {
+        if crate::testing::meta::on_postgres() {
+            return;
+        }
         let (s, _dir) = test_store().await;
         let plan = s
             .read(|conn| {
@@ -805,9 +817,11 @@ pub(crate) mod tests {
                     ))
                     .map_err(|e| Error::sqlite("explain", e))?;
                 let rows = stmt
-                    .query_map(rusqlite::params![0, 10, "z", 10], |r| r.get::<_, String>(3))
+                    .query_map(forklift_metadb::params![0, 10, "z", 10], |r| {
+                        r.get::<_, String>(3)
+                    })
                     .map_err(|e| Error::sqlite("explain", e))?
-                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .collect::<forklift_metadb::Result<Vec<_>>>()
                     .map_err(|e| Error::sqlite("explain", e))?;
                 Ok(rows.join("\n"))
             })

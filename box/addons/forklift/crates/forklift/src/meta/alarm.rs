@@ -2,7 +2,7 @@
 //! alarm, so each settings page can chart how its alarms went out.
 
 use chrono::{DateTime, TimeDelta, Utc};
-use rusqlite::params;
+use forklift_metadb::params;
 
 use super::repository::query_all;
 use super::time::{format_time, parse_time};

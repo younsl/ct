@@ -7,7 +7,7 @@ metadata:
   labels:
     {{- include "forklift.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ include "forklift.replicaCount" . }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   serviceName: {{ include "forklift.headlessServiceName" . }}
   podManagementPolicy: {{ .Values.replication.podManagementPolicy }}

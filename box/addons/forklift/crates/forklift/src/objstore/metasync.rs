@@ -1422,7 +1422,7 @@ pub(crate) mod tests {
     async fn set_user_version(store: &meta::Store, v: i64) {
         store
             .write(move |conn| {
-                conn.pragma_update(None, "user_version", v)
+                conn.execute_batch(&format!("PRAGMA user_version = {v}"))
                     .map_err(|e| meta::Error::sqlite("set user_version", e))
             })
             .await

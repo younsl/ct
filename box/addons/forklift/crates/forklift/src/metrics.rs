@@ -436,6 +436,9 @@ forklift_storage_bytes 4096
     /// connection by design and that has to be visible.
     #[tokio::test(flavor = "multi_thread")]
     async fn db_pool_collector_reads_the_real_store() {
+        if crate::testing::meta::on_postgres() {
+            return;
+        }
         let (store, _dir) = crate::testing::meta::test_store().await;
         let c = DbPoolCollector::new(Arc::new(store));
         let text = collect_and_encode(Box::new(c));

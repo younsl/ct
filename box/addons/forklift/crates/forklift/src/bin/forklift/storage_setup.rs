@@ -34,7 +34,11 @@ pub(crate) async fn open_blob_store(
     if cfg.storage.backend != "s3" {
         let fsblobs = storage::FsStore::new(&cfg.data_dir).context("open blob store")?;
         return Ok(BlobBackend {
-            blobs: Arc::new(storage::instrument(Arc::new(fsblobs), "fs", reg)),
+            blobs: Arc::new(storage::instrument(
+                reserving(Arc::new(fsblobs), store),
+                "fs",
+                reg,
+            )),
             meta_sync: None,
             conditional_writes: None,
             s3_client: None,
@@ -46,7 +50,11 @@ pub(crate) async fn open_blob_store(
         .context("open s3 blob store")?;
     let client = s3blobs.client();
     let s3_client = Some(client.clone());
-    let blobs = Arc::new(storage::instrument(Arc::new(s3blobs), "s3", reg));
+    let blobs = Arc::new(storage::instrument(
+        reserving(Arc::new(s3blobs), store),
+        "s3",
+        reg,
+    ));
     if cfg.storage.s3.create_bucket {
         let api = objstore::S3Api::new(client.clone());
         let created = objstore::retry_transient(
@@ -67,6 +75,20 @@ pub(crate) async fn open_blob_store(
             .await
             .context("probe s3 conditional writes")?,
     );
+    if store.is_postgres() {
+        // Metadata lives in PostgreSQL, so there is no SQLite file to ship.
+        tracing::info!(target: LOG_TARGET,
+            bucket = %cfg.storage.s3.bucket,
+            prefix = %cfg.storage.s3.prefix,
+            "storage backend: s3 (blobs only, metadata in postgresql)"
+        );
+        return Ok(BlobBackend {
+            blobs,
+            meta_sync: None,
+            conditional_writes,
+            s3_client,
+        });
+    }
     let sync = objstore::MetaSync::new(objstore::MetaOptions {
         store: Arc::clone(store),
         api: object_api,
@@ -104,6 +126,21 @@ pub(crate) async fn open_blob_store(
         conditional_writes,
         s3_client,
     })
+}
+
+/// On PostgreSQL several pods write to one blob store while another sweeps it,
+/// so every write is reserved in the metadata store (see
+/// `storage::ReservingStore`). On SQLite the engine's in-process lock covers
+/// that and the store is used as is.
+fn reserving(
+    inner: Arc<dyn storage::WalkableStore>,
+    store: &Arc<meta::Store>,
+) -> Arc<dyn storage::WalkableStore> {
+    if store.is_postgres() {
+        Arc::new(storage::ReservingStore::new(inner, Arc::clone(store)))
+    } else {
+        inner
+    }
 }
 
 /// Hands the admin console its storage view: the backend descriptor, the

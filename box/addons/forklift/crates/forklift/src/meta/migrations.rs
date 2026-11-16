@@ -1,6 +1,11 @@
 //! Embedded SQL migrations, applied in file-name order by `Store::open`.
 //! Published migrations remain immutable so existing databases open unchanged.
 
+/// PostgreSQL migrations, numbered independently of the SQLite ones. A schema
+/// change adds one file to each list.
+pub(crate) const PG_MIGRATIONS: &[(&str, &str)] =
+    &[("0001_init.sql", include_str!("migrations_pg/0001_init.sql"))];
+
 /// (file name, SQL body) pairs sorted by name; names look like `0001_init.sql`.
 pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init.sql", include_str!("migrations/0001_init.sql")),

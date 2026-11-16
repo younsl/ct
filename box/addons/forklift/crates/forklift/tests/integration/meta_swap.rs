@@ -1,9 +1,12 @@
-use rusqlite::params;
+use forklift_metadb::params;
 
 use forklift::meta::*;
 
 #[tokio::test]
 async fn snapshot_and_swap() {
+    if forklift::testing::meta::on_postgres() {
+        return;
+    }
     let (leader, leader_dir) = forklift::testing::meta::test_store().await;
     leader
         .create_repository(Repository {

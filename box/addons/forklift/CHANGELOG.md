@@ -4,6 +4,37 @@ Notable changes per release. Container image versions come from the
 `org.opencontainers.image.version` label in the `Dockerfile`; chart versions from
 `charts/forklift/Chart.yaml`.
 
+## 0.21.0 (2026-11-16)
+
+### Added
+
+- Every pod can serve at once. The metadata store runs on PostgreSQL when `FORKLIFT_DATABASE_HOST` or `FORKLIFT_DATABASE_URL` is set, which removes the single writer that made the SQLite layouts keep one serving pod. SQLite stays the default and nothing changes without those settings. See [Active-active](docs/active-active.md).
+- `FORKLIFT_TARGET` selects what a process runs: `all` (the default), `api` for requests only, or `worker` for the background jobs only. On PostgreSQL every pod is ready, and the Lease only picks the pod that runs blob garbage collection, retention, scan backfill and notifications.
+- The store is written once and runs on both databases through a connection facade, the new `forklift-metadb` crate. The same test suite passes on SQLite and on PostgreSQL 17 when `FORKLIFT_TEST_POSTGRES_URL` is set.
+- Writes from several pods are kept consistent. A multi-statement write takes a PostgreSQL advisory lock for its transaction, artifact writes lock one path so different artifacts are written in parallel, every blob write reserves its digest before it is referenced, and garbage collection deletes a blob record and its bytes in one transaction.
+- With the s3 backend on PostgreSQL the chunks of an OCI push are staged in the bucket under `oci-uploads/`, so the requests of one push can reach different pods.
+- The worker compares every blob's reference count with the rows referencing it once an hour. An undercount is raised at once, an overcount is reported. New metrics `forklift_blob_ref_drift{direction}` and `forklift_blob_ref_repaired_total`.
+- On PostgreSQL each pod reloads coverage settings, mutes and the last scan result from the store once a minute, so a scan run by the worker shows up on the API pods.
+
+### Changed
+
+- A token's `last_used_at` is written at most once per 5 minutes instead of on every request.
+- A failed OCI chunk append logs its cause. It used to answer `500` with nothing in the log.
+- `docs/metrics.md` is grouped by the process that reports each metric: API, worker, every process, and the SQLite high availability metrics.
+
+### Measured
+
+Two API processes and one worker on one PostgreSQL 17 database, locally and on a single-node kind cluster with the bundled PostgreSQL and SeaweedFS.
+
+- 300 sequential and 400 concurrent requests through the Service were split between the two API pods (162 and 138, then 217 and 183). The worker received none.
+- 60 concurrent overwrites of one path through the Service left every blob reference count equal to the number of rows referencing it.
+- Deleting the worker moved the Lease to its replacement while 240 requests through the Service all succeeded.
+- No throughput was measured. Writes other than artifact uploads are serialized across pods by a database lock.
+
+### Not included
+
+- There is no move of an existing SQLite install to PostgreSQL. A PostgreSQL install starts empty.
+
 ## 0.20.0 (2026-11-05)
 
 ### Added

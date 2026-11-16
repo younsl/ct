@@ -1,6 +1,11 @@
-//! SQLite-backed metadata store: repositories, artifacts, blob reference
-//! counts, users, roles, tokens, approvals, scans and everything else the
-//! console and the package protocols persist.
+//! The metadata store: repositories, artifacts, blob reference counts,
+//! users, roles, tokens, approvals, scans and everything else the console and
+//! the package protocols persist. It runs on embedded SQLite by default and on
+//! PostgreSQL when several pods serve at once (see [`Store::open_postgres`]).
+//! Every statement goes through the `forklift_metadb` connection facade, so
+//! the methods are written once for both.
+//!
+//! The rest of this description is about the SQLite layout.
 //!
 //! The store wraps two connection sets over the same database file: a
 //! single-connection *write* pool that preserves the one-writer discipline and
@@ -22,7 +27,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
-use rusqlite::{Connection, OpenFlags};
+use forklift_metadb::{Connection, PgConfig};
+use rusqlite::OpenFlags;
 use tokio::sync::Semaphore;
 
 mod alarm;
@@ -93,12 +99,12 @@ pub enum Error {
     /// The write connection stayed busy past the caller's wait limit.
     #[error("database busy")]
     Busy,
-    /// Any SQLite failure not classified above, with the operation it came from.
+    /// Any database failure not classified above, with the operation it came from.
     #[error("{op}: {source}")]
     Sqlite {
         op: &'static str,
         #[source]
-        source: rusqlite::Error,
+        source: forklift_metadb::Error,
     },
     /// A filesystem failure (snapshot files, swaps).
     #[error("{op}: {source}")]
@@ -119,17 +125,13 @@ pub enum Error {
 }
 
 impl Error {
-    /// Wraps a rusqlite error, translating the row-missing and constraint
+    /// Wraps a database error, translating the row-missing and constraint
     /// classes into their sentinel variants so callers can `match` on them.
-    pub fn sqlite(op: &'static str, source: rusqlite::Error) -> Self {
-        match &source {
-            rusqlite::Error::QueryReturnedNoRows => Self::NotFound,
-            rusqlite::Error::SqliteFailure(e, _)
-                if e.code == rusqlite::ErrorCode::ConstraintViolation =>
-            {
-                Self::Conflict
-            }
-            _ => Self::Sqlite { op, source },
+    pub fn sqlite(op: &'static str, source: impl Into<forklift_metadb::Error>) -> Self {
+        match source.into() {
+            forklift_metadb::Error::QueryReturnedNoRows => Self::NotFound,
+            forklift_metadb::Error::Constraint { .. } => Self::Conflict,
+            source => Self::Sqlite { op, source },
         }
     }
 
@@ -146,6 +148,12 @@ impl Error {
     /// True for [`Error::Conflict`].
     pub const fn is_conflict(&self) -> bool {
         matches!(self, Self::Conflict)
+    }
+}
+
+impl From<forklift_metadb::Error> for Error {
+    fn from(e: forklift_metadb::Error) -> Self {
+        Self::sqlite("database", e)
     }
 }
 
@@ -215,6 +223,8 @@ struct Pool {
     permits: Semaphore,
     size: usize,
     role: ConnRole,
+    /// Set for PostgreSQL pools, to replace a session the server dropped.
+    pg: Option<Arc<PgConfig>>,
     in_use: AtomicU64,
     /// Callers queued for a connection right now.
     waiting: AtomicU64,
@@ -231,17 +241,37 @@ impl Pool {
         for _ in 0..size {
             conns.push(open_connection(path, role, opts)?);
         }
-        Ok(Arc::new(Self {
+        Ok(Self::new(conns, role, None))
+    }
+
+    /// Opens `size` PostgreSQL sessions. Connecting blocks, so it runs on the
+    /// blocking thread pool.
+    async fn open_postgres(cfg: &Arc<PgConfig>, size: usize, role: ConnRole) -> Result<Arc<Self>> {
+        let connect_cfg = Arc::clone(cfg);
+        let conns = tokio::task::spawn_blocking(move || {
+            (0..size)
+                .map(|_| Connection::connect_postgres(&connect_cfg))
+                .collect::<std::result::Result<Vec<_>, _>>()
+        })
+        .await?
+        .map_err(|e| Error::sqlite("connect postgres", e))?;
+        Ok(Self::new(conns, role, Some(Arc::clone(cfg))))
+    }
+
+    fn new(conns: Vec<Connection>, role: ConnRole, pg: Option<Arc<PgConfig>>) -> Arc<Self> {
+        let size = conns.len();
+        Arc::new(Self {
             conns: parking_lot::Mutex::new(conns),
             permits: Semaphore::new(size),
             size,
             role,
+            pg,
             in_use: AtomicU64::new(0),
             waiting: AtomicU64::new(0),
             wait_count: AtomicU64::new(0),
             wait_nanos: AtomicU64::new(0),
             closed: std::sync::atomic::AtomicBool::new(false),
-        }))
+        })
     }
 
     /// Runs `f` on a pooled connection on the blocking thread pool.
@@ -257,10 +287,17 @@ impl Pool {
         // The blocking task owns the lease, so cancellation of its async
         // caller cannot discard the connection or leak a semaphore permit.
         tokio::task::spawn_blocking(move || {
+            let pg = lease.pool.pg.clone();
             let conn = lease
                 .conn
                 .as_mut()
                 .ok_or_else(|| Error::Other("database lease closed".into()))?;
+            if let Some(cfg) = pg
+                && conn.is_closed()
+            {
+                *conn = Connection::connect_postgres(&cfg)
+                    .map_err(|e| Error::sqlite("reconnect postgres", e))?;
+            }
             f(conn)
         })
         .await?
@@ -383,7 +420,33 @@ pub struct Store {
     handles: ArcSwap<Handles>,
     path: PathBuf,
     opts: OpenOptions,
+    postgres: bool,
 }
+
+/// How [`Store::open_postgres`] connects.
+#[derive(Debug, Clone)]
+pub struct PostgresOptions {
+    /// Sessions this process holds, split between the write and read pools.
+    pub max_connections: usize,
+    /// Schema to create the tables in. Empty uses the server default.
+    pub schema: String,
+    /// Extra root certificates trusted for the server certificate.
+    pub extra_roots: Vec<rustls::pki_types::CertificateDer<'static>>,
+}
+
+impl Default for PostgresOptions {
+    fn default() -> Self {
+        Self {
+            max_connections: 16,
+            schema: String::new(),
+            extra_roots: Vec::new(),
+        }
+    }
+}
+
+/// When set, [`Store::open_temp`] opens PostgreSQL stores on this server,
+/// each in a schema of its own, so the whole test suite runs against it.
+pub const TEST_POSTGRES_URL_ENV: &str = "FORKLIFT_TEST_POSTGRES_URL";
 
 /// Which pool a connection belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -416,8 +479,8 @@ fn open_connection(path: &Path, role: ConnRole, opts: OpenOptions) -> Result<Con
         | OpenFlags::SQLITE_OPEN_CREATE
         | OpenFlags::SQLITE_OPEN_NO_MUTEX
         | OpenFlags::SQLITE_OPEN_URI;
-    let conn =
-        Connection::open_with_flags(path, flags).map_err(|e| Error::sqlite("open sqlite", e))?;
+    let conn = rusqlite::Connection::open_with_flags(path, flags)
+        .map_err(|e| Error::sqlite("open sqlite", e))?;
     conn.busy_timeout(BUSY_TIMEOUT)
         .map_err(|e| Error::sqlite("set busy timeout", e))?;
     conn.execute_batch(
@@ -435,7 +498,7 @@ fn open_connection(path: &Path, role: ConnRole, opts: OpenOptions) -> Result<Con
         conn.execute_batch("PRAGMA query_only = 1;")
             .map_err(|e| Error::sqlite("set query_only", e))?;
     }
-    Ok(conn)
+    Ok(Connection::Sqlite(conn))
 }
 
 impl Store {
@@ -455,7 +518,50 @@ impl Store {
             handles: ArcSwap::from_pointee(handles),
             path,
             opts,
+            postgres: false,
         })
+    }
+
+    /// Connects to PostgreSQL at `conn_str` (a `postgres://` URL or a
+    /// key-value connection string) and applies any pending migrations.
+    ///
+    /// Several processes may open the same database at once. Unlike SQLite
+    /// there is no single writer: multi-statement writes are serialized by the
+    /// advisory locks the connection facade takes per transaction.
+    pub async fn open_postgres(conn_str: &str, opts: PostgresOptions) -> Result<Self> {
+        let mut cfg = PgConfig::parse(conn_str, &opts.extra_roots)
+            .map_err(|e| Error::sqlite("postgres config", e))?;
+        if !opts.schema.is_empty() {
+            cfg = cfg
+                .with_search_path(&opts.schema)
+                .map_err(|e| Error::sqlite("postgres schema", e))?;
+        }
+        let cfg = Arc::new(cfg);
+        let write_size = (opts.max_connections / 2).max(1);
+        let read_size = opts.max_connections.saturating_sub(write_size).max(1);
+        let write = Pool::open_postgres(&cfg, write_size, ConnRole::Write).await?;
+        run_migrations(&write).await?;
+        let read = Pool::open_postgres(&cfg, read_size, ConnRole::Read).await?;
+        Ok(Self {
+            handles: ArcSwap::from_pointee(Handles { write, read }),
+            path: PathBuf::new(),
+            opts: OpenOptions::default(),
+            postgres: true,
+        })
+    }
+
+    /// True when the store runs on PostgreSQL.
+    pub const fn is_postgres(&self) -> bool {
+        self.postgres
+    }
+
+    fn sqlite_only(&self, what: &str) -> Result<()> {
+        if self.postgres {
+            return Err(Error::Other(format!(
+                "{what} is not supported on PostgreSQL"
+            )));
+        }
+        Ok(())
     }
 
     /// The options the store was opened with.
@@ -463,11 +569,37 @@ impl Store {
         self.opts
     }
 
-    /// Opens a store on a fresh temporary file. Test helper.
+    /// Opens a store on a fresh temporary file, or in a fresh PostgreSQL
+    /// schema when [`TEST_POSTGRES_URL_ENV`] is set. Test helper.
     pub async fn open_temp() -> Result<(Self, tempfile::TempDir)> {
         let dir = tempfile::tempdir().map_err(|e| Error::io("create temp dir", e))?;
+        if let Ok(url) = std::env::var(TEST_POSTGRES_URL_ENV)
+            && !url.is_empty()
+        {
+            return Ok((Self::open_temp_postgres(&url).await?, dir));
+        }
         let store = Self::open(dir.path().join("forklift.db")).await?;
         Ok((store, dir))
+    }
+
+    async fn open_temp_postgres(url: &str) -> Result<Self> {
+        let schema = format!("t_{}", uuid::Uuid::new_v4().simple());
+        let (admin_url, create) = (url.to_owned(), format!("CREATE SCHEMA \"{schema}\""));
+        tokio::task::spawn_blocking(move || {
+            let cfg = PgConfig::parse(&admin_url, &[])?;
+            Connection::connect_postgres(&cfg)?.execute_batch(&create)
+        })
+        .await?
+        .map_err(|e| Error::sqlite("create test schema", e))?;
+        Self::open_postgres(
+            url,
+            PostgresOptions {
+                max_connections: 4,
+                schema,
+                ..PostgresOptions::default()
+            },
+        )
+        .await
     }
 
     /// The database file path.
@@ -555,6 +687,7 @@ impl Store {
     /// keeping it off the write connection stops a multi-second snapshot from
     /// blocking every write while it copies.
     pub async fn snapshot(&self, dst: impl AsRef<Path>) -> Result<()> {
+        self.sqlite_only("a database snapshot")?;
         let dst = dst.as_ref().to_path_buf();
         match tokio::fs::remove_file(&dst).await {
             Ok(()) => {}
@@ -580,6 +713,7 @@ impl Store {
 
     /// Pins a read-pool connection for change detection. See [`ChangeWatch`].
     pub async fn new_change_watch(&self) -> Result<ChangeWatch> {
+        self.sqlite_only("a change watch")?;
         let handles = self.handles.load();
         let pool = Arc::clone(&handles.read);
         drop(handles);
@@ -600,6 +734,7 @@ impl Store {
     /// not be serving write traffic when this is called (the standby is not
     /// Ready).
     pub async fn swap_from_snapshot(&self, snapshot_path: impl AsRef<Path>) -> Result<()> {
+        self.sqlite_only("a snapshot swap")?;
         let snapshot_path = snapshot_path.as_ref().to_path_buf();
         let old = self.handles.load_full();
         old.read.close();
@@ -628,21 +763,46 @@ impl Store {
 /// observes a half-migrated schema.
 async fn open_handles(path: &Path, opts: OpenOptions) -> Result<Handles> {
     let write = Pool::open(path, 1, ConnRole::Write, opts)?;
-    // Migrations are a startup-critical, atomic step: a shutdown signal must not
-    // abort one mid-apply and leave the schema half-migrated. The blocking task
-    // is not cancellable, which is what we want; the timeout still bounds it.
-    let migrate = write.run(migrate);
-    match tokio::time::timeout(MIGRATE_TIMEOUT, migrate).await {
-        Ok(res) => res?,
-        Err(_) => return Err(Error::Other("migrate: timed out".into())),
-    }
+    run_migrations(&write).await?;
     let read = Pool::open(path, READ_POOL_SIZE, ConnRole::Read, opts)?;
     Ok(Handles { write, read })
 }
 
+/// Migrations are a startup-critical, atomic step: a shutdown signal must not
+/// abort one mid-apply and leave the schema half-migrated. The blocking task
+/// is not cancellable, which is what we want; the timeout still bounds it.
+async fn run_migrations(write: &Arc<Pool>) -> Result<()> {
+    match tokio::time::timeout(MIGRATE_TIMEOUT, write.run(migrate)).await {
+        Ok(res) => res,
+        Err(_) => Err(Error::Other("migrate: timed out".into())),
+    }
+}
+
+/// Session-level advisory lock that keeps pods starting together from
+/// migrating one PostgreSQL database at the same time.
+const MIGRATE_LOCK_KEY: i64 = 0x666f_726b_6d69_6772;
+
 /// Applies every embedded migration not yet recorded in `schema_migrations`,
 /// each in its own transaction.
 fn migrate(conn: &mut Connection) -> Result<()> {
+    if !conn.is_postgres() {
+        return apply_migrations(conn, migrations::MIGRATIONS);
+    }
+    conn.execute(
+        "SELECT pg_advisory_lock(?)",
+        forklift_metadb::params![MIGRATE_LOCK_KEY],
+    )
+    .map_err(|e| Error::sqlite("lock migrations", e))?;
+    let res = apply_migrations(conn, migrations::PG_MIGRATIONS);
+    conn.execute(
+        "SELECT pg_advisory_unlock(?)",
+        forklift_metadb::params![MIGRATE_LOCK_KEY],
+    )
+    .map_err(|e| Error::sqlite("unlock migrations", e))?;
+    res
+}
+
+fn apply_migrations(conn: &mut Connection, list: &[(&str, &str)]) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY,
@@ -662,7 +822,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             .map_err(|e| Error::sqlite("list migrations", e))?
     };
 
-    for (name, body) in migrations::MIGRATIONS {
+    for (name, body) in list {
         let version = migration_version(name)?;
         if applied.contains(&version) {
             continue;
@@ -674,7 +834,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             .map_err(|e| Error::Other(format!("apply {name}: {e}")))?;
         tx.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES(?1, ?2)",
-            rusqlite::params![version, now_rfc3339()],
+            forklift_metadb::params![version, now_rfc3339()],
         )
         .map_err(|e| Error::sqlite("record migration", e))?;
         tx.commit()
@@ -813,6 +973,9 @@ pub(crate) mod tests {
 
         #[test]
         fn cancelled_change_watch_query_keeps_its_pinned_connection() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .max_blocking_threads(1)
@@ -878,7 +1041,7 @@ pub(crate) mod tests {
                     .write(move |c| {
                         c.execute(
                             "INSERT INTO blobs(sha256, size, ref_count, created_at) VALUES('sha-held', 1, 0, ?)",
-                            rusqlite::params![now_rfc3339()],
+                            forklift_metadb::params![now_rfc3339()],
                         )
                         .map_err(|e| Error::sqlite("write inside the held transaction", e))?;
                         let _ = released.blocking_recv();
@@ -939,6 +1102,9 @@ pub(crate) mod tests {
 
         #[tokio::test]
         async fn open_applies_every_migration_once() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let (store, dir) = crate::testing::meta::test_store().await;
             let applied: i64 = store
                 .read(|c| {
@@ -1005,6 +1171,9 @@ pub(crate) mod tests {
 
         #[tokio::test]
         async fn snapshot_and_swap_replace_database() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let (store, dir) = crate::testing::meta::test_store().await;
             store
                 .write(|c| {
@@ -1056,6 +1225,9 @@ pub(crate) mod tests {
 
         #[tokio::test]
         async fn change_watch_detects_commits_on_other_connections() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let (store, _dir) = crate::testing::meta::test_store().await;
             let watch = store.new_change_watch().await.unwrap();
             let v1 = watch.version().await.unwrap();
@@ -1087,6 +1259,9 @@ pub(crate) mod tests {
 
         #[tokio::test]
         async fn change_watch_fails_after_swap() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let (store, dir) = crate::testing::meta::test_store().await;
             let watch = store.new_change_watch().await.unwrap();
             let snap = dir.path().join("snap.db");
@@ -1100,6 +1275,9 @@ pub(crate) mod tests {
 
         #[tokio::test]
         async fn pool_stats_count_waits_on_the_single_writer() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let (store, _dir) = crate::testing::meta::test_store().await;
             let store = std::sync::Arc::new(store);
             let (w, _) = store.pool_stats();
@@ -1153,6 +1331,9 @@ pub(crate) mod tests {
 
         #[tokio::test]
         async fn write_wait_limit_answers_busy() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let (store, _dir) = crate::testing::meta::test_store().await;
             let store = std::sync::Arc::new(store);
             let (tx, hold) = hold_writer(&store).await;
@@ -1175,6 +1356,9 @@ pub(crate) mod tests {
 
         #[tokio::test]
         async fn yield_to_writers_waits_for_queued_writes() {
+            if crate::testing::meta::on_postgres() {
+                return;
+            }
             let (store, _dir) = crate::testing::meta::test_store().await;
             let store = std::sync::Arc::new(store);
             store.yield_to_writers().await;

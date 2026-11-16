@@ -76,6 +76,9 @@ pub(crate) struct Leadership {
     pub(crate) leader_transitions: IntCounter,
     pub(crate) leader_state: Arc<AtomicBool>,
     pub(crate) label_routing: bool,
+    /// Set on PostgreSQL, where every pod serves and leadership only decides
+    /// which one runs the singleton background jobs.
+    pub(crate) serve_always: bool,
 }
 
 impl Leadership {
@@ -167,6 +170,9 @@ impl Leadership {
             config::BLOB_GC_GRACE,
         ));
         tokio::spawn(
+            Arc::clone(&self.engine).run_ref_check(cancel.clone(), Duration::from_hours(1)),
+        );
+        tokio::spawn(
             Arc::clone(&self.manager).run_idle_reaper(cancel.clone(), Duration::from_hours(1)),
         );
         tokio::spawn(Arc::clone(&self.manager).run_oci_prune(
@@ -178,8 +184,8 @@ impl Leadership {
         // artifacts) + periodic re-scanner (no-ops without a scanner). Multiple
         // workers drain the queue concurrently so freshly cached coordinates are
         // scanned promptly under burst.
-        for _ in 0..cfg.vuln.workers.max(1) {
-            tokio::spawn(Arc::clone(&self.manager).run_vuln_worker(cancel.clone()));
+        if !self.serve_always {
+            self.spawn_queue_workers(cancel);
         }
         tokio::spawn(
             Arc::clone(&self.manager).run_vuln_backfill(cancel.clone(), cfg.vuln.rescan_interval),
@@ -189,11 +195,8 @@ impl Leadership {
             cfg.vuln.rescan_interval,
             cfg.vuln.ttl,
         ));
-        // License resolution worker pool + backfill + periodic re-resolver
-        // (no-ops without a resolver).
-        for _ in 0..cfg.license.workers.max(1) {
-            tokio::spawn(Arc::clone(&self.manager).run_license_worker(cancel.clone()));
-        }
+        // License resolution backfill + periodic re-resolver (no-ops without
+        // a resolver).
         tokio::spawn(
             Arc::clone(&self.manager)
                 .run_license_backfill(cancel.clone(), cfg.license.rescan_interval),
@@ -226,6 +229,20 @@ impl Leadership {
         }
     }
 
+    /// Starts the workers that drain this process's own scan and license
+    /// queues. The queues are in memory and filled by the requests a pod
+    /// serves, so on PostgreSQL every pod runs them for the process lifetime,
+    /// while on SQLite only the leader serves and they follow leadership.
+    pub(crate) fn spawn_queue_workers(&self, cancel: &CancellationToken) {
+        let cfg = &self.cfg;
+        for _ in 0..cfg.vuln.workers.max(1) {
+            tokio::spawn(Arc::clone(&self.manager).run_vuln_worker(cancel.clone()));
+        }
+        for _ in 0..cfg.license.workers.max(1) {
+            tokio::spawn(Arc::clone(&self.manager).run_license_worker(cancel.clone()));
+        }
+    }
+
     pub(crate) async fn stop_leading(self: Arc<Self>) {
         self.leader_gauge.set(0.0);
         self.leader_state.store(false, Ordering::SeqCst);
@@ -245,6 +262,9 @@ impl Leadership {
                 self.set_pod_role(cluster::ROLE_STANDBY),
             )
             .await;
+            return;
+        }
+        if self.serve_always {
             return;
         }
         // Shared-volume HA without label routing: readiness gates the leader.

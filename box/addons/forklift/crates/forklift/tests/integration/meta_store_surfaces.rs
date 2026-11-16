@@ -186,6 +186,9 @@ async fn list_expired_artifacts() {
 
 #[tokio::test]
 async fn store_accessors() {
+    if forklift::testing::meta::on_postgres() {
+        return;
+    }
     let (s, _dir) = forklift::testing::meta::test_store().await;
     s.ping().await.expect("ping");
     assert!(!s.path().as_os_str().is_empty(), "path empty");

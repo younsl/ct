@@ -148,6 +148,17 @@ pub struct Blob {
     pub created_at: DateTime<Utc>,
 }
 
+/// A blob whose recorded reference count differs from the number of rows
+/// that reference it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlobRefDrift {
+    pub sha256: String,
+    /// `blobs.ref_count` as stored.
+    pub recorded: i64,
+    /// Artifact rows plus group metadata cache rows pointing at the blob.
+    pub actual: i64,
+}
+
 /// The deduplicated blob footprint of one repository format.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FormatUsage {
