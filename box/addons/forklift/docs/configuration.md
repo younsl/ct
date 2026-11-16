@@ -47,7 +47,7 @@ All settings are environment variables (the Helm chart maps values to them).
 | `FORKLIFT_DATABASE_PASSWORD` | (none) | PostgreSQL password. The chart injects it from a Secret |
 | `FORKLIFT_DATABASE_SSLMODE` | `prefer` | `disable`, `prefer` or `require`. The server certificate is verified against the system roots and `FORKLIFT_EXTRA_CA_FILE` |
 | `FORKLIFT_DATABASE_URL` | (none) | A `postgres://` URL, used instead of the discrete settings above |
-| `FORKLIFT_DATABASE_SCHEMA` | (server default) | Schema holding the tables |
+| `FORKLIFT_DATABASE_SCHEMA` | (server default) | Schema holding the tables. Created at startup when it does not exist, which needs the `CREATE` privilege on the database |
 | `FORKLIFT_DATABASE_MAX_CONNECTIONS` | `16` | PostgreSQL sessions this process opens, split between writes and reads. Keep pods times this value under the server's `max_connections` |
 | `FORKLIFT_TARGET` | `all` | What the process runs: `all` (requests and background jobs), `api` (requests only) or `worker` (background jobs only). `api` and `worker` need PostgreSQL |
 | `FORKLIFT_HTTP_ADDR` | `:8080` | API, UI and package endpoints |

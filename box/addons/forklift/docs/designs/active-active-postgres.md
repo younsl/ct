@@ -139,6 +139,8 @@ An earlier draft of this design had a `Store` trait with a SQLite and a PostgreS
 
 Statements that differed were moved to SQL both databases accept where possible (`RETURNING id` for `last_insert_rowid`, `ON CONFLICT DO UPDATE` for `INSERT OR REPLACE`, table-qualified columns in upserts, a quoted `"offset"` column). Four sites branch on the backend: timestamp comparison (`julianday` against a `timestamptz` cast), JSON array expansion (`json_each` against `json_array_elements_text`), a planner hint, and a catalog query in a test.
 
+The store bootstraps itself: it creates the configured schema when missing, then the tables, under a session advisory lock so pods starting together take turns. Only the database and the user have to exist beforehand.
+
 PostgreSQL has its own migration list. The first file is the schema the 49 SQLite migrations reach, generated from a migrated SQLite database: integers are `BIGINT`, timestamps stay RFC 3339 text and booleans stay integers, so both backends bind and read the same Rust types. A schema change adds one file to each list.
 
 The same test suite runs on both. `Store::open_temp` opens a fresh PostgreSQL schema per test when `FORKLIFT_TEST_POSTGRES_URL` is set, so every store, engine and API test exercises PostgreSQL without a second copy of the tests.

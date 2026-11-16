@@ -183,7 +183,7 @@ database:
   type: ""
   # -- (int) PostgreSQL sessions each forklift pod opens, split between writes and reads.
   maxConnections: 16
-  # -- (string) PostgreSQL schema holding the tables. Empty uses the server default.
+  # -- (string) PostgreSQL schema holding the tables, created at startup when missing. Empty uses the server default.
   schema: ""
   # PostgreSQL deployed by this chart as one StatefulSet pod. It is a single
   # instance with no failover, so it suits evaluation and small installs. With

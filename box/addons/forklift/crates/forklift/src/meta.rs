@@ -532,9 +532,11 @@ impl Store {
         let mut cfg = PgConfig::parse(conn_str, &opts.extra_roots)
             .map_err(|e| Error::sqlite("postgres config", e))?;
         if !opts.schema.is_empty() {
+            // Validates the name before it is spliced into DDL below.
             cfg = cfg
                 .with_search_path(&opts.schema)
                 .map_err(|e| Error::sqlite("postgres schema", e))?;
+            ensure_schema(conn_str, &opts).await?;
         }
         let cfg = Arc::new(cfg);
         let write_size = (opts.max_connections / 2).max(1);
@@ -584,13 +586,6 @@ impl Store {
 
     async fn open_temp_postgres(url: &str) -> Result<Self> {
         let schema = format!("t_{}", uuid::Uuid::new_v4().simple());
-        let (admin_url, create) = (url.to_owned(), format!("CREATE SCHEMA \"{schema}\""));
-        tokio::task::spawn_blocking(move || {
-            let cfg = PgConfig::parse(&admin_url, &[])?;
-            Connection::connect_postgres(&cfg)?.execute_batch(&create)
-        })
-        .await?
-        .map_err(|e| Error::sqlite("create test schema", e))?;
         Self::open_postgres(
             url,
             PostgresOptions {
@@ -766,6 +761,31 @@ async fn open_handles(path: &Path, opts: OpenOptions) -> Result<Handles> {
     run_migrations(&write).await?;
     let read = Pool::open(path, READ_POOL_SIZE, ConnRole::Read, opts)?;
     Ok(Handles { write, read })
+}
+
+/// Creates the configured schema when it does not exist, so pointing forklift
+/// at a new schema of an existing database needs no manual step. The caller
+/// has validated the name. Pods starting together take the migration lock
+/// around it, since concurrent `CREATE SCHEMA IF NOT EXISTS` statements can
+/// collide on the catalog.
+async fn ensure_schema(conn_str: &str, opts: &PostgresOptions) -> Result<()> {
+    let (conn_str, roots) = (conn_str.to_owned(), opts.extra_roots.clone());
+    let create = format!("CREATE SCHEMA IF NOT EXISTS \"{}\"", opts.schema);
+    tokio::task::spawn_blocking(move || {
+        let conn = Connection::connect_postgres(&PgConfig::parse(&conn_str, &roots)?)?;
+        conn.execute(
+            "SELECT pg_advisory_lock(?)",
+            forklift_metadb::params![MIGRATE_LOCK_KEY],
+        )?;
+        let created = conn.execute_batch(&create);
+        conn.execute(
+            "SELECT pg_advisory_unlock(?)",
+            forklift_metadb::params![MIGRATE_LOCK_KEY],
+        )?;
+        created
+    })
+    .await?
+    .map_err(|e| Error::sqlite("create schema", e))
 }
 
 /// Migrations are a startup-critical, atomic step: a shutdown signal must not
@@ -1099,6 +1119,47 @@ pub(crate) mod tests {
         use chrono::{TimeZone, Utc};
 
         use crate::meta::*;
+
+        /// A schema that does not exist yet is created on open, also when
+        /// several pods open it at the same moment, and opening it again
+        /// keeps what is there. PostgreSQL only.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn open_postgres_creates_a_missing_schema() {
+            let Ok(url) = std::env::var(TEST_POSTGRES_URL_ENV) else {
+                return;
+            };
+            if url.is_empty() {
+                return;
+            }
+            let opts = PostgresOptions {
+                max_connections: 2,
+                schema: format!("t_{}", uuid::Uuid::new_v4().simple()),
+                ..PostgresOptions::default()
+            };
+            let (a, b, c) = tokio::join!(
+                Store::open_postgres(&url, opts.clone()),
+                Store::open_postgres(&url, opts.clone()),
+                Store::open_postgres(&url, opts.clone()),
+            );
+            let (a, _b, _c) = (a.unwrap(), b.unwrap(), c.unwrap());
+            a.create_repository(Repository {
+                name: "kept".into(),
+                format: FORMAT_NPM.into(),
+                r#type: TYPE_HOSTED.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+            let again = Store::open_postgres(&url, opts.clone()).await.unwrap();
+            assert_eq!(again.list_repositories().await.unwrap().len(), 1);
+
+            let bad = PostgresOptions {
+                schema: "no;pe".into(),
+                ..opts
+            };
+            assert!(Store::open_postgres(&url, bad).await.is_err());
+        }
 
         #[tokio::test]
         async fn open_applies_every_migration_once() {

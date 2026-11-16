@@ -4,6 +4,12 @@ Notable changes per release. Container image versions come from the
 `org.opencontainers.image.version` label in the `Dockerfile`; chart versions from
 `charts/forklift/Chart.yaml`.
 
+## 0.21.1 (2026-11-16)
+
+### Added
+
+- The PostgreSQL schema named by `FORKLIFT_DATABASE_SCHEMA` is created at startup when it does not exist, so pointing forklift at a new schema of an existing database needs no manual step. Only the database and the user have to exist beforehand. Pods starting together take turns through the migration lock. Creating a schema needs the `CREATE` privilege on the database, and an existing schema needs nothing extra.
+
 ## 0.21.0 (2026-11-16)
 
 ### Added

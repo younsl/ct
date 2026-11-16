@@ -55,7 +55,8 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift \
 ```
 
 - The API pods (`FORKLIFT_TARGET=api`) serve the UI, the API and the package endpoints. The worker (`FORKLIFT_TARGET=worker`) runs blob garbage collection, retention, scans and notifications, and receives no client traffic.
-- The schema is created on first start. Pods starting together take turns through an advisory lock.
+- The tables are created on first start and upgraded on later ones, so no manual step follows a version bump. Pods starting together take turns through an advisory lock.
+- An external server needs the database and the user to exist. With `database.schema` set, forklift also creates that schema when it is missing.
 - Under a GitOps tool that renders without cluster access, set `database.internal.password` explicitly. A generated password changes on every render, and the bundled server only reads it when its volume is first initialized.
 - Each pod opens `database.maxConnections` sessions (16 by default). Keep the total under the server's `max_connections`.
 - There is no automatic move of an existing SQLite install to PostgreSQL yet. A new PostgreSQL install starts empty.

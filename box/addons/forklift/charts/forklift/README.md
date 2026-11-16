@@ -1,6 +1,6 @@
 # forklift
 
-![Version: 0.24.0](https://img.shields.io/badge/Version-0.24.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.21.0](https://img.shields.io/badge/AppVersion-0.21.0-informational?style=flat-square)
+![Version: 0.24.1](https://img.shields.io/badge/Version-0.24.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.21.1](https://img.shields.io/badge/AppVersion-0.21.1-informational?style=flat-square)
 
 Lightweight Kubernetes-native artifact repository (Maven, npm, Cargo, Go, PyPI) with proxy caching and supply-chain controls (age policy, package approval, vulnerability scanning)
 
@@ -45,7 +45,7 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift -f values.yaml
 Install a specific version:
 
 ```console
-helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.24.0
+helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.24.1
 ```
 
 ### Install from local chart
@@ -53,7 +53,7 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.24.0
 Download forklift chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/forklift --untar --version 0.24.0
+helm pull oci://ghcr.io/younsl/charts/forklift --untar --version 0.24.1
 helm install forklift ./forklift
 ```
 
@@ -142,7 +142,7 @@ The following table lists the configurable parameters and their default values.
 | storage.migration.extraPodSpec | object | `{}` | Extra Pod spec fields, e.g. runtimeClassName. Fields the chart already renders are rejected. |
 | database.type | string | `""` | Metadata backend: sqlite, internal (PostgreSQL deployed by this chart) or external. Empty picks internal for installationMode=activeActive and sqlite otherwise. |
 | database.maxConnections | int | `16` | PostgreSQL sessions each forklift pod opens, split between writes and reads. |
-| database.schema | string | `""` | PostgreSQL schema holding the tables. Empty uses the server default. |
+| database.schema | string | `""` | PostgreSQL schema holding the tables, created at startup when missing. Empty uses the server default. |
 | database.internal.image.registry | string | `"docker.io"` | Image registry host. Empty folds the host into `repository`. |
 | database.internal.image.repository | string | `"postgres"` | Image repository. |
 | database.internal.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
