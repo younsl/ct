@@ -15,7 +15,7 @@ Notable changes per release. Container image versions come from the
 - A personal access token can no longer issue, edit or revoke tokens. Those calls need a signed-in session and answer 403 to a token.
 - A token whose scopes are empty or unreadable is rejected instead of acting with its owner's full access.
 - `repo.admin` on a pattern now covers updating, disabling and deleting matching repositories, bulk deletes, and creating a repository whose name matches. Those used to need the instance administrator. A group repository needs `repo.admin` on every member.
-- Delegated access management cannot escalate. `role.write` grants only permissions the caller holds, and `user.write` acts only on users whose permissions the caller holds as well.
+- Delegated access management stays within the delegate's reach. `role.write` grants, removes and deletes only roles whose permissions the caller holds, and `user.write` acts only on users whose permissions the caller holds as well.
 - `audit.read` no longer opens users, roles, the approval queue, receivers or insights. Each has its own read permission, and a stored `audit` grant is rewritten into all of them.
 
 ### Added

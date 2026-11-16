@@ -52,7 +52,7 @@ A group repository serves its members without checking them again, so creating o
 
 `repo.admin` includes the upstream URL and its credentials, so whoever holds it on a pattern can point a proxy repository, and the upstream reachability check, at any address the forklift pods can reach. Grant it to people trusted with outbound access from the cluster.
 
-Delegated access management never reaches beyond the delegate. `role.write` grants only permissions the caller holds itself (`team-*` covers `team-a-*` but not `*`, and only `*` grants `*`), and assigning a role or mapping a group to one needs the same. `user.write` acts only on users whose permissions the caller holds as well: resetting a password, issuing or revoking their tokens, impersonating or deleting them.
+Delegated access management never reaches beyond the delegate. `role.write` grants only permissions the caller holds itself (`team-*` covers `team-a-*` but not `*`, and only `*` grants `*`), and assigning, removing or deleting a role, editing its permissions or mapping a group to it needs the same. `user.write` acts only on users whose permissions the caller holds as well: resetting a password, changing their roles, issuing or revoking their tokens, impersonating or deleting them.
 
 Artifact labels are the one write that no read or write permission grants: they may be changed with `repo.admin` on the repository, or by the principal recorded as having uploaded that artifact. Every attempt, refused ones included, is recorded in the repository's audit log.
 

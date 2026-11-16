@@ -361,3 +361,53 @@ async fn delegated_managers_cannot_escalate() {
         "delete the administrator"
     );
 }
+
+/// A delegated manager cannot take access away from someone holding more:
+/// removing an administrator's role or deleting a role beyond its reach is
+/// refused like granting one.
+#[tokio::test]
+async fn delegated_managers_cannot_strip_wider_access() {
+    let srv = new_test_server().await;
+    forklift::testing::api::mk_role_user(
+        &srv,
+        "mgr",
+        "pw123456",
+        "access-manager",
+        "*",
+        r#""repo.read","role.write","user.write""#,
+    )
+    .await;
+    let users = srv.admin_do(Method::GET, "/users", "").await.json();
+    let admin_id = users
+        .as_array()
+        .expect("users")
+        .iter()
+        .find(|u| u["username"] == "admin")
+        .and_then(|u| u["id"].as_i64())
+        .expect("admin id");
+    let roles = srv.admin_do(Method::GET, "/roles", "").await.json();
+    let administrator = roles
+        .as_array()
+        .expect("roles")
+        .iter()
+        .find(|r| r["name"] == "administrator")
+        .and_then(|r| r["id"].as_i64())
+        .expect("administrator role");
+    let as_mgr = async |method: Method, uri: &str| {
+        srv.do_as("mgr", "pw123456", method, uri, "").await.status
+    };
+    assert_eq!(
+        as_mgr(
+            Method::DELETE,
+            &format!("/users/{admin_id}/roles/{administrator}")
+        )
+        .await,
+        StatusCode::FORBIDDEN,
+        "strip the administrator's role"
+    );
+    assert_eq!(
+        as_mgr(Method::DELETE, &format!("/roles/{administrator}")).await,
+        StatusCode::FORBIDDEN,
+        "delete the administrator role"
+    );
+}

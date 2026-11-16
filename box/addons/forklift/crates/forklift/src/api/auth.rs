@@ -1123,7 +1123,9 @@ pub(super) async fn assign_role(
 pub(super) async fn remove_role(
     State(h): State<Arc<Handler>>,
     UrlPath((id, role_id)): UrlPath<(String, String)>,
+    request: Request,
 ) -> Response {
+    let (parts, _) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -1135,6 +1137,12 @@ pub(super) async fn remove_role(
         Ok(true) => return write_error(StatusCode::CONFLICT, MANAGED_ROLE_MSG),
         Ok(false) => {}
         Err(err) => return map_error(err),
+    }
+    if let Some(resp) = h.may_manage_user(&parts, id).await {
+        return resp;
+    }
+    if let Some(resp) = h.may_grant_roles(&parts, &[role_id]).await {
+        return resp;
     }
     match h.store.remove_role(id, role_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -1308,7 +1316,9 @@ pub(super) async fn create_role(State(h): State<Arc<Handler>>, request: Request)
 pub(super) async fn delete_role(
     State(h): State<Arc<Handler>>,
     UrlPath(id): UrlPath<String>,
+    request: Request,
 ) -> Response {
+    let (parts, _) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -1317,6 +1327,9 @@ pub(super) async fn delete_role(
         Ok(true) => return write_error(StatusCode::CONFLICT, MANAGED_ROLE_MSG),
         Ok(false) => {}
         Err(err) => return map_error(err),
+    }
+    if let Some(resp) = h.may_grant_roles(&parts, &[id]).await {
+        return resp;
     }
     match h.store.delete_role(id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -1390,7 +1403,9 @@ pub(super) async fn add_permission(
 pub(super) async fn delete_permission(
     State(h): State<Arc<Handler>>,
     UrlPath((id, perm_id)): UrlPath<(String, String)>,
+    request: Request,
 ) -> Response {
+    let (parts, _) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -1402,6 +1417,9 @@ pub(super) async fn delete_permission(
         Ok(true) => return write_error(StatusCode::CONFLICT, MANAGED_ROLE_MSG),
         Ok(false) => {}
         Err(err) => return map_error(err),
+    }
+    if let Some(resp) = h.may_grant_roles(&parts, &[id]).await {
+        return resp;
     }
     match h.store.delete_permission(id, perm_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -1477,7 +1495,9 @@ pub(super) async fn create_group_mapping(
 pub(super) async fn delete_group_mapping(
     State(h): State<Arc<Handler>>,
     UrlPath(id): UrlPath<String>,
+    request: Request,
 ) -> Response {
+    let (parts, _) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -1486,6 +1506,17 @@ pub(super) async fn delete_group_mapping(
         Ok(true) => return write_error(StatusCode::CONFLICT, MANAGED_ROLE_MSG),
         Ok(false) => {}
         Err(err) => return map_error(err),
+    }
+    let mapped = match h.store.list_group_mappings().await {
+        Ok(mappings) => mappings
+            .into_iter()
+            .filter(|m| m.id == id)
+            .map(|m| m.role_id)
+            .collect::<Vec<_>>(),
+        Err(err) => return map_error(err),
+    };
+    if let Some(resp) = h.may_grant_roles(&parts, &mapped).await {
+        return resp;
     }
     match h.store.delete_group_mapping(id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
