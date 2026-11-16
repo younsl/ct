@@ -676,6 +676,35 @@ async fn open_store(
             .context("load the database ca file")?,
     };
     let deadline = tokio::time::Instant::now() + DATABASE_BOOT_BUDGET;
+    // The HTTP listener starts only after this returns, so a pod whose
+    // database refuses the connection or the login never passes its probes.
+    loop {
+        match meta::Store::probe_postgres(&conn_str, &opts).await {
+            Ok(info) => {
+                tracing::info!(
+                    target: LOG_TARGET,
+                    user = %info.user,
+                    database = %info.database,
+                    server_version = %info.version,
+                    encrypted = info.encrypted,
+                    sslmode = %cfg.database.sslmode,
+                    "postgresql login ok"
+                );
+                break;
+            }
+            Err(err) => {
+                if let Some(reason) = err.permanent_connect_failure() {
+                    tracing::error!(target: LOG_TARGET, err = %err, reason, "postgresql login failed, not retrying");
+                    return Err(err).context(format!("postgresql preflight: {reason}"));
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(err).context("postgresql preflight: server unreachable");
+                }
+                tracing::warn!(target: LOG_TARGET, err = %err, "postgresql not reachable yet, retrying");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
     loop {
         match meta::Store::open_postgres(&conn_str, opts.clone()).await {
             Ok(store) => {

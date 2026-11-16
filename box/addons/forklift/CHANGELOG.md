@@ -4,6 +4,24 @@ Notable changes per release. Container image versions come from the
 `org.opencontainers.image.version` label in the `Dockerfile`; chart versions from
 `charts/forklift/Chart.yaml`.
 
+## 0.22.0 (2026-11-16)
+
+### Breaking
+
+- `FORKLIFT_DATABASE_SSLMODE` follows libpq. `prefer` and `require` now encrypt the PostgreSQL connection without checking the server certificate. Before, every mode but `disable` verified it. An install that relied on that check sets `verify-full`, or `verify-ca` to skip the host name check.
+- `FORKLIFT_DATABASE_CA_FILE` (chart: `database.external.caBundle`) needs `verify-ca` or `verify-full`. Startup and the chart render fail with any other mode, so a bundle is never accepted and then left unread.
+- Chart: `database.external.sslMode` defaults to `require` instead of `prefer`. A server without TLS needs `disable`.
+
+### Added
+
+- `FORKLIFT_DATABASE_SSLMODE` accepts `verify-ca` and `verify-full`, also inside `FORKLIFT_DATABASE_URL`. A managed service such as Amazon RDS is reachable with `require` and no CA bundle, and certificate verification is opt-in.
+- A pod connects and logs in to PostgreSQL before it opens its HTTP port, and logs the user, database, server version and whether the session is encrypted. A refused login, a missing database or a rejected server certificate stops the pod at once with the reason, instead of retrying for four minutes. An unreachable server is still retried.
+- `GET /api/v1/ha` reports the `active-active` mode for a PostgreSQL install and the new `database` field (`sqlite` or `postgres`).
+
+### Fixed
+
+- The HA Status page drew an active-active install as a leader with a standby. It now draws every API pod as serving, PostgreSQL as the shared metadata store, and the Lease as the choice of the pod that runs the background jobs. The diagram is titled with the installation mode (Standalone, Active - Passive or Active - Active).
+
 ## 0.21.1 (2026-11-16)
 
 ### Added

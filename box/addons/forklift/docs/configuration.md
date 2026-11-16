@@ -45,8 +45,8 @@ All settings are environment variables (the Helm chart maps values to them).
 | `FORKLIFT_DATABASE_HOST` | (none) | PostgreSQL host. Setting it (or `FORKLIFT_DATABASE_URL`) moves the metadata store from SQLite to PostgreSQL, where every pod serves at once. See [Active-active](active-active.md) |
 | `FORKLIFT_DATABASE_PORT` / `_NAME` / `_USER` | `5432` / `forklift` / `forklift` | PostgreSQL port, database and user |
 | `FORKLIFT_DATABASE_PASSWORD` | (none) | PostgreSQL password. The chart injects it from a Secret |
-| `FORKLIFT_DATABASE_SSLMODE` | `prefer` | `disable`, `prefer` or `require`. The server certificate is verified against the system roots, `FORKLIFT_DATABASE_CA_FILE` and `FORKLIFT_EXTRA_CA_FILE` |
-| `FORKLIFT_DATABASE_CA_FILE` | (none) | PEM bundle with the CA of the database server, trusted for the database connection only. A missing or malformed file fails startup |
+| `FORKLIFT_DATABASE_SSLMODE` | `prefer` | As in libpq: `disable`, `prefer`, `require`, `verify-ca` or `verify-full`. `prefer` and `require` encrypt without checking the server certificate. `verify-ca` checks it against the system roots, `FORKLIFT_DATABASE_CA_FILE` and `FORKLIFT_EXTRA_CA_FILE`, and `verify-full` also checks the host name. The chart defaults to `require` |
+| `FORKLIFT_DATABASE_CA_FILE` | (none) | PEM bundle with the CA of the database server, trusted for the database connection only. Needs `verify-ca` or `verify-full`, and startup fails with any other mode. A missing or malformed file fails startup |
 | `FORKLIFT_DATABASE_URL` | (none) | A `postgres://` URL, used instead of the discrete settings above |
 | `FORKLIFT_DATABASE_SCHEMA` | (server default) | Schema holding the tables. Created at startup when it does not exist, which needs the `CREATE` privilege on the database |
 | `FORKLIFT_DATABASE_MAX_CONNECTIONS` | `16` | PostgreSQL sessions this process opens, split between writes and reads. Keep pods times this value under the server's `max_connections` |

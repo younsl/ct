@@ -21,5 +21,8 @@ rustls-native-certs.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+rcgen.workspace = true
+
 [lints]
 workspace = true

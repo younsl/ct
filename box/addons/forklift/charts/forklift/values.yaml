@@ -290,10 +290,10 @@ database:
     name: forklift
     # -- (string) Database user.
     user: forklift
-    # -- (string) TLS mode: disable, prefer or require. The server certificate is verified against the system roots, caBundle below and outbound.caBundle.
-    sslMode: prefer
+    # -- (string) TLS mode, as in libpq: disable, prefer, require, verify-ca or verify-full. prefer and require encrypt without checking the server certificate. verify-ca checks it against the system roots, caBundle below and outbound.caBundle, and verify-full also checks the host name.
+    sslMode: require
     caBundle:
-      # -- (string) ConfigMap with the CA certificates (PEM) of the database server, trusted for the database connection only. Managed services such as Amazon RDS sign with their own CA. Empty disables.
+      # -- (string) ConfigMap with the CA certificates (PEM) of the database server, trusted for the database connection only. Read by sslMode verify-ca and verify-full, and rejected with any other mode. Managed services such as Amazon RDS sign with their own CA. Empty disables.
       configMap: ""
       # -- (string) Key in the ConfigMap holding the PEM bundle.
       key: ca.crt

@@ -3,8 +3,8 @@ name: forklift
 description: Lightweight Kubernetes-native artifact repository (Maven, npm, Cargo, Go, PyPI) with proxy caching and supply-chain controls (age policy, package approval, vulnerability scanning)
 type: application
 deprecated: false
-version: 0.24.1
-appVersion: "0.21.1"
+version: 0.25.0
+appVersion: "0.22.0"
 home: https://github.com/younsl/ct/tree/main/box/addons/forklift
 sources:
   - https://github.com/younsl/ct/tree/main/box/addons/forklift/charts/forklift
@@ -29,4 +29,8 @@ keywords:
 annotations:
   artifacthub.io/changes: |
     - kind: changed
-      description: "appVersion 0.21.1. database.schema is created at startup when it does not exist"
+      description: "appVersion 0.22.0. database.external.sslMode follows libpq and defaults to require, which encrypts without checking the server certificate"
+    - kind: added
+      description: "database.external.sslMode accepts verify-ca and verify-full, the modes that read database.external.caBundle"
+    - kind: changed
+      description: "database.external.caBundle.configMap fails the render unless sslMode is verify-ca or verify-full"

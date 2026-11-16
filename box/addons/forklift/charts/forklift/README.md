@@ -1,6 +1,6 @@
 # forklift
 
-![Version: 0.24.1](https://img.shields.io/badge/Version-0.24.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.21.1](https://img.shields.io/badge/AppVersion-0.21.1-informational?style=flat-square)
+![Version: 0.25.0](https://img.shields.io/badge/Version-0.25.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.22.0](https://img.shields.io/badge/AppVersion-0.22.0-informational?style=flat-square)
 
 Lightweight Kubernetes-native artifact repository (Maven, npm, Cargo, Go, PyPI) with proxy caching and supply-chain controls (age policy, package approval, vulnerability scanning)
 
@@ -45,7 +45,7 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift -f values.yaml
 Install a specific version:
 
 ```console
-helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.24.1
+helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.25.0
 ```
 
 ### Install from local chart
@@ -53,7 +53,7 @@ helm install forklift oci://ghcr.io/younsl/charts/forklift --version 0.24.1
 Download forklift chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/forklift --untar --version 0.24.1
+helm pull oci://ghcr.io/younsl/charts/forklift --untar --version 0.25.0
 helm install forklift ./forklift
 ```
 
@@ -180,8 +180,8 @@ The following table lists the configurable parameters and their default values.
 | database.external.port | int | `5432` | Server port. |
 | database.external.name | string | `"forklift"` | Database name. |
 | database.external.user | string | `"forklift"` | Database user. |
-| database.external.sslMode | string | `"prefer"` | TLS mode: disable, prefer or require. The server certificate is verified against the system roots, caBundle below and outbound.caBundle. |
-| database.external.caBundle.configMap | string | `""` | ConfigMap with the CA certificates (PEM) of the database server, trusted for the database connection only. Managed services such as Amazon RDS sign with their own CA. Empty disables. |
+| database.external.sslMode | string | `"require"` | TLS mode, as in libpq: disable, prefer, require, verify-ca or verify-full. prefer and require encrypt without checking the server certificate. verify-ca checks it against the system roots, caBundle below and outbound.caBundle, and verify-full also checks the host name. |
+| database.external.caBundle.configMap | string | `""` | ConfigMap with the CA certificates (PEM) of the database server, trusted for the database connection only. Read by sslMode verify-ca and verify-full, and rejected with any other mode. Managed services such as Amazon RDS sign with their own CA. Empty disables. |
 | database.external.caBundle.key | string | `"ca.crt"` | Key in the ConfigMap holding the PEM bundle. |
 | database.external.password | string | `""` | Password given inline, stored in the chart Secret. Prefer existingSecret. |
 | database.external.existingSecret | string | `""` | Existing Secret holding the password. |

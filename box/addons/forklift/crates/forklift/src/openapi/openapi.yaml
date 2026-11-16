@@ -3488,11 +3488,12 @@ components:
           items: { type: string, enum: [read, write, delete, audit] }
     HAStatus:
       type: object
-      required: [backend, enabled, identity, is_leader, leader, mode, role]
+      required: [backend, database, enabled, identity, is_leader, leader, mode, role]
       properties:
         enabled: { type: boolean, description: Leader election active (HA mode). }
-        mode: { type: string, description: "Topology: single, shared-volume, replication or object-storage." }
+        mode: { type: string, description: "Topology: single, shared-volume, replication, object-storage or active-active (every pod serves on PostgreSQL)." }
         backend: { type: string, enum: [fs, s3] }
+        database: { type: string, enum: [sqlite, postgres], description: Metadata database. }
         storage_endpoint: { type: string, description: Object-storage bucket/endpoint (s3) or data directory (fs). }
         identity: { type: string, description: This pod's leader-election identity. }
         leader: { type: string, description: Current Lease holder's identity. }

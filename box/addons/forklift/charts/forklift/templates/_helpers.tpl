@@ -251,6 +251,9 @@ ConfigMap holding the CA of an external database, or empty.
 - name: FORKLIFT_DATABASE_SSLMODE
   value: {{ ternary "disable" $ext.sslMode $internal | quote }}
 {{- if include "forklift.databaseCA" . }}
+{{- if not (has $ext.sslMode (list "verify-ca" "verify-full")) }}
+{{- fail "database.external.caBundle.configMap needs database.external.sslMode verify-ca or verify-full" }}
+{{- end }}
 - name: FORKLIFT_DATABASE_CA_FILE
   value: {{ printf "/etc/forklift/database-ca/%s" $ext.caBundle.key | quote }}
 {{- end }}

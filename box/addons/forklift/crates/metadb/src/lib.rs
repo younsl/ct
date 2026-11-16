@@ -12,7 +12,7 @@ mod value;
 
 pub use error::{Error, OptionalExtension, Result};
 pub use params::{Params, ParamsFromIter, params_from_iter};
-pub use postgres::PgConfig;
+pub use postgres::{PgConfig, ServerInfo};
 pub use value::{FromSql, ToSql, Value};
 
 /// Mirrors rusqlite's module path for the value type.

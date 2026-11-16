@@ -552,6 +552,19 @@ impl Store {
         })
     }
 
+    /// Connects and logs in to PostgreSQL once without touching the schema,
+    /// so a boot can tell a server that is still starting from one that will
+    /// never accept this configuration.
+    pub async fn probe_postgres(
+        conn_str: &str,
+        opts: &PostgresOptions,
+    ) -> std::result::Result<forklift_metadb::ServerInfo, forklift_metadb::Error> {
+        let cfg = PgConfig::parse(conn_str, &opts.extra_roots)?;
+        tokio::task::spawn_blocking(move || forklift_metadb::postgres::probe(&cfg))
+            .await
+            .map_err(|e| forklift_metadb::Error::Connect(format!("probe task: {e}")))?
+    }
+
     /// True when the store runs on PostgreSQL.
     pub const fn is_postgres(&self) -> bool {
         self.postgres

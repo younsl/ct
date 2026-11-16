@@ -9,7 +9,10 @@ use crate::bridge::block_on;
 /// Names the active high-availability/storage topology for the admin status
 /// view.
 fn ha_mode(cfg: &config::Config) -> &'static str {
-    if cfg.replication.enabled {
+    // On PostgreSQL every pod serves, whatever the blob backend is.
+    if cfg.database.enabled() {
+        "active-active"
+    } else if cfg.replication.enabled {
         "replication"
     } else if cfg.storage.backend == "s3" {
         "object-storage"
@@ -34,6 +37,12 @@ pub(crate) fn ha_status_fn(
             enabled: cfg.ha.enabled,
             mode: ha_mode(&cfg).to_string(),
             backend: cfg.storage.backend.clone(),
+            database: if cfg.database.enabled() {
+                "postgres"
+            } else {
+                "sqlite"
+            }
+            .to_string(),
             identity: cfg.ha.identity.clone(),
             lease_name: cfg.ha.lease_name.clone(),
             is_leader: leader_state.load(Ordering::SeqCst),
@@ -106,5 +115,8 @@ mod tests {
         assert_eq!(ha_mode(&cfg), "object-storage");
         cfg.replication.enabled = true;
         assert_eq!(ha_mode(&cfg), "replication");
+        cfg.replication.enabled = false;
+        cfg.database.host = "db.example.com".into();
+        assert_eq!(ha_mode(&cfg), "active-active");
     }
 }

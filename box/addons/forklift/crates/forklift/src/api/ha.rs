@@ -14,10 +14,13 @@ use super::{Handler, StatusMessageDTO, write_error, write_json};
 pub struct HAStatus {
     /// Whether leader election is active (HA mode).
     pub enabled: bool,
-    /// The topology: single, shared-volume, replication, or object-storage.
+    /// The topology: single, shared-volume, replication, object-storage, or
+    /// active-active (every pod serves on PostgreSQL).
     pub mode: String,
     /// The storage backend: fs or s3.
     pub backend: String,
+    /// The metadata database: sqlite or postgres.
+    pub database: String,
     /// The address artifacts live at: the object-storage bucket/endpoint (s3) or
     /// the block-storage data directory (fs).
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -74,6 +77,7 @@ pub(super) async fn get_status(State(h): State<Arc<Handler>>) -> Response {
             HAStatus {
                 mode: "single".to_string(),
                 backend: "fs".to_string(),
+                database: "sqlite".to_string(),
                 is_leader: true,
                 role: "leader".to_string(),
                 ..Default::default()

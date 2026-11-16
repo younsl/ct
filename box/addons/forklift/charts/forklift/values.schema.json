@@ -414,7 +414,7 @@
             },
             "sslMode": {
               "type": "string",
-              "enum": ["disable", "prefer", "require"]
+              "enum": ["disable", "prefer", "require", "verify-ca", "verify-full"]
             },
             "caBundle": {
               "type": "object",

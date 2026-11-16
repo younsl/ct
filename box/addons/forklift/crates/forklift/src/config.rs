@@ -406,7 +406,7 @@ pub struct DatabaseConfig {
     pub name: String,
     pub user: String,
     pub password: String,
-    /// One of disable, prefer, require.
+    /// One of disable, prefer, require, verify-ca, verify-full.
     pub sslmode: String,
     /// PEM bundle trusted for the database connection only. Empty adds none.
     pub ca_file: String,
@@ -674,10 +674,19 @@ impl Config {
         }
         if self.database.enabled() {
             match self.database.sslmode.as_str() {
-                "disable" | "prefer" | "require" => {}
+                "disable" | "prefer" | "require" => {
+                    // Nothing below verify-ca reads the bundle, so accepting
+                    // it would look like verification that never happens.
+                    if self.database.url.is_empty() && !self.database.ca_file.is_empty() {
+                        return invalid(
+                            "database ca file needs sslmode verify-ca or verify-full".into(),
+                        );
+                    }
+                }
+                "verify-ca" | "verify-full" => {}
                 other => {
                     return invalid(format!(
-                        "invalid database sslmode {other:?} (want disable, prefer or require)"
+                        "invalid database sslmode {other:?} (want disable, prefer, require, verify-ca or verify-full)"
                     ));
                 }
             }
@@ -1435,6 +1444,40 @@ pub(crate) mod tests {
         g.set("FORKLIFT_STORAGE_S3_PROVIDER", "ceph");
         let err = Config::load().unwrap_err();
         assert!(err.to_string().contains("ceph"), "err = {err}");
+    }
+
+    #[test]
+    #[serial]
+    fn database_sslmode_accepts_the_libpq_modes() {
+        for mode in ["disable", "prefer", "require", "verify-ca", "verify-full"] {
+            let mut g = EnvGuard::new();
+            g.set("FORKLIFT_DATABASE_HOST", "db.example.com");
+            g.set("FORKLIFT_DATABASE_SSLMODE", mode);
+            let cfg = Config::load().unwrap_or_else(|e| panic!("{mode}: {e}"));
+            let conn = cfg.database.connection_string().expect("postgres");
+            assert!(conn.contains(&format!("sslmode={mode}")), "conn = {conn}");
+        }
+        let mut g = EnvGuard::new();
+        g.set("FORKLIFT_DATABASE_HOST", "db.example.com");
+        g.set("FORKLIFT_DATABASE_SSLMODE", "verify");
+        let err = Config::load().unwrap_err();
+        assert!(err.to_string().contains("verify-full"), "err = {err}");
+    }
+
+    #[test]
+    #[serial]
+    fn database_ca_file_needs_a_verifying_sslmode() {
+        let mut g = EnvGuard::new();
+        g.set("FORKLIFT_DATABASE_HOST", "db.example.com");
+        g.set(
+            "FORKLIFT_DATABASE_CA_FILE",
+            "/etc/forklift/database-ca/ca.crt",
+        );
+        g.set("FORKLIFT_DATABASE_SSLMODE", "require");
+        let err = Config::load().unwrap_err();
+        assert!(err.to_string().contains("verify-ca"), "err = {err}");
+        g.set("FORKLIFT_DATABASE_SSLMODE", "verify-full");
+        Config::load().expect("a verifying mode reads the bundle");
     }
 
     #[test]

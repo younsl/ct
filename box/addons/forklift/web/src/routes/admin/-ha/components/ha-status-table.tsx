@@ -42,6 +42,7 @@ function ValueCell({
 
 export function HaStatusTable({ status }: { status: HAStatus }) {
   const { t } = useTranslation();
+  const activeActive = status.mode === "active-active";
 
   return (
     <TableWrap className="mt-4">
@@ -71,10 +72,10 @@ export function HaStatusTable({ status }: { status: HAStatus }) {
             <TableCell className="text-muted-foreground">{t("common.role")}</TableCell>
             <ValueCell copy={status.role}>
               <span className="inline-flex min-w-0 items-center gap-2 max-sm:flex-wrap">
-                <Badge variant={status.is_leader ? "success" : "outline"}>
-                  {status.role || "-"}
+                <Badge variant={status.is_leader || activeActive ? "success" : "outline"}>
+                  {activeActive ? t("ha.role-active") : status.role || "-"}
                 </Badge>
-                {status.is_leader && (
+                {(status.is_leader || activeActive) && (
                   <span className="text-sm text-muted-foreground">{t("ha.serving-traffic")}</span>
                 )}
               </span>

@@ -126,7 +126,7 @@ export interface IssuedToken { id: number; name: string; description: string; to
 
 export interface TokenScope { repo_pattern: string; actions: ("read" | "write" | "delete" | "audit")[]; }
 
-export interface HAStatus { enabled: boolean; mode: string; backend: "fs" | "s3"; storage_endpoint?: string; identity: string; leader: string; is_leader: boolean; role: "leader" | "standby"; lease_name?: string; fencing_token?: number; started_at?: string; version?: string; runtime?: string; }
+export interface HAStatus { enabled: boolean; mode: string; backend: "fs" | "s3"; database: "sqlite" | "postgres"; storage_endpoint?: string; identity: string; leader: string; is_leader: boolean; role: "leader" | "standby"; lease_name?: string; fencing_token?: number; started_at?: string; version?: string; runtime?: string; }
 
 export interface StorageStats { backend: "fs" | "s3"; provider?: string; provider_name?: string; provider_deprecation?: string; endpoint?: string; bucket?: string; prefix?: string; blob_count: number; blob_bytes: number; usage_by_format: FormatUsage[]; cluster?: ClusterStats; cluster_error?: string; conditional_writes?: boolean; conditional_writes_detail?: string; last_migration?: MigrationSummary; migration_history_error?: string; fs_error?: string; fs?: DiskUsage; dangling: DanglingRef[]; }
 

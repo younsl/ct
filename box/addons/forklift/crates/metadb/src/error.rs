@@ -46,6 +46,46 @@ impl Error {
     pub const fn is_unique_violation(&self) -> bool {
         matches!(self, Self::Constraint { unique: true, .. })
     }
+
+    /// Why a connection attempt cannot succeed on a retry, or `None` when the
+    /// failure may pass by itself (server still starting, network not up).
+    pub fn permanent_connect_failure(&self) -> Option<&'static str> {
+        let Self::Postgres(e) = self else {
+            return None;
+        };
+        if let Some(db) = e.as_db_error() {
+            return permanent_sqlstate(db.code().code());
+        }
+        rejected_certificate(e).then_some("server certificate rejected")
+    }
+}
+
+fn permanent_sqlstate(code: &str) -> Option<&'static str> {
+    match code {
+        // Class 28 is invalid authorization: wrong password, unknown role, or
+        // a pg_hba rule refusing this user, database or encryption.
+        c if c.starts_with("28") => Some("authentication failed"),
+        "3D000" => Some("database does not exist"),
+        _ => None,
+    }
+}
+
+/// True when the TLS handshake failed on the server certificate. The TLS
+/// layer reports it as an I/O error wrapping the rustls one.
+fn rejected_certificate(e: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(e);
+    while let Some(err) = current {
+        let tls = err.downcast_ref::<rustls::Error>().or_else(|| {
+            err.downcast_ref::<std::io::Error>()
+                .and_then(std::io::Error::get_ref)
+                .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+        });
+        if matches!(tls, Some(rustls::Error::InvalidCertificate(_))) {
+            return true;
+        }
+        current = err.source();
+    }
+    false
 }
 
 impl From<rusqlite::Error> for Error {
@@ -98,5 +138,37 @@ impl<T> OptionalExtension<T> for Result<T> {
             Err(Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permanent_sqlstates_are_login_and_database_errors() {
+        assert_eq!(permanent_sqlstate("28P01"), Some("authentication failed"));
+        assert_eq!(permanent_sqlstate("28000"), Some("authentication failed"));
+        assert_eq!(permanent_sqlstate("3D000"), Some("database does not exist"));
+        // 57P03: the database system is starting up.
+        assert_eq!(permanent_sqlstate("57P03"), None);
+        assert_eq!(permanent_sqlstate("53300"), None);
+    }
+
+    #[test]
+    fn rejected_certificate_finds_the_rustls_error_in_the_chain() {
+        let bad = rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer);
+        let wrapped = std::io::Error::new(std::io::ErrorKind::InvalidData, bad.clone());
+        assert!(rejected_certificate(&bad));
+        assert!(rejected_certificate(&wrapped));
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert!(!rejected_certificate(&refused));
+        assert!(!rejected_certificate(&rustls::Error::HandshakeNotComplete));
+    }
+
+    #[test]
+    fn only_driver_errors_can_be_permanent_connect_failures() {
+        assert_eq!(Error::Connect("x".into()).permanent_connect_failure(), None);
+        assert_eq!(Error::QueryReturnedNoRows.permanent_connect_failure(), None);
     }
 }
