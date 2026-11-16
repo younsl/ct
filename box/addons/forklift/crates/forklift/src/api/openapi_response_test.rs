@@ -148,7 +148,7 @@ async fn spec_operations_match_live_responses() {
         },
         Case {
             params: &["1"],
-            body: r#"{"repo_pattern":"pinned-*","actions":["read"]}"#,
+            body: r#"{"repo_pattern":"pinned-*","actions":["repo.read"]}"#,
             ..case(
                 "add role permission",
                 "post",
@@ -156,12 +156,12 @@ async fn spec_operations_match_live_responses() {
             )
         },
         Case {
-            body: r#"{"name":"pinned-token","description":"created by the pinning test","expires_in":"720h","scopes":[{"repo_pattern":"maven-*","actions":["read"]}]}"#,
+            body: r#"{"name":"pinned-token","description":"created by the pinning test","expires_in":"720h","scopes":[{"repo_pattern":"maven-*","actions":["repo.read"]}]}"#,
             ..case("create token", "post", "/api/v1/tokens")
         },
         Case {
             params: &["1"],
-            body: r#"{"name":"pinned-user-token","description":"created by the pinning test","expires_in":"720h","scopes":[{"repo_pattern":"maven-*","actions":["read"]}]}"#,
+            body: r#"{"name":"pinned-user-token","description":"created by the pinning test","expires_in":"720h","scopes":[{"repo_pattern":"maven-*","actions":["repo.read"]}]}"#,
             ..case("create user token", "post", "/api/v1/users/{id}/tokens")
         },
         Case {
@@ -318,7 +318,7 @@ async fn seed_for_response_test(srv: &TestServer) {
                 srv,
                 "scoped token",
                 "/users/1/tokens",
-                r#"{"name":"seeded-token","description":"seeded by the pinning test","expires_in":"720h","scopes":[{"repo_pattern":"maven-*","actions":["read"]}]}"#,
+                r#"{"name":"seeded-token","description":"seeded by the pinning test","expires_in":"720h","scopes":[{"repo_pattern":"maven-*","actions":["repo.read"]}]}"#,
             )
             .await;
     seed(

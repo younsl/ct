@@ -86,9 +86,10 @@ pub(super) async fn me(State(h): State<Arc<Handler>>, request: Request) -> Respo
     out.insert("username", p.username.clone().into());
     out.insert("source", p.source.clone().into());
     out.insert("admin", p.is_admin().into());
-    out.insert("approver", (p.is_admin() || p.can_approve_any()).into());
-    out.insert("auditor", (p.is_admin() || p.can_audit_any()).into());
-    out.insert("security", (p.is_admin() || p.can_security_any()).into());
+    out.insert("approver", p.has(auth::REPO_APPROVE).into());
+    out.insert("auditor", p.has(auth::AUDIT_READ).into());
+    out.insert("security", p.has(auth::REPO_SECURITY).into());
+    out.insert("permissions", p.permission_names().into());
     out.insert("csrf_token", csrf_token.into());
     // Present only while impersonating, so the UI can raise its banner and offer
     // the way back to the administrator's own account.
@@ -192,6 +193,9 @@ pub(super) async fn impersonate_user(
             StatusCode::BAD_REQUEST,
             "a robot account cannot be impersonated: it has no interactive session",
         );
+    }
+    if let Some(resp) = h.may_manage_user(&parts, id).await {
+        return resp;
     }
     if target.disabled {
         return write_error(
@@ -319,7 +323,7 @@ pub(super) async fn list_tokens(State(h): State<Arc<Handler>>, request: Request)
 
 pub(super) async fn create_token(State(h): State<Arc<Handler>>, request: Request) -> Response {
     let (parts, body) = request.into_parts();
-    let u = match h.current_user(&parts).await {
+    let u = match h.session_user(&parts).await {
         Ok(u) => u,
         Err(response) => return *response,
     };
@@ -356,37 +360,16 @@ fn validate_token_req(req: &CreateTokenReq) -> Result<(DateTime<Utc>, String), S
 }
 
 /// Checks a token scope list. `Some(msg)` means it is invalid (the caller
-/// responds 400 with it).
+/// responds 400 with it). Tokens carry only `repo.read`, `repo.write`,
+/// `repo.delete` and global read permissions, so a leaked token can never
+/// decide approvals, edit policy or manage the instance.
 pub(super) fn validate_scopes(scopes: &[Scope]) -> Option<String> {
     if scopes.is_empty() {
         return Some("at least one scope required".to_string());
     }
-    for s in scopes {
-        if s.repo_pattern.trim().is_empty() {
-            return Some("scope repo_pattern required".to_string());
-        }
-        if s.actions.is_empty() {
-            return Some("scope actions required".to_string());
-        }
-        for a in &s.actions {
-            // Data-plane actions plus audit, the one management-plane action a
-            // token may carry: audit is read-only viewing of the admin surfaces
-            // (approval queue, audit logs, users, roles), so a leaked token still
-            // cannot decide approvals, edit policy, or manage accounts. approve,
-            // security and admin stay session-only by design.
-            if ![
-                auth::ACTION_READ,
-                auth::ACTION_WRITE,
-                auth::ACTION_DELETE,
-                auth::ACTION_AUDIT,
-            ]
-            .contains(&a.as_str())
-            {
-                return Some(format!("invalid scope action: {a}"));
-            }
-        }
-    }
-    None
+    scopes
+        .iter()
+        .find_map(|s| auth::validate_entry(&s.repo_pattern, &s.actions, true).err())
 }
 
 /// Validates the request body and creates a personal access token owned by
@@ -535,7 +518,7 @@ pub(super) async fn update_token(
     request: Request,
 ) -> Response {
     let (parts, body) = request.into_parts();
-    let u = match h.current_user(&parts).await {
+    let u = match h.session_user(&parts).await {
         Ok(u) => u,
         Err(response) => return *response,
     };
@@ -552,7 +535,7 @@ pub(super) async fn delete_token(
     request: Request,
 ) -> Response {
     let (parts, _) = request.into_parts();
-    let u = match h.current_user(&parts).await {
+    let u = match h.session_user(&parts).await {
         Ok(u) => u,
         Err(response) => return *response,
     };
@@ -620,13 +603,16 @@ pub(super) async fn create_user_token(
     UrlPath(id): UrlPath<String>,
     request: Request,
 ) -> Response {
-    let (_, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
     };
     if let Err(err) = h.store.get_user(id).await {
         return map_error(err);
+    }
+    if let Some(resp) = h.may_manage_user(&parts, id).await {
+        return resp;
     }
     issue_token(&h, body, id).await
 }
@@ -636,7 +622,7 @@ pub(super) async fn update_user_token(
     UrlPath((id, token_id)): UrlPath<(String, String)>,
     request: Request,
 ) -> Response {
-    let (_, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -644,13 +630,18 @@ pub(super) async fn update_user_token(
     let Ok(token_id) = token_id.parse::<i64>() else {
         return write_error(StatusCode::BAD_REQUEST, "invalid token id");
     };
+    if let Some(resp) = h.may_manage_user(&parts, id).await {
+        return resp;
+    }
     update_token_scopes(&h, body, id, token_id).await
 }
 
 pub(super) async fn delete_user_token(
     State(h): State<Arc<Handler>>,
     UrlPath((id, token_id)): UrlPath<(String, String)>,
+    request: Request,
 ) -> Response {
+    let (parts, _) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -658,6 +649,9 @@ pub(super) async fn delete_user_token(
     let Ok(token_id) = token_id.parse::<i64>() else {
         return write_error(StatusCode::BAD_REQUEST, "invalid token id");
     };
+    if let Some(resp) = h.may_manage_user(&parts, id).await {
+        return resp;
+    }
     match h.store.delete_token(id, token_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => map_error(err),
@@ -774,7 +768,7 @@ pub(super) async fn list_users(State(h): State<Arc<Handler>>) -> Response {
 }
 
 pub(super) async fn create_user(State(h): State<Arc<Handler>>, request: Request) -> Response {
-    let (_, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
         return write_error(StatusCode::BAD_REQUEST, "invalid json body");
     };
@@ -810,6 +804,9 @@ pub(super) async fn create_user(State(h): State<Arc<Handler>>, request: Request)
         let valid: std::collections::HashSet<i64> = roles.iter().map(|role| role.id).collect();
         if req.role_ids.iter().any(|rid| !valid.contains(rid)) {
             return write_error(StatusCode::BAD_REQUEST, "unknown role id");
+        }
+        if let Some(resp) = h.may_grant_roles(&parts, &req.role_ids).await {
+            return resp;
         }
     }
     // A robot has no password hash to store; a normal user's password is hashed.
@@ -898,6 +895,9 @@ pub(super) async fn update_user(
     let Ok(req) = serde_json::from_slice::<UpdateUserReq>(&bytes) else {
         return write_error(StatusCode::BAD_REQUEST, "invalid json body");
     };
+    if let Some(resp) = h.may_manage_user(&parts, id).await {
+        return resp;
+    }
     let target = match h.store.get_user(id).await {
         Ok(target) => target,
         Err(err) => return map_error(err),
@@ -997,6 +997,9 @@ pub(super) async fn delete_user(
     if h.is_self(&parts, id).await {
         return write_error(StatusCode::BAD_REQUEST, "cannot delete your own account");
     }
+    if let Some(resp) = h.may_manage_user(&parts, id).await {
+        return resp;
+    }
     match h.store.delete_user(id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => map_error(err),
@@ -1025,6 +1028,65 @@ impl Handler {
             .await
             .map_err(|_| Box::new(write_error(StatusCode::UNAUTHORIZED, "unknown user")))
     }
+
+    /// Refuses a grant beyond the caller's own reach, so `role.write` or
+    /// `user.write` can never be turned into more permissions than the caller
+    /// already holds. Without an authorization service (tests) it allows all.
+    fn may_grant(&self, parts: &Parts, perms: &[Permission]) -> Option<Response> {
+        self.authz.as_ref()?;
+        if auth::from_request_parts(parts).is_some_and(|p| p.covers_all(perms)) {
+            return None;
+        }
+        Some(write_error(
+            StatusCode::FORBIDDEN,
+            "cannot grant permissions you do not hold",
+        ))
+    }
+
+    /// Refuses granting roles whose permissions exceed the caller's.
+    async fn may_grant_roles(&self, parts: &Parts, role_ids: &[i64]) -> Option<Response> {
+        if self.authz.is_none() || role_ids.is_empty() {
+            return None;
+        }
+        let perms = match self.store.list_permissions().await {
+            Ok(perms) => perms,
+            Err(err) => return Some(map_error(err)),
+        };
+        let granted: Vec<Permission> = perms
+            .into_iter()
+            .filter(|p| role_ids.contains(&p.role_id))
+            .collect();
+        self.may_grant(parts, &granted)
+    }
+
+    /// Refuses acting on a user (password, tokens, impersonation, deletion)
+    /// whose permissions exceed the caller's, so a delegated user manager cannot
+    /// take over an administrator's account.
+    async fn may_manage_user(&self, parts: &Parts, user_id: i64) -> Option<Response> {
+        self.authz.as_ref()?;
+        let perms = match self.store.permissions_for_user(user_id).await {
+            Ok(perms) => perms,
+            Err(err) => return Some(map_error(err)),
+        };
+        self.may_grant(parts, &perms).map(|_| {
+            write_error(
+                StatusCode::FORBIDDEN,
+                "cannot manage a user holding permissions you do not hold",
+            )
+        })
+    }
+
+    /// Like [`Self::current_user`], but refuses a token-authenticated caller, so a
+    /// token can never issue, widen or extend tokens.
+    async fn session_user(&self, parts: &Parts) -> Result<User, Box<Response>> {
+        if auth::from_request_parts(parts).is_some_and(|p| p.via_token()) {
+            return Err(Box::new(write_error(
+                StatusCode::FORBIDDEN,
+                "token management requires a signed-in session",
+            )));
+        }
+        self.current_user(parts).await
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1038,7 +1100,7 @@ pub(super) async fn assign_role(
     UrlPath(id): UrlPath<String>,
     request: Request,
 ) -> Response {
-    let (_, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -1049,6 +1111,9 @@ pub(super) async fn assign_role(
     let Ok(req) = serde_json::from_slice::<AssignRoleReq>(&bytes) else {
         return write_error(StatusCode::BAD_REQUEST, "invalid json body");
     };
+    if let Some(resp) = h.may_grant_roles(&parts, &[req.role_id]).await {
+        return resp;
+    }
     match h.store.assign_role(id, req.role_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => map_error(err),
@@ -1087,20 +1152,6 @@ struct CreateRoleReq {
     description: String,
     #[serde(default)]
     permissions: Vec<AddPermissionReq>,
-}
-
-/// Reports whether `a` is a grantable permission action.
-fn valid_role_action(a: &str) -> bool {
-    [
-        auth::ACTION_READ,
-        auth::ACTION_WRITE,
-        auth::ACTION_DELETE,
-        auth::ACTION_APPROVE,
-        auth::ACTION_AUDIT,
-        auth::ACTION_SECURITY,
-        auth::ACTION_ADMIN,
-    ]
-    .contains(&a)
 }
 
 /// Returned when a client tries to mutate an entity owned by the declarative
@@ -1184,7 +1235,7 @@ pub(super) async fn list_roles(State(h): State<Arc<Handler>>) -> Response {
 }
 
 pub(super) async fn create_role(State(h): State<Arc<Handler>>, request: Request) -> Response {
-    let (_, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let invalid_name = || {
         write_error(
             StatusCode::BAD_REQUEST,
@@ -1201,14 +1252,21 @@ pub(super) async fn create_role(State(h): State<Arc<Handler>>, request: Request)
     // Validate any inline permissions before creating the role so a bad grant
     // fails cleanly instead of leaving a permissionless role behind.
     for p in &req.permissions {
-        if p.repo_pattern.trim().is_empty() || p.actions.is_empty() {
-            return write_error(StatusCode::BAD_REQUEST, "repo_pattern and actions required");
+        if let Err(msg) = auth::validate_entry(&p.repo_pattern, &p.actions, false) {
+            return write_error(StatusCode::BAD_REQUEST, &msg);
         }
-        for a in &p.actions {
-            if !valid_role_action(a) {
-                return write_error(StatusCode::BAD_REQUEST, &format!("invalid action: {a}"));
-            }
-        }
+    }
+    let requested: Vec<Permission> = req
+        .permissions
+        .iter()
+        .map(|p| Permission {
+            repo_pattern: p.repo_pattern.trim().to_string(),
+            actions: p.actions.join(","),
+            ..Default::default()
+        })
+        .collect();
+    if let Some(resp) = h.may_grant(&parts, &requested) {
+        return resp;
     }
     let role = match h
         .store
@@ -1279,7 +1337,7 @@ pub(super) async fn add_permission(
     UrlPath(id): UrlPath<String>,
     request: Request,
 ) -> Response {
-    let (_, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let id = match path_id(&id) {
         Ok(id) => id,
         Err(response) => return *response,
@@ -1289,24 +1347,29 @@ pub(super) async fn add_permission(
         Ok(false) => {}
         Err(err) => return map_error(err),
     }
-    let required = || write_error(StatusCode::BAD_REQUEST, "repo_pattern and actions required");
+    let required = || write_error(StatusCode::BAD_REQUEST, "actions required");
     let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
         return required();
     };
-    let req = match serde_json::from_slice::<AddPermissionReq>(&bytes) {
-        Ok(req) if !req.repo_pattern.is_empty() && !req.actions.is_empty() => req,
-        _ => return required(),
+    let Ok(req) = serde_json::from_slice::<AddPermissionReq>(&bytes) else {
+        return required();
     };
-    for a in &req.actions {
-        if !valid_role_action(a) {
-            return write_error(StatusCode::BAD_REQUEST, &format!("invalid action: {a}"));
-        }
+    if let Err(msg) = auth::validate_entry(&req.repo_pattern, &req.actions, false) {
+        return write_error(StatusCode::BAD_REQUEST, &msg);
+    }
+    let requested = Permission {
+        repo_pattern: req.repo_pattern.trim().to_string(),
+        actions: req.actions.join(","),
+        ..Default::default()
+    };
+    if let Some(resp) = h.may_grant(&parts, std::slice::from_ref(&requested)) {
+        return resp;
     }
     match h
         .store
         .add_permission(Permission {
             role_id: id,
-            repo_pattern: req.repo_pattern.clone(),
+            repo_pattern: req.repo_pattern.trim().to_string(),
             actions: req.actions.join(","),
             ..Default::default()
         })
@@ -1389,7 +1452,7 @@ pub(super) async fn create_group_mapping(
     State(h): State<Arc<Handler>>,
     request: Request,
 ) -> Response {
-    let (_, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
     let required = || write_error(StatusCode::BAD_REQUEST, "group_name and role_id required");
     let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
         return required();
@@ -1398,6 +1461,9 @@ pub(super) async fn create_group_mapping(
         Ok(req) if !req.group_name.trim().is_empty() => req,
         _ => return required(),
     };
+    if let Some(resp) = h.may_grant_roles(&parts, &[req.role_id]).await {
+        return resp;
+    }
     match h
         .store
         .create_group_mapping(&req.group_name, req.role_id)
@@ -1506,6 +1572,65 @@ pub(crate) mod tests {
         srv.send(request).await
     }
 
+    /// A leaked token must not be able to mint a broader or longer-lived token,
+    /// widen its own scopes or revoke its owner's tokens.
+    #[tokio::test]
+    async fn token_cannot_manage_tokens() {
+        let srv = new_test_server().await;
+        let resp = srv
+            .admin_do(
+                Method::POST,
+                "/tokens",
+                r#"{"name":"ci","description":"ci","scopes":[{"repo_pattern":"maven-*","actions":["repo.read"]}],"expires_in":"1h"}"#,
+            )
+            .await;
+        assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
+        let token = resp.json()["token"].as_str().expect("token").to_string();
+        let id = resp.json()["id"].as_i64().expect("token id");
+        let send = async |method: Method, uri: String, body: &str| {
+            let request = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("build request");
+            srv.send(request).await.status
+        };
+        let wide = r#"{"name":"wide","description":"w","scopes":[{"repo_pattern":"*","actions":["repo.read","repo.write","repo.delete"]}],"expires_in":"8760h"}"#;
+        assert_eq!(
+            send(Method::POST, "/tokens".into(), wide).await,
+            StatusCode::FORBIDDEN,
+            "issue"
+        );
+        assert_eq!(
+            send(
+                Method::PATCH,
+                format!("/tokens/{id}"),
+                r#"{"scopes":[{"repo_pattern":"*","actions":["repo.write"]}]}"#
+            )
+            .await,
+            StatusCode::FORBIDDEN,
+            "widen"
+        );
+        assert_eq!(
+            send(Method::DELETE, format!("/tokens/{id}"), "").await,
+            StatusCode::FORBIDDEN,
+            "revoke"
+        );
+        assert_eq!(
+            send(Method::GET, "/tokens".into(), "").await,
+            StatusCode::OK,
+            "listing stays readable"
+        );
+        let list = srv.admin_do(Method::GET, "/tokens", "").await.json();
+        assert_eq!(
+            list.as_array().map(Vec::len),
+            Some(1),
+            "no token was minted"
+        );
+    }
+
     #[tokio::test]
     async fn login_and_me() {
         let srv = new_test_server().await;
@@ -1569,7 +1694,7 @@ pub(crate) mod tests {
         .admin_do(
             Method::POST,
             "/tokens",
-            r#"{"name":"ci","description":"ci pipeline","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"720h"}"#,
+            r#"{"name":"ci","description":"ci pipeline","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"720h"}"#,
         )
         .await;
         assert_eq!(
@@ -1666,7 +1791,7 @@ pub(crate) mod tests {
             .admin_do(
                 Method::POST,
                 &format!("/roles/{role_id}/permissions"),
-                r#"{"repo_pattern":"maven-*","actions":["read","write"]}"#,
+                r#"{"repo_pattern":"maven-*","actions":["repo.read","repo.write"]}"#,
             )
             .await;
         assert_eq!(
@@ -1754,7 +1879,7 @@ pub(crate) mod tests {
         .admin_do(
             Method::POST,
             "/tokens",
-            r#"{"name":"ci","description":"ci pipeline","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"720h"}"#,
+            r#"{"name":"ci","description":"ci pipeline","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"720h"}"#,
         )
         .await;
         assert_eq!(
@@ -1772,7 +1897,7 @@ pub(crate) mod tests {
             .admin_do(
                 Method::PATCH,
                 &format!("/tokens/{id}"),
-                r#"{"scopes":[{"repo_pattern":"*","actions":["read","write"]}]}"#,
+                r#"{"scopes":[{"repo_pattern":"*","actions":["repo.read","repo.write"]}]}"#,
             )
             .await;
         assert_eq!(
@@ -1803,7 +1928,7 @@ pub(crate) mod tests {
             .admin_do(
                 Method::PATCH,
                 &format!("/users/1/tokens/{id}"),
-                r#"{"scopes":[{"repo_pattern":"lib-*","actions":["read"]}]}"#,
+                r#"{"scopes":[{"repo_pattern":"lib-*","actions":["repo.read"]}]}"#,
             )
             .await;
         assert_eq!(
@@ -1838,10 +1963,16 @@ pub(crate) mod tests {
             bearer_do(&srv, token, Method::GET, path).await.status
         };
 
-        // approve, security and admin stay session-only.
-        for action in ["approve", "security", "admin"] {
+        // Decisions, administration and global writes stay session-only.
+        for (pattern, action) in [
+            ("*", "repo.approve"),
+            ("*", "repo.security"),
+            ("*", "repo.admin"),
+            ("", "user.write"),
+            ("", "*"),
+        ] {
             let (_, code) = issue(format!(
-            r#"{{"name":"bad-{action}","description":"t","scopes":[{{"repo_pattern":"*","actions":["{action}"]}}],"expires_in":"720h"}}"#
+            r#"{{"name":"bad","description":"t","scopes":[{{"repo_pattern":"{pattern}","actions":["{action}"]}}],"expires_in":"720h"}}"#
         ))
         .await;
             assert_eq!(
@@ -1852,13 +1983,13 @@ pub(crate) mod tests {
         }
 
         let (read_token, code) = issue(
-        r#"{"name":"read-only","description":"t","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"720h"}"#
+        r#"{"name":"read-only","description":"t","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"720h"}"#
             .to_string(),
     )
     .await;
         assert_eq!(code, StatusCode::CREATED, "create read token = {code}");
         let (audit_token, code) = issue(
-        r#"{"name":"read-audit","description":"t","scopes":[{"repo_pattern":"*","actions":["read","audit"]}],"expires_in":"720h"}"#
+        r#"{"name":"read-audit","description":"t","scopes":[{"repo_pattern":"*","actions":["repo.read"]},{"actions":["approval.read","user.read","role.read"]}],"expires_in":"720h"}"#
             .to_string(),
     )
     .await;
@@ -1903,7 +2034,7 @@ pub(crate) mod tests {
                 srv.admin_do(
                     Method::POST,
                     &format!("/users/{uid}/tokens"),
-                    r#"{"name":"t","description":"d","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"720h"}"#,
+                    r#"{"name":"t","description":"d","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"720h"}"#,
                 )
                 .await
             };

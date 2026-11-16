@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { useAuth } from "@/authContext";
 import { Redirect } from "@/components/app/redirect";
+import { canManageUsers } from "@/utils/permissions";
 import { TokenNewPage } from "@/routes/workspace/tokens/-components/token-new-page";
 
 export const Route = createFileRoute("/access/users/$id/tokens/new")({
@@ -17,5 +18,5 @@ function UserTokenNewRoute() {
   // Signed out: the shell redirects to /login, so do not compete with it.
   if (!me.authenticated) return null;
 
-  return me.admin ? <TokenNewPage /> : <Redirect to="/workspace/repositories" replace />;
+  return canManageUsers(me) ? <TokenNewPage /> : <Redirect to="/workspace/repositories" replace />;
 }

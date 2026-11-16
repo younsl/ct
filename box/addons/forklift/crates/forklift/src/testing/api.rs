@@ -302,14 +302,25 @@ pub async fn mk_role_user(
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
     let role_id = resp.json()["id"].as_i64().expect("role id");
-    let resp = srv
-        .admin_do(
-            Method::POST,
-            &format!("/roles/{role_id}/permissions"),
-            &format!(r#"{{"repo_pattern":"{pattern}","actions":[{actions}]}}"#),
-        )
-        .await;
-    assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
+    let names: Vec<String> =
+        serde_json::from_str(&format!("[{actions}]")).expect("actions are a JSON list body");
+    let (repo_perms, global_perms): (Vec<String>, Vec<String>) = names
+        .into_iter()
+        .partition(|a| crate::auth::is_repo_permission(a));
+    for (pattern, perms) in [(pattern, repo_perms), ("", global_perms)] {
+        if perms.is_empty() {
+            continue;
+        }
+        let body = serde_json::json!({ "repo_pattern": pattern, "actions": perms });
+        let resp = srv
+            .admin_do(
+                Method::POST,
+                &format!("/roles/{role_id}/permissions"),
+                &body.to_string(),
+            )
+            .await;
+        assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
+    }
     let resp = srv
         .admin_do(
             Method::POST,
@@ -413,7 +424,7 @@ pub async fn mk_read_user(store: &Store, username: &str, pattern: &str) {
         .add_permission(Permission {
             role_id: role.id,
             repo_pattern: pattern.to_string(),
-            actions: "read".to_string(),
+            actions: "repo.read".to_string(),
             ..Default::default()
         })
         .await

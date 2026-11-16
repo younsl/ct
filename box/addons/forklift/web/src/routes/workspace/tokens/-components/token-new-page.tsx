@@ -1,6 +1,8 @@
 import type { FormEvent } from "react";
 
 import { Alert } from "@/components/app-ui/alert";
+import { Badge } from "@/components/app-ui/badge";
+import { PermissionPicker } from "@/components/app/permission-picker/permission-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageDescription, PageHeader } from "@/components/app-ui/page";
@@ -10,7 +12,6 @@ import { NAME_PATTERN } from "@/lib/name-pattern";
 import { useTranslation } from "@/lib/i18n";
 import { TokenCreatedPanel } from "@/routes/workspace/tokens/-components/token-created-panel";
 import { TokenExpiryField } from "@/routes/workspace/tokens/-components/token-expiry-field";
-import { TokenScopeBuilder } from "@/routes/workspace/tokens/-components/token-scope-builder";
 import { useTokenCreateForm } from "@/routes/workspace/tokens/-hooks/use-token-create-form";
 
 // Token creation. Reached from the New token button on /workspace/tokens
@@ -54,7 +55,6 @@ export function TokenNewPage() {
                   autoFocus
                   required
                   pattern={NAME_PATTERN}
-                  title={t("common.name-rule-64")}
                 />
                 <FieldDescription>{t("common.name-rule")}</FieldDescription>
               </Field>
@@ -80,7 +80,16 @@ export function TokenNewPage() {
               />
             </FieldGroup>
 
-            <TokenScopeBuilder scopes={form.scopes} onChange={form.setScopes} />
+            <section aria-labelledby="token-permissions-heading" className="flex min-w-0 flex-col gap-3 border-t border-border pt-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 id="token-permissions-heading" className="m-0 text-sm font-semibold">{t("common.permissions")}</h2>
+                  <p className="mt-1 mb-0 text-sm text-muted-foreground">{t("token.permissions-description")}</p>
+                </div>
+                <Badge className="mt-0.5">{form.entries.length}</Badge>
+              </div>
+              <PermissionPicker mode="token" value={form.entries} onChange={form.setEntries} />
+            </section>
 
             {form.error && <Alert>{form.error}</Alert>}
             <div className="flex min-w-0 items-center gap-2 border-t border-border pt-4 max-sm:flex-wrap">

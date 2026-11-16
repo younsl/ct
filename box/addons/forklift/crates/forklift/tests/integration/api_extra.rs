@@ -94,7 +94,7 @@ async fn token_create_validation() {
             ("description", r#""ci token""#.to_string()),
             (
                 "scopes",
-                r#"[{"repo_pattern":"*","actions":["read"]}]"#.to_string(),
+                r#"[{"repo_pattern":"*","actions":["repo.read"]}]"#.to_string(),
             ),
             ("expires_in", r#""720h""#.to_string()),
         ];
@@ -130,7 +130,7 @@ async fn token_create_validation() {
         ("empty scopes", valid("scopes", "[]")),
         (
             "scope without pattern",
-            valid("scopes", r#"[{"repo_pattern":"","actions":["read"]}]"#),
+            valid("scopes", r#"[{"repo_pattern":"","actions":["repo.read"]}]"#),
         ),
         (
             "scope without actions",
@@ -138,7 +138,10 @@ async fn token_create_validation() {
         ),
         (
             "invalid scope action",
-            valid("scopes", r#"[{"repo_pattern":"*","actions":["admin"]}]"#),
+            valid(
+                "scopes",
+                r#"[{"repo_pattern":"*","actions":["repo.admin"]}]"#,
+            ),
         ),
         ("missing expires_in", valid("expires_in", "")),
         ("invalid expires_in", valid("expires_in", r#""banana""#)),
@@ -611,7 +614,7 @@ async fn repository_permissions() {
         .admin_do(
             Method::POST,
             "/roles",
-            r#"{"name":"maven-readers","permissions":[{"repo_pattern":"maven-*","actions":["read"]}]}"#,
+            r#"{"name":"maven-readers","permissions":[{"repo_pattern":"maven-*","actions":["repo.read"]}]}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -630,7 +633,7 @@ async fn repository_permissions() {
         p["role"] == "maven-readers"
             && p["repo_pattern"] == "maven-*"
             && p["actions"].as_array().map(Vec::len) == Some(1)
-            && p["actions"][0] == "read"
+            && p["actions"][0] == "repo.read"
     });
     assert!(
         found,
@@ -681,7 +684,7 @@ async fn repository_tokens() {
         .admin_do(
             Method::POST,
             "/tokens",
-            r#"{"name":"ci","description":"ci","scopes":[{"repo_pattern":"maven-*","actions":["read"]}],"expires_in":"720h"}"#,
+            r#"{"name":"ci","description":"ci","scopes":[{"repo_pattern":"maven-*","actions":["repo.read"]}],"expires_in":"720h"}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -696,7 +699,7 @@ async fn repository_tokens() {
             && tk["repo_pattern"] == "maven-*"
             && tk["unscoped"] != true
             && tk["actions"].as_array().map(Vec::len) == Some(1)
-            && tk["actions"][0] == "read"
+            && tk["actions"][0] == "repo.read"
     });
     assert!(found, "scoped token not listed for maven-central: {toks}");
 

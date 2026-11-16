@@ -7,6 +7,7 @@ import { getErrorMessageIfAny } from "@/lib/http/error/api-error";
 import { useTranslation } from "@/lib/i18n";
 import { RolesTable } from "@/routes/access/roles/-components/roles-table";
 import { useRolesList } from "@/routes/access/roles/-hooks/use-roles-list";
+import { canManageRoles } from "@/utils/permissions";
 
 import type { Me } from "@/services/v1/openapi-types";
 
@@ -29,7 +30,7 @@ export function RolesPage({ me }: { me: Me }) {
             <span className="text-base font-normal text-muted-foreground">{roles.length}</span>
           </span>
         }
-        actions={me.admin && (
+        actions={canManageRoles(me) && (
           <Button onClick={() => navigate({ to: "/access/roles/new" })}>
             {t("role.create")}
           </Button>

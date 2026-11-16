@@ -82,37 +82,21 @@ impl<S: Send + Sync> FromRequestParts<S> for OptionalPrincipal {
     }
 }
 
-/// Middleware that allows only global administrators.
-pub async fn require_admin(req: Request, next: Next) -> Response {
-    guard(req, next, super::authz::Principal::is_admin).await
+/// Middleware that allows principals holding `perm`: a global permission, or a
+/// repository permission on at least one pattern, whose handlers then check
+/// each repository. Mount with `from_fn_with_state(perm, require)`.
+pub async fn require(State(perm): State<&'static str>, req: Request, next: Next) -> Response {
+    guard(req, next, |p| p.has(perm)).await
 }
 
-/// Middleware that allows administrators and principals holding the approve
-/// action on at least one repository pattern. Handlers behind it still enforce
-/// per-repository checks via `can(repo, ACTION_APPROVE)`.
-pub async fn require_approver(req: Request, next: Next) -> Response {
-    guard(req, next, |p| p.is_admin() || p.can_approve_any()).await
-}
-
-/// Middleware that allows administrators plus principals holding either the
-/// approve or the audit action on at least one repository pattern. It gates the
-/// package-approval surface (the approvals queue and version-deny list) so a
-/// security auditor can read it. Auditors get read-only access: the mutating
-/// handlers behind it still enforce the approve action per repository, which the
-/// audit action does not grant.
-pub async fn require_approver_or_auditor(req: Request, next: Next) -> Response {
-    guard(req, next, |p| {
-        p.is_admin() || p.can_approve_any() || p.can_audit_any()
-    })
-    .await
-}
-
-/// Middleware that allows administrators and principals holding the audit action
-/// on at least one repository pattern. It gates the read-only administrative
-/// endpoints (users, roles, group mappings, audit logs, repository permissions);
-/// mutating endpoints stay behind [`require_admin`].
-pub async fn require_auditor(req: Request, next: Next) -> Response {
-    guard(req, next, |p| p.is_admin() || p.can_audit_any()).await
+/// Middleware that allows principals holding any of `perms`, with the same
+/// semantics as [`require`].
+pub async fn require_any(
+    State(perms): State<&'static [&'static str]>,
+    req: Request,
+    next: Next,
+) -> Response {
+    guard(req, next, |p| perms.iter().any(|perm| p.has(perm))).await
 }
 
 /// Middleware that requires any authenticated principal.

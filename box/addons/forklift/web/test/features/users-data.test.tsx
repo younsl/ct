@@ -53,7 +53,7 @@ const token = {
   id: 11,
   name: "ci",
   description: "",
-  scopes_json: '[{"repo_pattern":"maven-*","actions":["read"]}]',
+  scopes_json: '[{"repo_pattern":"maven-*","actions":["repo.read"]}]',
   expires_at: null,
   last_used_at: null,
   created_at: "2026-01-01T00:00:00Z",

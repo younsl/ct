@@ -6,9 +6,64 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 
+use super::authz::{Scope, is_legacy, translate_legacy, translate_legacy_scopes};
 use super::credentials::hash_password;
 use super::policy::parse_policy;
 use crate::meta;
+
+/// Rewrites role permissions and token scopes stored in the pre-catalog
+/// vocabulary (`read`, `admin`, ...) into catalog permissions, once per row:
+/// rows already in the catalog are left alone, so running it again changes
+/// nothing. Tokens lose every permission a token may not carry, and a token
+/// left without any is rejected from then on.
+pub async fn migrate_permission_vocabulary(store: &meta::Store) -> anyhow::Result<()> {
+    let mut roles = 0usize;
+    for p in store.list_permissions().await.context("list permissions")? {
+        let actions: Vec<String> = p
+            .actions
+            .split(',')
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(str::to_string)
+            .collect();
+        if !is_legacy(&actions) {
+            continue;
+        }
+        let entries = translate_legacy(&p.repo_pattern, &actions)
+            .into_iter()
+            .map(|(pattern, acts)| (pattern, acts.join(",")))
+            .collect();
+        store
+            .rewrite_permission(p.id, entries)
+            .await
+            .context("rewrite permission")?;
+        roles += 1;
+    }
+    let mut tokens = 0usize;
+    for t in store.list_all_tokens().await.context("list tokens")? {
+        let Ok(scopes) = serde_json::from_str::<Vec<Scope>>(&t.scopes_json) else {
+            continue;
+        };
+        if !scopes.iter().any(|s| is_legacy(&s.actions)) {
+            continue;
+        }
+        let json = serde_json::to_string(&translate_legacy_scopes(&scopes))
+            .context("encode token scopes")?;
+        store
+            .update_token_scopes(t.user_id, t.id, &json)
+            .await
+            .context("rewrite token scopes")?;
+        tokens += 1;
+    }
+    if roles > 0 || tokens > 0 {
+        tracing::info!(
+            role_permissions = roles,
+            tokens,
+            "rewrote stored permissions into the <category>.<verb> catalog"
+        );
+    }
+    Ok(())
+}
 
 /// Applies the declarative RBAC policy to the store. `policy_file` is the path
 /// to an ArgoCD-style policy.csv (mounted from a ConfigMap); `accounts_dir`, if
@@ -225,12 +280,102 @@ pub(crate) mod tests {
             .expect("resolve")
             .expect("resolve");
         assert!(
-            p.can("anyrepo", ACTION_READ),
+            p.can("anyrepo", REPO_READ),
             "default role should grant read"
         );
         assert!(
-            !p.can("anyrepo", ACTION_WRITE),
+            !p.can("anyrepo", REPO_WRITE),
             "default role must not grant write"
         );
+    }
+
+    /// Rows written before the catalog keep working after an upgrade: each one is
+    /// rewritten into what it used to grant, tokens lose what they may not carry,
+    /// and a second run changes nothing.
+    #[tokio::test]
+    async fn migrate_permission_vocabulary_rewrites_legacy_rows() {
+        let t = new_test_service().await;
+        let role = |name: &str| crate::meta::Role {
+            name: name.into(),
+            ..Default::default()
+        };
+        let admins = t.store.create_role(role("admins")).await.unwrap();
+        let auditors = t.store.create_role(role("auditors")).await.unwrap();
+        let current = t.store.create_role(role("current")).await.unwrap();
+        for (role_id, pattern, actions) in [
+            (admins.id, "*", "admin"),
+            (auditors.id, "*", "read,audit"),
+            (current.id, "lib-*", "repo.read"),
+        ] {
+            t.store
+                .add_permission(crate::meta::Permission {
+                    role_id,
+                    repo_pattern: pattern.into(),
+                    actions: actions.into(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        let user = t
+            .store
+            .create_user(crate::meta::User {
+                username: "ci".into(),
+                source: crate::meta::SOURCE_LOCAL.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        t.store
+            .create_token(crate::meta::Token {
+                user_id: user.id,
+                name: "ci".into(),
+                hash: "h".into(),
+                scopes_json: r#"[{"repo_pattern":"maven-*","actions":["read","approve"]}]"#.into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        migrate_permission_vocabulary(&t.store)
+            .await
+            .expect("migrate");
+        let snapshot = async || {
+            let mut perms: Vec<(i64, String, String)> = t
+                .store
+                .list_permissions()
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|p| (p.role_id, p.repo_pattern, p.actions))
+                .collect();
+            perms.sort();
+            let tokens = t.store.list_all_tokens().await.unwrap();
+            (perms, tokens[0].scopes_json.clone())
+        };
+        let first = snapshot().await;
+        assert_eq!(
+            first.0,
+            vec![
+                (admins.id, String::new(), "*".to_string()),
+                (
+                    auditors.id,
+                    String::new(),
+                    "audit.read,user.read,role.read,approval.read,notification.read,insights.read"
+                        .to_string()
+                ),
+                (auditors.id, "*".to_string(), "repo.read".to_string()),
+                (current.id, "lib-*".to_string(), "repo.read".to_string()),
+            ]
+        );
+        assert_eq!(
+            first.1,
+            r#"[{"repo_pattern":"maven-*","actions":["repo.read"]}]"#
+        );
+
+        migrate_permission_vocabulary(&t.store)
+            .await
+            .expect("migrate again");
+        assert_eq!(snapshot().await, first, "a second run changes nothing");
     }
 }

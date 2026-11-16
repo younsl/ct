@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { Alert } from "@/components/app-ui/alert";
 import { Button } from "@/components/ui/button";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { ConfirmModal } from "@/components/overlays/confirm-modal";
 import { PageDescription, PageHeader } from "@/components/app-ui/page";
 import { QuotasPanel, MAX_TOKENS_PER_USER } from "@/components/app-ui/token-quota";
@@ -48,13 +49,11 @@ export function TokensPage() {
       <PageHeader
         title={t("token.personal-title")}
         actions={
-          <Button
-            disabled={atCap}
-            title={atCap ? t("token.limit-reached") : undefined}
-            onClick={() => navigate({ to: "/workspace/tokens/new" })}
-          >
-            {t("token.new")}
-          </Button>
+          <HintTooltip content={atCap ? t("token.limit-reached") : undefined} wrap>
+            <Button disabled={atCap} onClick={() => navigate({ to: "/workspace/tokens/new" })}>
+              {t("token.new")}
+            </Button>
+          </HintTooltip>
         }
       />
       <PageDescription>

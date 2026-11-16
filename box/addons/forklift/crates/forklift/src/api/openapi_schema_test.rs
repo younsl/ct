@@ -322,26 +322,21 @@ fn spec_schemas_match_request_shapes() {
 /// kept listing three, and the generated client had no type for the fourth.
 #[test]
 fn spec_token_scope_actions_match_validator() {
-    use crate::auth::{
-        ACTION_ADMIN, ACTION_APPROVE, ACTION_AUDIT, ACTION_DELETE, ACTION_READ, ACTION_SECURITY,
-        ACTION_WRITE, Scope,
-    };
+    use crate::auth::{PERMISSIONS, PermissionScope, Scope};
 
     let documented = spec_enum("TokenScope", "actions");
 
-    // Every action the authorisation model defines, so the test sees an action
-    // that becomes grantable as well as one that stops being.
-    for action in [
-        ACTION_READ,
-        ACTION_WRITE,
-        ACTION_DELETE,
-        ACTION_APPROVE,
-        ACTION_AUDIT,
-        ACTION_SECURITY,
-        ACTION_ADMIN,
-    ] {
+    // Every permission the catalog defines, so the test sees one that becomes
+    // token-grantable as well as one that stops being.
+    for def in PERMISSIONS {
+        let action = def.name;
+        let pattern = if def.scope == PermissionScope::Repo {
+            "*"
+        } else {
+            ""
+        };
         let accepted = crate::api::auth::validate_scopes(&[Scope {
-            repo_pattern: "*".to_string(),
+            repo_pattern: pattern.to_string(),
             actions: vec![action.to_string()],
         }])
         .is_none();
@@ -355,6 +350,35 @@ fn spec_token_scope_actions_match_validator() {
             "TokenScope.actions lists {action:?} but token scopes reject it; the client offers a value the server 400s on"
         );
     }
+}
+
+/// `PermissionName` is what generated clients offer for role permissions, so it
+/// must list exactly the catalog.
+#[test]
+fn spec_permission_names_match_catalog() {
+    #[derive(serde::Deserialize)]
+    struct Doc {
+        components: Components,
+    }
+    #[derive(serde::Deserialize)]
+    struct Components {
+        schemas: BTreeMap<String, Named>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Named {
+        #[serde(default)]
+        r#enum: Vec<String>,
+    }
+    let doc: Doc = serde_yaml_ng::from_str(SPEC).unwrap_or_else(|e| panic!("parse spec: {e}"));
+    let documented = &doc.components.schemas["PermissionName"].r#enum;
+    let catalog: Vec<String> = crate::auth::PERMISSIONS
+        .iter()
+        .map(|d| d.name.to_string())
+        .collect();
+    assert_eq!(
+        documented, &catalog,
+        "PermissionName enum drifted from the catalog"
+    );
 }
 
 // ---------------------------------------------------------------------------

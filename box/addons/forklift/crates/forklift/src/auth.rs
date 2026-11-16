@@ -20,8 +20,12 @@ mod reconcile;
 mod session;
 
 pub use authz::{
-    ACTION_ADMIN, ACTION_APPROVE, ACTION_AUDIT, ACTION_DELETE, ACTION_READ, ACTION_SECURITY,
-    ACTION_WRITE, Principal, Scope, match_repo_pattern,
+    ALL, APPROVAL_READ, AUDIT_READ, COVERAGE_READ, COVERAGE_WRITE, INSIGHTS_READ, INSIGHTS_WRITE,
+    NOTIFICATION_READ, NOTIFICATION_WRITE, PERMISSIONS, PermissionDef, PermissionScope, Principal,
+    REPO_ADMIN, REPO_APPROVE, REPO_DELETE, REPO_READ, REPO_SECURITY, REPO_WRITE, ROLE_READ,
+    ROLE_WRITE, SYSTEM_READ, SYSTEM_WRITE, Scope, USER_READ, USER_WRITE, is_legacy,
+    is_repo_permission, match_repo_pattern, permission, token_allowed, translate_legacy,
+    translate_legacy_scopes, validate_entry,
 };
 pub use credentials::{
     MAX_FAILED_LOGINS, generate_token, hash_password, hash_token, is_pat, random_password,
@@ -29,12 +33,12 @@ pub use credentials::{
 };
 pub use middleware::{
     OptionalPrincipal, RequirePrincipal, clear_session_cookie, from_request, from_request_parts,
-    middleware, require_admin, require_approver, require_approver_or_auditor, require_auditor,
-    require_auth, set_session_cookie, unauthorized, unauthorized_basic,
+    middleware, require, require_any, require_auth, set_session_cookie, unauthorized,
+    unauthorized_basic,
 };
 pub use oidc::{OidcParams, OidcProvider, handle_callback, handle_login, handle_logout};
 pub use policy::parse_policy;
-pub use reconcile::reconcile_rbac;
+pub use reconcile::{migrate_permission_vocabulary, reconcile_rbac};
 pub use session::{SessionCodec, SessionData};
 
 /// Authentication, session and authorization errors.
@@ -338,9 +342,17 @@ impl Service {
             Ok(u) if !u.disabled => u,
             _ => return Ok(None),
         };
-        let mut scopes: Vec<Scope> = Vec::new();
-        if !t.scopes_json.is_empty() {
-            scopes = serde_json::from_str(&t.scopes_json).unwrap_or_default();
+        // A token whose scopes are missing or unreadable authenticates nothing,
+        // so a damaged row can never fall back to the owner's full access.
+        let Ok(scopes) = serde_json::from_str::<Vec<Scope>>(&t.scopes_json) else {
+            tracing::warn!(
+                token_id = t.id,
+                "token scopes unreadable, rejecting the token"
+            );
+            return Ok(None);
+        };
+        if scopes.is_empty() {
+            return Ok(None);
         }
         // `last_used_at` is shown to operators at a coarse grain, so a token
         // used on every request is stamped once per interval, not per request.
@@ -424,7 +436,7 @@ impl Service {
                 continue;
             }
             let p = self.build_principal(&u, &[], false, Vec::new()).await?;
-            if p.can(repo, ACTION_APPROVE) {
+            if p.can(repo, REPO_APPROVE) {
                 out.push(u.username);
             }
         }
@@ -480,8 +492,8 @@ impl Service {
                 self.store
                     .add_permission(meta::Permission {
                         role_id: role.id,
-                        repo_pattern: "*".into(),
-                        actions: ACTION_ADMIN.into(),
+                        repo_pattern: String::new(),
+                        actions: ALL.into(),
                         ..Default::default()
                     })
                     .await?;
@@ -551,81 +563,79 @@ pub(crate) mod tests {
                 perms: vec![
                     meta::Permission {
                         repo_pattern: "maven-*".into(),
-                        actions: "read,write".into(),
+                        actions: "repo.read,repo.write".into(),
                         ..Default::default()
                     },
                     meta::Permission {
                         repo_pattern: "shared".into(),
-                        actions: "read".into(),
+                        actions: "repo.read".into(),
                         ..Default::default()
                     },
                 ],
                 ..Default::default()
             };
             assert!(
-                p.can("maven-central", ACTION_READ) && p.can("maven-central", ACTION_WRITE),
+                p.can("maven-central", REPO_READ) && p.can("maven-central", REPO_WRITE),
                 "expected read/write on maven-central"
             );
             assert!(
-                !p.can("maven-central", ACTION_DELETE),
+                !p.can("maven-central", REPO_DELETE),
                 "delete should be denied"
             );
             assert!(
-                p.can("shared", ACTION_READ) && !p.can("shared", ACTION_WRITE),
+                p.can("shared", REPO_READ) && !p.can("shared", REPO_WRITE),
                 "shared should be read-only"
             );
-            assert!(!p.can("npm-proxy", ACTION_READ), "npm-proxy not granted");
+            assert!(!p.can("npm-proxy", REPO_READ), "npm-proxy not granted");
         }
 
         #[test]
         fn principal_admin_implies_all() {
             let p = Principal {
                 perms: vec![meta::Permission {
-                    repo_pattern: "*".into(),
-                    actions: "admin".into(),
+                    repo_pattern: String::new(),
+                    actions: ALL.into(),
                     ..Default::default()
                 }],
                 ..Default::default()
             };
             assert!(
-                p.is_admin() && p.can("anything", ACTION_DELETE),
-                "admin should imply all actions"
+                p.is_admin() && p.can("anything", REPO_DELETE),
+                "* should imply all permissions"
             );
         }
 
         #[test]
         fn principal_token_scope_narrows() {
             let base = vec![meta::Permission {
-                repo_pattern: "*".into(),
-                actions: "admin".into(),
+                repo_pattern: String::new(),
+                actions: ALL.into(),
                 ..Default::default()
             }];
-            // Unscoped token inherits full access.
-            let full = Principal {
+            let unscoped = Principal {
                 perms: base.clone(),
                 via_token: true,
                 ..Default::default()
             };
             assert!(
-                full.can("any", ACTION_WRITE),
-                "unscoped token should inherit role perms"
+                !unscoped.can("any", REPO_READ),
+                "a token without scopes grants nothing"
             );
-            // Scoped token narrows to a single repo/action.
             let scoped = Principal {
                 perms: base,
                 via_token: true,
                 token_scopes: vec![Scope {
                     repo_pattern: "maven-*".into(),
-                    actions: vec![ACTION_READ.into()],
+                    actions: vec![REPO_READ.into()],
                 }],
                 ..Default::default()
             };
             assert!(
-                scoped.can("maven-central", ACTION_READ),
+                scoped.can("maven-central", REPO_READ),
                 "scoped read should be allowed"
             );
             assert!(
-                !scoped.can("maven-central", ACTION_WRITE) && !scoped.can("npm", ACTION_READ),
+                !scoped.can("maven-central", REPO_WRITE) && !scoped.can("npm", REPO_READ),
                 "scope should narrow access"
             );
         }
@@ -843,7 +853,8 @@ pub(crate) mod tests {
                     user_id: robot.id,
                     name: "ci".into(),
                     hash,
-                    scopes_json: r#"[{"repo_pattern":"*","actions":["read","write"]}]"#.into(),
+                    scopes_json: r#"[{"repo_pattern":"*","actions":["repo.read","repo.write"]}]"#
+                        .into(),
                     ..Default::default()
                 })
                 .await
@@ -869,6 +880,40 @@ pub(crate) mod tests {
             );
         }
 
+        /// A token whose stored scopes are empty or unreadable must not fall back to
+        /// its owner's access: it authenticates nothing at all.
+        #[tokio::test]
+        async fn token_without_readable_scopes_is_rejected() {
+            let t = new_test_service().await;
+            t.svc
+                .bootstrap_admin("admin", "pw")
+                .await
+                .expect("bootstrap");
+            let admin = t.store.get_user_by_username("admin").await.unwrap();
+            for (name, scopes) in [("empty", "[]"), ("blank", ""), ("broken", "{not json")] {
+                let (plain, hash) = generate_token().unwrap();
+                t.store
+                    .create_token(meta::Token {
+                        user_id: admin.id,
+                        name: name.into(),
+                        hash,
+                        scopes_json: scopes.into(),
+                        ..Default::default()
+                    })
+                    .await
+                    .expect("create token");
+                let parts = Request::builder()
+                    .uri("/")
+                    .header(http::header::AUTHORIZATION, format!("Bearer {plain}"))
+                    .body(Body::empty())
+                    .unwrap()
+                    .into_parts()
+                    .0;
+                let p = t.svc.resolve(&parts).await.expect("resolve");
+                assert!(p.is_none(), "{name} scopes resolved a principal");
+            }
+        }
+
         #[tokio::test]
         async fn resolve_basic_and_token() {
             let t = new_test_service().await;
@@ -890,7 +935,7 @@ pub(crate) mod tests {
                     user_id: admin.id,
                     name: "ci".into(),
                     hash,
-                    scopes_json: r#"[{"repo_pattern":"maven-*","actions":["read"]}]"#.into(),
+                    scopes_json: r#"[{"repo_pattern":"maven-*","actions":["repo.read"]}]"#.into(),
                     ..Default::default()
                 })
                 .await
@@ -905,7 +950,7 @@ pub(crate) mod tests {
             let p = t.svc.resolve(&parts).await.expect("token resolve");
             let p = p.expect("token resolve");
             assert!(
-                p.can("maven-central", ACTION_READ) && !p.can("maven-central", ACTION_WRITE),
+                p.can("maven-central", REPO_READ) && !p.can("maven-central", REPO_WRITE),
                 "token scope not enforced"
             );
 
@@ -919,7 +964,7 @@ pub(crate) mod tests {
                 .0;
             let p = t.svc.resolve(&parts).await.expect("bare token resolve");
             assert!(
-                p.is_some_and(|p| p.can("maven-central", ACTION_READ)),
+                p.is_some_and(|p| p.can("maven-central", REPO_READ)),
                 "bare token must resolve"
             );
 
@@ -959,7 +1004,7 @@ pub(crate) mod tests {
                 .add_permission(meta::Permission {
                     role_id: role.id,
                     repo_pattern: "maven-*".into(),
-                    actions: "read,write".into(),
+                    actions: "repo.read,repo.write".into(),
                     ..Default::default()
                 })
                 .await
@@ -984,11 +1029,11 @@ pub(crate) mod tests {
                 .await
                 .expect("build principal");
             assert!(
-                p.can("maven-snapshots", ACTION_WRITE),
+                p.can("maven-snapshots", REPO_WRITE),
                 "group-mapped role should grant write"
             );
             assert!(
-                !p.can("npm-proxy", ACTION_READ),
+                !p.can("npm-proxy", REPO_READ),
                 "unmapped repo should be denied"
             );
         }
@@ -1054,7 +1099,7 @@ pub(crate) mod tests {
             let guard = || {
                 Router::new()
                     .route("/", get(|| async { StatusCode::OK }))
-                    .layer(axum::middleware::from_fn(require_admin))
+                    .layer(axum::middleware::from_fn_with_state(ALL, require))
                     .layer(axum::middleware::from_fn_with_state(
                         Arc::clone(&t.svc),
                         crate::auth::middleware,
@@ -1120,155 +1165,6 @@ pub(crate) mod tests {
             basic_auth_parts, cookie_parts, new_test_service, request_parts, to_request,
         };
 
-        fn perms(actions: &str) -> Vec<meta::Permission> {
-            vec![meta::Permission {
-                repo_pattern: "maven-*".into(),
-                actions: actions.into(),
-                ..Default::default()
-            }]
-        }
-
-        fn scope(actions: &[&str]) -> Vec<Scope> {
-            vec![Scope {
-                repo_pattern: "maven-*".into(),
-                actions: actions
-                    .iter()
-                    .map(std::string::ToString::to_string)
-                    .collect(),
-            }]
-        }
-
-        /// The three "any" predicates gate whole surfaces (the approvals queue, the
-        /// read-only admin views, the Security tab's write affordance), so what a token
-        /// may carry is the whole point: approve and security are human decisions and can
-        /// never come from a token scope, while audit is read-only and can. Getting this
-        /// wrong hands a leaked token a management-plane action, which is why each case
-        /// is pinned rather than left to the two callers to imply.
-        #[test]
-        fn principal_any_predicates() {
-            let cases: Vec<(&str, Principal, bool, bool, bool)> = vec![
-                ("no permissions", Principal::default(), false, false, false),
-                (
-                    "read only",
-                    Principal {
-                        perms: perms("read,write"),
-                        ..Default::default()
-                    },
-                    false,
-                    false,
-                    false,
-                ),
-                (
-                    "approver",
-                    Principal {
-                        perms: perms("read,approve"),
-                        ..Default::default()
-                    },
-                    true,
-                    false,
-                    false,
-                ),
-                (
-                    "auditor",
-                    Principal {
-                        perms: perms("read,audit"),
-                        ..Default::default()
-                    },
-                    false,
-                    true,
-                    false,
-                ),
-                (
-                    "security engineer",
-                    Principal {
-                        perms: perms("read,security"),
-                        ..Default::default()
-                    },
-                    false,
-                    false,
-                    true,
-                ),
-                // admin in the CSV implies every action, including these three.
-                (
-                    "admin",
-                    Principal {
-                        perms: perms("admin"),
-                        ..Default::default()
-                    },
-                    true,
-                    true,
-                    true,
-                ),
-                // An unscoped token inherits the user's full role-limited access.
-                (
-                    "token without scopes",
-                    Principal {
-                        perms: perms("approve,audit,security"),
-                        via_token: true,
-                        ..Default::default()
-                    },
-                    true,
-                    true,
-                    true,
-                ),
-                // A scoped token narrows: audit may be carried, approve and security not.
-                (
-                    "token scoped to audit",
-                    Principal {
-                        perms: perms("approve,audit,security"),
-                        via_token: true,
-                        token_scopes: scope(&["audit"]),
-                        ..Default::default()
-                    },
-                    false,
-                    true,
-                    false,
-                ),
-                (
-                    "token scoped to approve",
-                    Principal {
-                        perms: perms("approve,audit,security"),
-                        via_token: true,
-                        token_scopes: scope(&["approve"]),
-                        ..Default::default()
-                    },
-                    true,
-                    false,
-                    false,
-                ),
-                (
-                    "token scoped to read",
-                    Principal {
-                        perms: perms("approve,audit,security"),
-                        via_token: true,
-                        token_scopes: scope(&["read"]),
-                        ..Default::default()
-                    },
-                    false,
-                    false,
-                    false,
-                ),
-                // A token scope alone grants nothing: the role must allow it too.
-                (
-                    "token scope without the role",
-                    Principal {
-                        perms: perms("read"),
-                        via_token: true,
-                        token_scopes: scope(&["approve", "audit"]),
-                        ..Default::default()
-                    },
-                    false,
-                    false,
-                    false,
-                ),
-            ];
-            for (name, p, approve, audit, security) in cases {
-                assert_eq!(p.can_approve_any(), approve, "{name}: can_approve_any");
-                assert_eq!(p.can_audit_any(), audit, "{name}: can_audit_any");
-                assert_eq!(p.can_security_any(), security, "{name}: can_security_any");
-            }
-        }
-
         /// `match_repo_pattern` is the exported spelling the API uses to list which roles
         /// apply to a repository, and it must stay the same glob the authorization path
         /// runs; a divergence would show permissions that do not apply (or hide ones
@@ -1303,6 +1199,7 @@ pub(crate) mod tests {
             store: &Arc<meta::Store>,
             username: &str,
             role_name: &str,
+            pattern: &str,
             actions: &str,
         ) {
             let hash = hash_password(USER_PASS).expect("hash");
@@ -1325,7 +1222,7 @@ pub(crate) mod tests {
             store
                 .add_permission(meta::Permission {
                     role_id: role.id,
-                    repo_pattern: "*".into(),
+                    repo_pattern: pattern.into(),
                     actions: actions.into(),
                     ..Default::default()
                 })
@@ -1345,18 +1242,30 @@ pub(crate) mod tests {
                 .bootstrap_admin("admin", USER_PASS)
                 .await
                 .expect("bootstrap");
-            mk_user_with_role(&t.store, "plain", "reader-role", "read").await;
-            mk_user_with_role(&t.store, "approver", "approver-role", "read,approve").await;
-            mk_user_with_role(&t.store, "auditor", "auditor-role", "read,audit").await;
+            mk_user_with_role(&t.store, "plain", "reader-role", "*", "repo.read").await;
+            mk_user_with_role(
+                &t.store,
+                "approver",
+                "approver-role",
+                "npm-*",
+                "repo.approve",
+            )
+            .await;
+            mk_user_with_role(&t.store, "auditor", "auditor-role", "", "audit.read").await;
 
             let guard = |which: &str| {
                 let inner = Router::new().route("/", get(|| async { StatusCode::OK }));
+                const APPROVALS: &[&str] = &[APPROVAL_READ, REPO_APPROVE];
                 let inner = match which {
-                    "approver" => inner.layer(axum::middleware::from_fn(require_approver)),
-                    "approverOrAuditor" => {
-                        inner.layer(axum::middleware::from_fn(require_approver_or_auditor))
+                    "approver" => {
+                        inner.layer(axum::middleware::from_fn_with_state(REPO_APPROVE, require))
                     }
-                    "auditor" => inner.layer(axum::middleware::from_fn(require_auditor)),
+                    "approverOrAuditor" => {
+                        inner.layer(axum::middleware::from_fn_with_state(APPROVALS, require_any))
+                    }
+                    "auditor" => {
+                        inner.layer(axum::middleware::from_fn_with_state(AUDIT_READ, require))
+                    }
                     other => panic!("unknown guard {other}"),
                 };
                 inner.layer(axum::middleware::from_fn_with_state(
@@ -1374,7 +1283,7 @@ pub(crate) mod tests {
                 ("approverOrAuditor", "", StatusCode::UNAUTHORIZED),
                 ("approverOrAuditor", "plain", StatusCode::FORBIDDEN),
                 ("approverOrAuditor", "approver", StatusCode::OK),
-                ("approverOrAuditor", "auditor", StatusCode::OK),
+                ("approverOrAuditor", "auditor", StatusCode::FORBIDDEN),
                 ("approverOrAuditor", "admin", StatusCode::OK),
                 ("auditor", "", StatusCode::UNAUTHORIZED),
                 ("auditor", "plain", StatusCode::FORBIDDEN),
@@ -1405,7 +1314,7 @@ pub(crate) mod tests {
                 .bootstrap_admin("admin", USER_PASS)
                 .await
                 .expect("bootstrap");
-            mk_user_with_role(&t.store, "plain", "reader-role", "read").await;
+            mk_user_with_role(&t.store, "plain", "reader-role", "*", "repo.read").await;
 
             let cookie = t
                 .svc
@@ -1422,7 +1331,7 @@ pub(crate) mod tests {
                 "impersonating a non-admin produced an admin principal"
             );
             assert!(
-                p.can("maven-central", ACTION_READ),
+                p.can("maven-central", REPO_READ),
                 "impersonated principal lost the target's own read access"
             );
 
@@ -1464,9 +1373,16 @@ pub(crate) mod tests {
         async fn approvers_for() {
             let t = new_test_service().await;
 
-            mk_user_with_role(&t.store, "reader", "reader-role", "read").await;
-            mk_user_with_role(&t.store, "approver", "approver-role", "read,approve").await;
-            mk_user_with_role(&t.store, "gone", "gone-role", "read,approve").await;
+            mk_user_with_role(&t.store, "reader", "reader-role", "*", "repo.read").await;
+            mk_user_with_role(
+                &t.store,
+                "approver",
+                "approver-role",
+                "*",
+                "repo.read,repo.approve",
+            )
+            .await;
+            mk_user_with_role(&t.store, "gone", "gone-role", "*", "repo.read,repo.approve").await;
             // A scoped approver on maven only, to prove the repository argument is used.
             let hash = hash_password(USER_PASS).unwrap();
             let scoped = t
@@ -1491,7 +1407,7 @@ pub(crate) mod tests {
                 .add_permission(meta::Permission {
                     role_id: role.id,
                     repo_pattern: "maven-*".into(),
-                    actions: "approve".into(),
+                    actions: "repo.approve".into(),
                     ..Default::default()
                 })
                 .await

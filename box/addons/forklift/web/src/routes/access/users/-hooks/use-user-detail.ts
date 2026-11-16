@@ -8,7 +8,7 @@ import { openApiQueryOptions } from "@/query/v1/openapi-query-options";
 // per-user endpoint, so the user comes out of the list. The role list is needed
 // separately because the page offers roles the user does *not* hold, which the
 // user record alone cannot supply.
-export function useUserDetail(userId: number) {
+export function useUserDetail(userId: number, { includeRoles = true }: { includeRoles?: boolean } = {}) {
   const [actionError, setActionError] = useState("");
   const enabled = Number.isFinite(userId);
 
@@ -24,7 +24,7 @@ export function useUserDetail(userId: number) {
   });
   const rolesQuery = useQuery({
     ...openApiQueryOptions.listRoles(),
-    enabled,
+    enabled: enabled && includeRoles,
     meta: { suppressGlobalErrorToast: true },
   });
   const tokensQuery = useQuery({
@@ -40,7 +40,7 @@ export function useUserDetail(userId: number) {
       getErrorMessageIfAny(usersQuery.error) ||
       getErrorMessageIfAny(rolesQuery.error) ||
       getErrorMessageIfAny(tokensQuery.error),
-    isLoading: usersQuery.isPending || rolesQuery.isPending || tokensQuery.isPending,
+    isLoading: usersQuery.isPending || (includeRoles && rolesQuery.isPending) || tokensQuery.isPending,
     roles: rolesQuery.data ?? [],
     tokens: tokensQuery.data ?? [],
     user: usersQuery.data?.find((candidate) => candidate.id === userId),

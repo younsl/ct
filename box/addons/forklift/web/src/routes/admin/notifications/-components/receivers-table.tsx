@@ -1,13 +1,14 @@
 import { useNavigate } from "@tanstack/react-router";
 
 import { Badge } from "@/components/app-ui/badge";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { Button } from "@/components/ui/button";
 import { DataTable, type ColumnDef } from "@/components/app-ui/table";
 import { useDateTime, useTranslation } from "@/lib/i18n";
 
 import type { Receiver } from "@/services/v1/openapi-types";
 
-export function ReceiversTable({ receivers }: { receivers: Receiver[] }) {
+export function ReceiversTable({ receivers, canWrite }: { receivers: Receiver[]; canWrite: boolean }) {
   const { t } = useTranslation();
   const fmtDate = useDateTime();
   const navigate = useNavigate();
@@ -68,7 +69,9 @@ export function ReceiversTable({ receivers }: { receivers: Receiver[] }) {
         return repositories.length === 0 ? (
           <span className="text-muted-foreground">0</span>
         ) : (
-          <Badge variant="outline" title={repositories.join(", ")}>{repositories.length}</Badge>
+          <HintTooltip content={repositories.join(", ")}>
+            <Badge variant="outline" tabIndex={0}>{repositories.length}</Badge>
+          </HintTooltip>
         );
       },
     },
@@ -82,9 +85,9 @@ export function ReceiversTable({ receivers }: { receivers: Receiver[] }) {
           <Badge variant="outline">{t("common.status.disabled")}</Badge>
         ),
     },
-    {
+    ...(canWrite ? [{
       id: "actions",
-      cell: ({ row }) => (
+      cell: ({ row }: { row: { original: Receiver } }) => (
         <div className="flex min-w-0 items-center justify-end gap-2 max-sm:flex-wrap">
           <Button
             variant="outline"
@@ -97,7 +100,7 @@ export function ReceiversTable({ receivers }: { receivers: Receiver[] }) {
           </Button>
         </div>
       ),
-    },
+    } satisfies ColumnDef<Receiver>] : []),
   ];
 
   return (

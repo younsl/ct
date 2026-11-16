@@ -114,16 +114,12 @@ pub(super) async fn search(
         !authz_on
             || principal
                 .as_ref()
-                .is_some_and(|p| p.can(name, auth::ACTION_READ))
+                .is_some_and(|p| p.can(name, auth::REPO_READ))
     };
-    let can_see_approvals = !authz_on
-        || principal
-            .as_ref()
-            .is_some_and(|p| p.is_admin() || p.can_approve_any() || p.can_audit_any());
-    let can_see_admin_reads = !authz_on
-        || principal
-            .as_ref()
-            .is_some_and(|p| p.is_admin() || p.can_audit_any());
+    let holds = |perm: &str| !authz_on || principal.as_ref().is_some_and(|p| p.has(perm));
+    let can_see_approvals = holds(auth::APPROVAL_READ) || holds(auth::REPO_APPROVE);
+    let can_see_users = holds(auth::USER_READ);
+    let can_see_roles = holds(auth::ROLE_READ);
 
     let mut out = SearchResultDTO {
         query: q.clone(),
@@ -245,7 +241,7 @@ pub(super) async fn search(
         }
     }
 
-    if can_see_admin_reads {
+    if can_see_users {
         let users = match h.store.list_users().await {
             Ok(users) => users,
             Err(err) => return map_error(err),
@@ -267,7 +263,9 @@ pub(super) async fn search(
         }
         out.users = Some(matched);
         out.counts.insert("users".to_string(), count);
+    }
 
+    if can_see_roles {
         let roles = match h.store.list_roles().await {
             Ok(roles) => roles,
             Err(err) => return map_error(err),
@@ -346,7 +344,7 @@ pub(crate) mod tests {
             "pw123456",
             "npm-reader",
             "npmjs",
-            r#""read""#,
+            r#""repo.read""#,
         )
         .await;
         mk_role_user(
@@ -355,7 +353,7 @@ pub(crate) mod tests {
             "pw123456",
             "auditor2",
             "*",
-            r#""read","audit""#,
+            r#""repo.read","user.read","role.read","approval.read""#,
         )
         .await;
 

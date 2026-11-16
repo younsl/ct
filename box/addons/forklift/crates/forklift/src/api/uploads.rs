@@ -50,7 +50,7 @@ pub(super) async fn receive(
     };
     // Hide repositories the caller cannot read; disclose an existing readable
     // repository but deny upload when write is missing.
-    if h.authz.is_some() && !principal.can(&repository.name, auth::ACTION_READ) {
+    if h.authz.is_some() && !principal.can(&repository.name, auth::REPO_READ) {
         return write_upload_problem(&problem(
             "repository-not-found",
             "Repository not found",
@@ -59,7 +59,7 @@ pub(super) async fn receive(
             "The repository was not found",
         ));
     }
-    if h.authz.is_some() && !principal.can(&repository.name, auth::ACTION_WRITE) {
+    if h.authz.is_some() && !principal.can(&repository.name, auth::REPO_WRITE) {
         return write_upload_problem(&problem(
             "forbidden",
             "Upload forbidden",
@@ -95,7 +95,7 @@ pub(super) async fn receive(
         uploader.max_request_bytes().max(0) as usize,
     ));
     let allow_maven_replace =
-        h.authz.is_none() || principal.can(&repository.name, auth::ACTION_DELETE);
+        h.authz.is_none() || principal.can(&repository.name, auth::REPO_DELETE);
     let outcome = uploader
         .receive_authorized(
             &repository,
@@ -208,7 +208,7 @@ pub(super) async fn get(
     let principal = auth::from_request_parts(&parts);
     let readable = principal
         .as_ref()
-        .is_some_and(|p| h.authz.is_none() || p.can(&repository.name, auth::ACTION_READ));
+        .is_some_and(|p| h.authz.is_none() || p.can(&repository.name, auth::REPO_READ));
     if !readable {
         return not_found();
     }
@@ -317,7 +317,7 @@ pub(super) async fn delete_publication(
 ) -> Response {
     let (parts, _) = request.into_parts();
     let (repository, principal) = match h
-        .authorize_publication_mutation(&parts, &id, auth::ACTION_DELETE)
+        .authorize_publication_mutation(&parts, &id, auth::REPO_DELETE)
         .await
     {
         Ok(pair) => pair,
@@ -364,7 +364,7 @@ pub(super) async fn yank_publication(
 ) -> Response {
     let (parts, body) = request.into_parts();
     let (repository, principal) = match h
-        .authorize_publication_mutation(&parts, &id, auth::ACTION_WRITE)
+        .authorize_publication_mutation(&parts, &id, auth::REPO_WRITE)
         .await
     {
         Ok(pair) => pair,
@@ -433,8 +433,8 @@ impl Handler {
             return Err(Box::new(auth::unauthorized()));
         };
         if self.authz.is_some()
-            && (!principal.can(&repository.name, auth::ACTION_WRITE)
-                || (require_delete && !principal.can(&repository.name, auth::ACTION_DELETE)))
+            && (!principal.can(&repository.name, auth::REPO_WRITE)
+                || (require_delete && !principal.can(&repository.name, auth::REPO_DELETE)))
         {
             return Err(Box::new(write_upload_problem(&problem(
                 "forbidden",
@@ -1137,9 +1137,9 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn upload_lifecycle_authorization() {
             let h = upload_api_harness(true).await;
-            mk_upload_user(&h.store, "writer", "read,write").await;
-            mk_upload_user(&h.store, "replacer", "read,write,delete").await;
-            mk_upload_user(&h.store, "reader", "read").await;
+            mk_upload_user(&h.store, "writer", "repo.read,repo.write").await;
+            mk_upload_user(&h.store, "replacer", "repo.read,repo.write,repo.delete").await;
+            mk_upload_user(&h.store, "reader", "repo.read").await;
 
             let commit = format!(
                 "/repositories/{}/uploads/missing-upload/commit",
@@ -1231,8 +1231,8 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn publication_lifecycle_authorization() {
             let h = upload_api_harness(true).await;
-            mk_upload_user(&h.store, "writer", "read,write").await;
-            mk_upload_user(&h.store, "deleter", "read,delete").await;
+            mk_upload_user(&h.store, "writer", "repo.read,repo.write").await;
+            mk_upload_user(&h.store, "deleter", "repo.read,repo.delete").await;
 
             let delete_path = format!(
                 "/repositories/{}/publications/missing-publication",

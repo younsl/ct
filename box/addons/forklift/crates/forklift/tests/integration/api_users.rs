@@ -65,7 +65,7 @@ async fn robot_account_create() {
         .admin_do(
             Method::POST,
             &format!("/users/{bot_id}/tokens"),
-            r#"{"name":"ci","description":"ci token","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"720h"}"#,
+            r#"{"name":"ci","description":"ci token","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"720h"}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -108,7 +108,7 @@ async fn user_admin_lifecycle() {
         .admin_do(
             Method::POST,
             &format!("/roles/{role_id}/permissions"),
-            r#"{"repo_pattern":"*","actions":["read"]}"#,
+            r#"{"repo_pattern":"*","actions":["repo.read"]}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -147,7 +147,7 @@ async fn user_admin_lifecycle() {
     assert!(
         readers["permissions"].as_array().map(Vec::len) == Some(1)
             && readers["permissions"][0]["repo_pattern"] == "*"
-            && readers["permissions"][0]["actions"][0] == "read",
+            && readers["permissions"][0]["actions"][0] == "repo.read",
         "readers = {readers}"
     );
     assert_eq!(
@@ -225,7 +225,7 @@ async fn user_token_admin_lifecycle() {
         .admin_do(
             Method::POST,
             &format!("/users/{user_id}/tokens"),
-            r#"{"name":"ci","description":"dev1 ci","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"720h"}"#,
+            r#"{"name":"ci","description":"dev1 ci","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"720h"}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -256,7 +256,7 @@ async fn user_token_admin_lifecycle() {
         .admin_do(
             Method::POST,
             &format!("/users/{}/tokens", user_id + 9999),
-            r#"{"name":"x","description":"x","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"1h"}"#,
+            r#"{"name":"x","description":"x","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"1h"}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::NOT_FOUND, "{}", resp.text());
@@ -303,7 +303,7 @@ async fn user_token_rbac() {
         .admin_do(
             Method::POST,
             &format!("/users/{user_id}/tokens"),
-            r#"{"name":"ci","description":"d","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"1h"}"#,
+            r#"{"name":"ci","description":"d","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"1h"}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -332,7 +332,7 @@ async fn user_token_rbac() {
         .admin_do(
             Method::POST,
             &format!("/roles/{aud_role_id}/permissions"),
-            r#"{"repo_pattern":"*","actions":["read","audit"]}"#,
+            r#"{"actions":["user.read"]}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -358,7 +358,7 @@ async fn user_token_rbac() {
             "pw123456",
             Method::POST,
             &tokens_url,
-            r#"{"name":"x","description":"d","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"1h"}"#,
+            r#"{"name":"x","description":"d","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"1h"}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::FORBIDDEN, "{}", resp.text());
@@ -429,7 +429,7 @@ async fn protected_admin_cannot_be_disabled() {
         .admin_do(
             Method::POST,
             &format!("/roles/{role_id}/permissions"),
-            r#"{"repo_pattern":"*","actions":["admin"]}"#,
+            r#"{"actions":["*"]}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -525,7 +525,7 @@ async fn create_role_with_permissions() {
         .admin_do(
             Method::POST,
             "/roles",
-            r#"{"name":"maven-readers","description":"read maven","permissions":[{"repo_pattern":"maven-*","actions":["read"]}]}"#,
+            r#"{"name":"maven-readers","description":"read maven","permissions":[{"repo_pattern":"maven-*","actions":["repo.read"]}]}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -533,7 +533,7 @@ async fn create_role_with_permissions() {
     assert!(
         role["permissions"].as_array().map(Vec::len) == Some(1)
             && role["permissions"][0]["repo_pattern"] == "maven-*"
-            && role["permissions"][0]["actions"][0] == "read",
+            && role["permissions"][0]["actions"][0] == "repo.read",
         "role = {role}, want one maven-* read permission"
     );
 

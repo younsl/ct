@@ -141,7 +141,7 @@ paths:
               schema: { $ref: "#/components/schemas/Announcement" }
     put:
       tags: [session]
-      summary: Replace the site-wide announcement (admin)
+      summary: Replace the site-wide announcement (system.write)
       description: >
         The body is stored as Markdown source verbatim; rendering and
         sanitisation are the UI's job. An empty body clears the announcement.
@@ -166,9 +166,9 @@ paths:
       description: >
         Powers the sidebar search. Every section is narrowed to what the caller
         may see; repositories, artifacts and artifact labels filter per-repo by
-        the read action,
-        approvals require approve or audit rights, users and roles require
-        admin or audit rights. Sections without access are null, permitted
+        repo.read,
+        approvals require approval.read or repo.approve, users require
+        user.read and roles require role.read. Sections without access are null, permitted
         sections with no match are empty arrays.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
@@ -202,7 +202,7 @@ paths:
                 items: { $ref: "#/components/schemas/RepositoryListItem" }
     post:
       tags: [repositories]
-      summary: Create a repository
+      summary: Create a repository (repo.admin on the new name)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -237,7 +237,7 @@ paths:
         "404": { description: Not found }
     put:
       tags: [repositories]
-      summary: Update a repository's upstream URL and config (admin)
+      summary: Update a repository's upstream URL and config (repo.admin)
       description: >
         PUT replaces the whole resource, so a proxy must always resend its
         upstream_url; omitting it returns 400 instead of silently clearing it.
@@ -261,7 +261,7 @@ paths:
         "404": { description: Not found }
     delete:
       tags: [repositories]
-      summary: Delete a repository
+      summary: Delete a repository (repo.admin)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Deleted }
@@ -270,7 +270,7 @@ paths:
   /api/v1/repositories/{id}/security:
     put:
       tags: [repositories]
-      summary: Update a repository's security policy (admin or security action)
+      summary: Update a repository's security policy (repo.security)
       description: >
         Replaces the security-policy sections of a repository's config: age
         policy, approval policy, vulnerability policy, license policy, IP ACL
@@ -303,7 +303,7 @@ paths:
   /api/v1/repositories/{id}/audit-logs:
     get:
       tags: [repositories]
-      summary: List a repository's audit log (admin), newest first
+      summary: List a repository's audit log (audit.read), newest first
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -341,7 +341,7 @@ paths:
   /api/v1/repositories/check-upstream:
     post:
       tags: [repositories]
-      summary: Probe an upstream URL for reachability before creating a proxy (admin)
+      summary: Probe an upstream URL for reachability before creating a proxy (repo.admin)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -461,7 +461,7 @@ paths:
         "404": { description: Not found }
     delete:
       tags: [repositories]
-      summary: Delete one artifact, or purge all unmanaged artifacts in the repository (admin)
+      summary: Delete one artifact, or purge all unmanaged artifacts in the repository (repo.admin)
       description: >
         With a path query parameter, deletes one unmanaged artifact. Without it,
         purges unmanaged repositories; managed publications require lifecycle endpoints.
@@ -631,7 +631,7 @@ paths:
   /api/v1/repositories/{id}/disabled:
     post:
       tags: [repositories]
-      summary: Take a repository offline or back online (admin)
+      summary: Take a repository offline or back online (repo.admin)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -770,7 +770,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: integer } }
     post:
       tags: [repositories]
-      summary: Delete many artifacts in one request (admin)
+      summary: Delete many artifacts in one request (repo.admin)
       description: >
         Each path is deleted and audited as a single delete would be, and a path
         that refuses is reported in failed rather than failing the batch. There is
@@ -856,7 +856,7 @@ paths:
   /api/v1/repositories/{id}/permissions:
     get:
       tags: [repositories]
-      summary: List role permissions granting access to this repository (admin/auditor)
+      summary: List role permissions granting access to this repository (audit.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -872,7 +872,7 @@ paths:
   /api/v1/repositories/{id}/tokens:
     get:
       tags: [repositories]
-      summary: List personal access tokens that can reach this repository (admin/auditor)
+      summary: List personal access tokens that can reach this repository (audit.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -914,6 +914,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/IssuedToken" }
+        "403": { description: Called with a token, token management needs a signed-in session }
         "409": { description: Token limit reached (max 3 per user) }
   /api/v1/tokens/{id}:
     parameters:
@@ -931,6 +932,7 @@ paths:
       responses:
         "204": { description: Updated }
         "400": { description: Validation error }
+        "403": { description: Called with a token, token management needs a signed-in session }
         "404": { description: Not found }
     delete:
       tags: [tokens]
@@ -938,10 +940,11 @@ paths:
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Revoked }
+        "403": { description: Called with a token, token management needs a signed-in session }
   /api/v1/users:
     get:
       tags: [users]
-      summary: List users (admin)
+      summary: List users (user.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -953,7 +956,7 @@ paths:
                 items: { $ref: "#/components/schemas/User" }
     post:
       tags: [users]
-      summary: Create a local user or robot account (admin)
+      summary: Create a local user or robot account (user.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         content:
@@ -972,7 +975,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: integer } }
     put:
       tags: [users]
-      summary: Update a user (admin) - reset password, toggle disabled or lockout, or unlock
+      summary: Update a user (user.write) - reset password, toggle disabled or lockout, or unlock
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         content:
@@ -988,7 +991,7 @@ paths:
         "404": { description: Not found }
     delete:
       tags: [users]
-      summary: Delete a user (admin); deleting your own account is rejected
+      summary: Delete a user (user.write); deleting your own account is rejected
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Deleted }
@@ -996,7 +999,7 @@ paths:
   /api/v1/users/{id}/impersonate:
     post:
       tags: [users]
-      summary: Sign in as this user (admin, interactive session only)
+      summary: Sign in as this user (user.write, interactive session only, never a user holding more than the caller)
       description: >
         Replaces the caller's session cookie with one that acts as the target
         user, carrying only that user's permissions. The reason is recorded in
@@ -1025,7 +1028,7 @@ paths:
   /api/v1/users/{id}/roles:
     post:
       tags: [users]
-      summary: Assign a role to a user (admin)
+      summary: Assign a role to a user (user.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1038,7 +1041,7 @@ paths:
   /api/v1/users/{id}/roles/{roleID}:
     delete:
       tags: [users]
-      summary: Remove a role from a user (admin)
+      summary: Remove a role from a user (user.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1051,7 +1054,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: integer } }
     get:
       tags: [tokens]
-      summary: List a user's personal access tokens (admin or auditor)
+      summary: List a user's personal access tokens (user.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -1064,7 +1067,7 @@ paths:
         "404": { description: Not found }
     post:
       tags: [tokens]
-      summary: Create a personal access token for a user (admin); plaintext returned once
+      summary: Create a personal access token for a user (user.write); plaintext returned once
       description: A user may hold at most 3 access tokens; revoke one to free a slot.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
@@ -1086,7 +1089,7 @@ paths:
       - { name: tokenID, in: path, required: true, schema: { type: integer } }
     patch:
       tags: [tokens]
-      summary: Replace a user's token scopes (admin)
+      summary: Replace a user's token scopes (user.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1099,14 +1102,14 @@ paths:
         "404": { description: Not found }
     delete:
       tags: [tokens]
-      summary: Revoke a user's personal access token (admin)
+      summary: Revoke a user's personal access token (user.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Revoked }
   /api/v1/roles:
     get:
       tags: [roles]
-      summary: List roles with their permissions (admin)
+      summary: List roles with their permissions (role.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -1118,7 +1121,7 @@ paths:
                 items: { $ref: "#/components/schemas/Role" }
     post:
       tags: [roles]
-      summary: Create a role (admin)
+      summary: Create a role (role.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1136,7 +1139,7 @@ paths:
   /api/v1/roles/{id}:
     delete:
       tags: [roles]
-      summary: Delete a role (admin)
+      summary: Delete a role (role.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1146,7 +1149,7 @@ paths:
   /api/v1/roles/{id}/permissions:
     post:
       tags: [roles]
-      summary: Add a permission to a role (admin)
+      summary: Add a permission to a role (role.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1161,12 +1164,12 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Permission" }
-        "400": { description: Missing repo_pattern or invalid action }
+        "400": { description: Invalid permission entry }
         "409": { description: Role managed by declarative RBAC policy }
   /api/v1/roles/{id}/permissions/{permID}:
     delete:
       tags: [roles]
-      summary: Remove a permission from a role (admin)
+      summary: Remove a permission from a role (role.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1177,7 +1180,7 @@ paths:
   /api/v1/approvals:
     get:
       tags: [approvals]
-      summary: List package approval requests and decisions (admin or approve permission), newest first
+      summary: List package approval requests and decisions (approval.read or repo.approve), newest first
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: repo, in: query, schema: { type: string } }
@@ -1197,7 +1200,7 @@ paths:
         "400": { description: Invalid status or regex }
     post:
       tags: [approvals]
-      summary: Manually approve or reject a package (admin or approve permission on the repository), even before any request
+      summary: Manually approve or reject a package (repo.approve on the repository), even before any request
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1216,7 +1219,7 @@ paths:
   /api/v1/approvals/count:
     get:
       tags: [approvals]
-      summary: Count approval rows (admin or approve permission), for the pending badge
+      summary: Count approval rows (approval.read or repo.approve), for the pending badge
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: repo, in: query, schema: { type: string } }
@@ -1243,7 +1246,7 @@ paths:
   /api/v1/approvals/approve-all:
     post:
       tags: [approvals]
-      summary: Approve pending packages in one proxy or hosted repository (admin or approve permission on the repository)
+      summary: Approve pending packages in one proxy or hosted repository (repo.approve on the repository)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1276,7 +1279,7 @@ paths:
   /api/v1/approvals/{id}/approve:
     post:
       tags: [approvals]
-      summary: Approve a package (admin or approve permission on the repository)
+      summary: Approve a package (repo.approve on the repository)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1296,7 +1299,7 @@ paths:
   /api/v1/approvals/{id}/reject:
     post:
       tags: [approvals]
-      summary: Reject a package (admin or approve permission on the repository); cached content stops being served immediately
+      summary: Reject a package (repo.approve on the repository); cached content stops being served immediately
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1316,7 +1319,7 @@ paths:
   /api/v1/version-denies:
     get:
       tags: [approvals]
-      summary: List per-version deny entries (admin or approve permission), newest first
+      summary: List per-version deny entries (approval.read or repo.approve), newest first
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: repo, in: query, schema: { type: string } }
@@ -1330,7 +1333,7 @@ paths:
               schema: { $ref: "#/components/schemas/VersionDenyList" }
     post:
       tags: [approvals]
-      summary: Deny one exact package version in a proxy or hosted repository (admin or approve permission on the repository); overrides package-level approval and blocks cached copies immediately
+      summary: Deny one exact package version in a proxy or hosted repository (repo.approve on the repository); overrides package-level approval and blocks cached copies immediately
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1349,7 +1352,7 @@ paths:
   /api/v1/version-denies/{id}:
     delete:
       tags: [approvals]
-      summary: Remove a deny entry (admin or approve permission on the repository)
+      summary: Remove a deny entry (repo.approve on the repository)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1360,7 +1363,7 @@ paths:
   /api/v1/group-mappings:
     get:
       tags: [group-mappings]
-      summary: List Keycloak group-to-role mappings (admin)
+      summary: List Keycloak group-to-role mappings (role.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -1372,7 +1375,7 @@ paths:
                 items: { $ref: "#/components/schemas/GroupMapping" }
     post:
       tags: [group-mappings]
-      summary: Map a Keycloak group to a role (admin)
+      summary: Map a Keycloak group to a role (role.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1385,7 +1388,7 @@ paths:
   /api/v1/group-mappings/{id}:
     delete:
       tags: [group-mappings]
-      summary: Delete a group-to-role mapping (admin)
+      summary: Delete a group-to-role mapping (role.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1396,7 +1399,7 @@ paths:
   /api/v1/ha:
     get:
       tags: [ha]
-      summary: High-availability/leadership status (admin)
+      summary: High-availability/leadership status (system.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -1407,7 +1410,7 @@ paths:
   /api/v1/storage:
     get:
       tags: [ha]
-      summary: Object-storage overview — backend, blob footprint, cluster metrics (admin)
+      summary: Object-storage overview — backend, blob footprint, cluster metrics (system.read)
       description: >
         Reports the active storage backend and forklift's deduplicated blob
         footprint (blob_count/blob_bytes), split by repository format
@@ -1428,7 +1431,7 @@ paths:
     get:
       operationId: getStorageHealth
       tags: [ha]
-      summary: Object-store reachability checks from the last hour (admin)
+      summary: Object-store reachability checks from the last hour (system.read)
       description: >
         A HeadBucket check runs on every pod once a minute and the pod keeps the
         last 60 results in memory, so the history describes the pod that served
@@ -1444,7 +1447,7 @@ paths:
     get:
       operationId: listStorageMigrations
       tags: [ha]
-      summary: Storage migration history, newest first (admin)
+      summary: Storage migration history, newest first (system.read)
       description: >
         Lists the forklift migrate-storage runs recorded in this object store,
         succeeded, failed or dry, at most 100. Empty for the fs backend.
@@ -1460,7 +1463,7 @@ paths:
     get:
       operationId: getStorageMigration
       tags: [ha]
-      summary: One storage migration run with every preflight and postflight check (admin)
+      summary: One storage migration run with every preflight and postflight check (system.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string }, description: Record id, e.g. 20261003T010203Z-0123abcd }
@@ -1475,7 +1478,7 @@ paths:
   /api/v1/ha/step-down:
     post:
       tags: [ha]
-      summary: Ask the leader to step down for a manual failover (admin)
+      summary: Ask the leader to step down for a manual failover (system.write)
       description: >
         Triggers a controlled failover: the current leader releases its Lease so
         a standby is elected. Returns 409 when this instance is not the leader or
@@ -1492,7 +1495,7 @@ paths:
   /api/v1/notification/receivers:
     get:
       tags: [notification]
-      summary: List notification receivers (admin/auditor)
+      summary: List notification receivers (notification.read)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -1504,7 +1507,7 @@ paths:
                 items: { $ref: "#/components/schemas/Receiver" }
     post:
       tags: [notification]
-      summary: Create a notification receiver (admin)
+      summary: Create a notification receiver (notification.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1522,7 +1525,7 @@ paths:
   /api/v1/notification/receivers/{id}:
     put:
       tags: [notification]
-      summary: Update a notification receiver (admin)
+      summary: Update a notification receiver (notification.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1542,7 +1545,7 @@ paths:
         "409": { description: Receiver name already exists }
     delete:
       tags: [notification]
-      summary: Delete a notification receiver (admin)
+      summary: Delete a notification receiver (notification.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
@@ -1552,7 +1555,7 @@ paths:
   /api/v1/notification/receivers/{id}/test:
     post:
       tags: [notification]
-      summary: Send a test alarm to a receiver's webhook (admin)
+      summary: Send a test alarm to a receiver's webhook (notification.write)
       description: Delivers a test notification to the receiver's stored webhook URL and reports whether it succeeded.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
@@ -1570,7 +1573,7 @@ paths:
   /api/v1/notification/test:
     post:
       tags: [notification]
-      summary: Send a test alarm to an arbitrary webhook URL (admin)
+      summary: Send a test alarm to an arbitrary webhook URL (notification.write)
       description: Delivers a test notification to the URL in the request body, for verifying a webhook before the receiver is saved.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
@@ -1592,7 +1595,7 @@ paths:
       - { name: id, in: path, required: true, schema: { type: integer } }
     get:
       tags: [notification]
-      summary: Preview a repository's sample approval alarm (admin)
+      summary: Preview a repository's sample approval alarm (notification.write)
       description: Returns the sample alarm payload this repository would send and the receivers it targets, without delivering anything.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
@@ -1605,7 +1608,7 @@ paths:
         "503": { description: Notifications are not configured }
     post:
       tags: [notification]
-      summary: Send a sample approval alarm to a repository's selected receivers (admin)
+      summary: Send a sample approval alarm to a repository's selected receivers (notification.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -1642,7 +1645,7 @@ paths:
     post:
       tags: [insights]
       operationId: refreshInsights
-      summary: Run the security analysis now (admin or security)
+      summary: Run the security analysis now (insights.write)
       description: The run is detached from the request; poll GET /api/v1/insights until running is false.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
@@ -1655,14 +1658,14 @@ paths:
                 required: [started]
                 properties:
                   started: { type: boolean }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "409": { description: An analysis is already running, or this instance is not the leader }
         "503": { description: Security insights are disabled }
   /api/v1/insights/settings:
     get:
       tags: [insights]
       operationId: getInsightSettings
-      summary: Security insight settings (admin or security)
+      summary: Security insight settings (insights.write)
       description: >
         When the analysis runs and when its alarm goes out. Before anybody saves,
         the defaults apply: analysis every FORKLIFT_INSIGHTS_INTERVAL, no scheduled alarm.
@@ -1673,12 +1676,12 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/InsightSettings" }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "503": { description: Security insights are disabled }
     put:
       tags: [insights]
       operationId: updateInsightSettings
-      summary: Save security insight settings (admin or security)
+      summary: Save security insight settings (insights.write)
       description: >
         Every field is optional; an omitted field keeps its stored value. Saved
         settings take effect on the leader within a minute.
@@ -1695,13 +1698,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/InsightSettings" }
         "400": { description: Invalid interval, cron expression, timezone, receiver name or severity }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "503": { description: Security insights are disabled }
   /api/v1/insights/notification/preview:
     get:
       tags: [insights]
       operationId: getInsightsNotificationPreview
-      summary: Render the security insight alarm without sending it (admin or security)
+      summary: Render the security insight alarm without sending it (insights.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -1710,13 +1713,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/InsightsAlarmPreview" }
         "400": { description: No analysis has run yet }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "503": { description: Security insights or notifications are not configured }
   /api/v1/insights/notification/send:
     post:
       tags: [insights]
       operationId: sendInsightsNotification
-      summary: Send the security insight alarm to chosen receivers now (admin or security)
+      summary: Send the security insight alarm to chosen receivers now (insights.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -1737,13 +1740,13 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/NotificationSampleReport" }
         "400": { description: No receiver chosen, or no analysis has run yet }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "503": { description: Security insights or notifications are not configured }
   /api/v1/insights/notification/history:
     get:
       tags: [insights]
       operationId: getInsightsNotificationHistory
-      summary: Recent deliveries of the security insight alarm (admin or security)
+      summary: Recent deliveries of the security insight alarm (insights.write)
       description: >
         Every delivery attempt, scheduled or manual, one per receiver, kept for
         90 days. A scheduled run that skips the alarm sends nothing and records nothing.
@@ -1757,7 +1760,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AlarmHistory" }
         "400": { description: days out of range }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "503": { description: Security insights are disabled }
   /api/v1/insights/checks/{id}/history:
     get:
@@ -1767,7 +1770,7 @@ paths:
       description: >
         Each analyzer run records every check's status (with the acknowledgements
         then in force), severity and flagged count, kept for 90 days. Only
-        administrators, auditors and security reviewers may read it: the counts
+        holders of insights.read may read it: the counts
         span every repository and cannot be narrowed.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
@@ -1796,7 +1799,7 @@ paths:
       description: >
         The report lists the first 100 flagged items of each finding. This pages
         through every stored one of the latest run (at most 10000 per finding),
-        worst first. Only administrators, auditors and security reviewers may
+        worst first. Only holders of insights.read may
         read it, the same callers the check page is for.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       parameters:
@@ -1827,7 +1830,7 @@ paths:
     put:
       tags: [insights]
       operationId: acknowledgeInsightCheck
-      summary: Acknowledge a failing check (admin or security)
+      summary: Acknowledge a failing check (insights.write)
       description: >
         Takes the check out of the score, the severity counts and the alarms
         until days pass (30 by default, at most 365) or the check flags more
@@ -1850,17 +1853,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/InsightAck" }
         "400": { description: Missing note, days out of range, no analysis yet, or the check is passing }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "404": { description: No such check }
         "503": { description: Security insights are disabled }
     delete:
       tags: [insights]
       operationId: unacknowledgeInsightCheck
-      summary: Remove a check's acknowledgement (admin or security)
+      summary: Remove a check's acknowledgement (insights.write)
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Removed }
-        "403": { description: Requires admin or security permission }
+        "403": { description: Requires insights.write }
         "404": { description: The check has no acknowledgement }
   /api/v1/coverage:
     get:
@@ -1968,7 +1971,7 @@ paths:
     get:
       tags: [coverage]
       operationId: getCoverageProjectPipeline
-      summary: A project's GitLab CI definitions on one ref (admin)
+      summary: A project's GitLab CI definitions on one ref (coverage.read)
       description: >
         Returns only files matching the GitLab CI pattern, which is the whole
         security boundary of this endpoint: it shows how a project builds without
@@ -1996,7 +1999,7 @@ paths:
     put:
       tags: [coverage]
       operationId: updateCoverageProjectMute
-      summary: Mute a project or one of its checks (admin)
+      summary: Mute a project or one of its checks (coverage.write)
       description: >
         Muting every check takes the project out of coverage entirely. Muting one
         of them - "ci" or "registry" - leaves the project in the measurement and
@@ -2028,7 +2031,7 @@ paths:
     get:
       tags: [coverage]
       operationId: getCoverageSettings
-      summary: Coverage scan settings (admin)
+      summary: Coverage scan settings (coverage.read)
       description: >
         The GitLab access token is never returned: it comes from the environment
         and is deliberately absent from this surface and from the database.
@@ -2043,7 +2046,7 @@ paths:
     put:
       tags: [coverage]
       operationId: updateCoverageSettings
-      summary: Save coverage scan settings (admin)
+      summary: Save coverage scan settings (coverage.write)
       description: >
         Every field is optional; an omitted field keeps its stored value, so the
         console can save one panel without resetting the rest.
@@ -2065,7 +2068,7 @@ paths:
     post:
       tags: [coverage]
       operationId: postCheckHostCoverageSettings
-      summary: Check a forklift host as it is typed (admin)
+      summary: Check a forklift host as it is typed (coverage.write)
       description: >
         Reports whether the name is shaped like a forklift address and whether it
         resolves. Only the resolver is asked; nothing is sent to the host. The
@@ -2090,7 +2093,7 @@ paths:
     get:
       tags: [coverage]
       operationId: getCoverageGitlabCheck
-      summary: Check that the configured GitLab API answers and accepts the token (admin)
+      summary: Check that the configured GitLab API answers and accepts the token (coverage.write)
       description: >
         Calls /api/v4/version on the configured instance. A 200 proves the URL is
         reachable and the token is accepted; a 401 or 403 separates a rejected
@@ -2107,7 +2110,7 @@ paths:
     post:
       tags: [coverage]
       operationId: postScanCoverage
-      summary: Start a coverage scan now (admin)
+      summary: Start a coverage scan now (coverage.write)
       description: >
         Returns as soon as the scan is accepted; a full crawl takes minutes. Poll
         GET /api/v1/coverage and read scan_progress to follow it.
@@ -2124,7 +2127,7 @@ paths:
     get:
       tags: [coverage]
       operationId: getCoverageNotificationPreview
-      summary: Preview the coverage report alarm without sending it (admin)
+      summary: Preview the coverage report alarm without sending it (coverage.read)
       description: >
         Before the first scan there are no numbers to show, so the preview is
         built from a clearly marked sample and sample is true.
@@ -2140,7 +2143,7 @@ paths:
     post:
       tags: [coverage]
       operationId: postSendCoverageNotification
-      summary: Send the coverage report to its receivers now (admin)
+      summary: Send the coverage report to its receivers now (coverage.write)
       description: >
         A manual send ignores skip_when_full_coverage, since somebody asked for it.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
@@ -2156,7 +2159,7 @@ paths:
     get:
       tags: [coverage]
       operationId: getCoverageNotificationHistory
-      summary: Recent deliveries of the coverage report (admin)
+      summary: Recent deliveries of the coverage report (coverage.read)
       description: >
         Every delivery attempt, scheduled or manual, one per receiver, kept for
         90 days. A scheduled run skipped for full coverage records nothing.
@@ -2476,19 +2479,27 @@ components:
     PermissionCreate:
       type: object
       description: One grant as it is submitted - the same shape whether it arrives with a new role or is added to an existing one.
-      required: [repo_pattern, actions]
+      required: [actions]
       properties:
-        repo_pattern: { type: string, description: Repository glob such as * or maven-*. }
+        repo_pattern:
+          type: string
+          description: Repository glob such as * or maven-*. Required for repo.* permissions and empty for global ones.
         actions:
           type: array
-          items: { type: string, enum: [read, write, delete, approve, audit, security, admin] }
+          minItems: 1
+          description: Permissions of one kind, either all repo.* or all global.
+          items: { $ref: "#/components/schemas/PermissionName" }
+    PermissionName:
+      type: string
+      description: A permission named <category>.<verb>. repo.* permissions apply to repositories matching a pattern, the others to the whole instance, and * grants everything.
+      enum: ["repo.read", "repo.write", "repo.delete", "repo.approve", "repo.security", "repo.admin", "user.read", "user.write", "role.read", "role.write", "audit.read", "approval.read", "notification.read", "notification.write", "coverage.read", "coverage.write", "insights.read", "insights.write", "system.read", "system.write", "*"]
     Permission:
       type: object
-      description: One grant inside a role - a repository name pattern and the actions allowed on it.
+      description: One grant inside a role - repo.* permissions on a repository name pattern, or global permissions with an empty pattern.
       required: [actions, id, repo_pattern]
       properties:
         id: { type: integer }
-        repo_pattern: { type: string }
+        repo_pattern: { type: string, description: Empty for global permissions. }
         actions:
           type: array
           items: { type: string }
@@ -2576,10 +2587,14 @@ components:
         authenticated: { type: boolean }
         username: { type: string }
         source: { type: string, description: Principal source, local or oidc. }
-        admin: { type: boolean }
-        approver: { type: boolean }
-        auditor: { type: boolean }
-        security: { type: boolean, description: May edit repository security policy (age, approval, vulnerability, license, IP ACL, notification receivers). }
+        admin: { type: boolean, description: Holds *. }
+        approver: { type: boolean, description: Holds repo.approve on at least one repository. }
+        auditor: { type: boolean, description: Holds audit.read. }
+        security: { type: boolean, description: Holds repo.security on at least one repository. }
+        permissions:
+          type: array
+          description: Every permission the caller holds, repo.* ones counted when held on any repository.
+          items: { $ref: "#/components/schemas/PermissionName" }
         csrf_token: { type: string, description: Value for the X-CSRF-Token header on session-cookie mutations such as uploads. }
         impersonator:
           type: string
@@ -2843,12 +2858,18 @@ components:
               description: Scanned artifacts that are clean, i.e. carry no advisories.
     RepositoryCapabilities:
       type: object
-      required: [read, write, delete, upload]
+      required: [read, write, delete, upload, security, admin]
       properties:
         read: { type: boolean }
         write: { type: boolean }
         delete: { type: boolean }
         upload: { type: boolean }
+        security:
+          type: boolean
+          description: The caller holds repo.security on this repository.
+        admin:
+          type: boolean
+          description: The caller holds repo.admin on this repository.
     RepositoryCreate:
       type: object
       required: [name, format, type]
@@ -3474,18 +3495,20 @@ components:
 
     TokenScope:
       type: object
-      required: [repo_pattern, actions]
+      required: [actions]
       properties:
-        repo_pattern: { type: string, examples: ["maven-*"] }
+        repo_pattern:
+          type: string
+          examples: ["maven-*"]
+          description: Required for repo.* permissions and empty for global ones.
         actions:
           type: array
           minItems: 1
           description: >
-            The data-plane actions, plus audit - the one management-plane action
-            a token may carry. audit is read-only viewing of the admin surfaces,
-            so a leaked token still cannot decide approvals, edit policy or
-            manage accounts; approve, security and admin stay session-only.
-          items: { type: string, enum: [read, write, delete, audit] }
+            repo.read, repo.write, repo.delete and the global read permissions.
+            Decisions, administration and global writes stay session-only, so a
+            leaked token cannot approve packages, edit policy or manage accounts.
+          items: { type: string, enum: ["repo.read", "repo.write", "repo.delete", "user.read", "role.read", "audit.read", "approval.read", "notification.read", "coverage.read", "insights.read", "system.read"] }
     HAStatus:
       type: object
       required: [backend, database, enabled, identity, is_leader, leader, mode, role]

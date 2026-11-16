@@ -3,10 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::Error;
-use super::authz::{
-    ACTION_ADMIN, ACTION_APPROVE, ACTION_AUDIT, ACTION_DELETE, ACTION_READ, ACTION_SECURITY,
-    ACTION_WRITE,
-};
+use super::authz::{ALL, PermissionScope, permission, translate_legacy};
 use crate::meta;
 
 /// Subject prefix for grant (`g`) lines naming a user. A bare subject is treated
@@ -24,10 +21,13 @@ const SUBJECT_GROUP_PREFIX: &str = "group:";
 /// g, <subject>, <role>
 /// ```
 ///
-/// For permission (`p`) lines, `<resource>` is `repo` (or `*`), `<action>` is
-/// one of read|write|delete|approve|admin (or `*` meaning admin), `<object>` is
-/// a repository glob pattern, and `<effect>` is `allow` (the only effect
-/// forklift enforces; `deny` is rejected). For grant (`g`) lines, `<subject>` is
+/// For permission (`p`) lines, `<resource>.<action>` names a catalog permission
+/// (`repo, read` is `repo.read`, `user, read` is `user.read`) and `<effect>` is
+/// `allow` (the only effect forklift enforces; `deny` is rejected). `<object>`
+/// is a repository glob pattern for `repo` permissions and `*` for global ones.
+/// `*, *, *` grants everything. The pre-catalog `repo, audit` and
+/// `repo, admin, *` lines still parse, with a warning, into what they used to
+/// grant. For grant (`g`) lines, `<subject>` is
 /// `user:<name>`, `group:<name>`, or a bare name (treated as a user); groups map
 /// to Keycloak group claims.
 ///
@@ -49,13 +49,15 @@ pub fn parse_policy(text: &str) -> Result<meta::ManagedRBAC, Error> {
         let fields = split_csv(line);
         match fields[0].as_str() {
             "p" => {
-                let (role, pattern, action) = parse_permission_line(&fields)
+                let (role, entries) = parse_permission_line(&fields)
                     .map_err(|e| Error::Policy(format!("policy line {}: {e}", i + 1)))?;
                 role_seen.insert(role.clone());
                 let by_pattern = role_actions.entry(role).or_default();
-                let actions = by_pattern.entry(pattern).or_default();
-                if !actions.iter().any(|a| a == &action) {
-                    actions.push(action);
+                for (pattern, action) in entries {
+                    let actions = by_pattern.entry(pattern).or_default();
+                    if !actions.iter().any(|a| a == &action) {
+                        actions.push(action);
+                    }
                 }
             }
             "g" => {
@@ -95,14 +97,15 @@ pub fn parse_policy(text: &str) -> Result<meta::ManagedRBAC, Error> {
     })
 }
 
-/// Returns `(role, pattern, action)` for a permission line.
-fn parse_permission_line(fields: &[String]) -> Result<(String, String, String), String> {
+/// Returns the role and its `(pattern, permission)` entries for a permission
+/// line. Global permissions carry an empty pattern.
+fn parse_permission_line(fields: &[String]) -> Result<(String, Vec<(String, String)>), String> {
     if fields.len() < 5 || fields.len() > 6 {
         return Err("permission needs 'p, <role>, <resource>, <action>, <object>[, allow]'".into());
     }
     let role = fields[1].clone();
     let resource = fields[2].as_str();
-    let mut action = fields[3].clone();
+    let action = fields[3].as_str();
     let pattern = fields[4].clone();
     let effect = if fields.len() == 6 {
         fields[5].as_str()
@@ -112,21 +115,49 @@ fn parse_permission_line(fields: &[String]) -> Result<(String, String, String), 
     if role.is_empty() || pattern.is_empty() {
         return Err("role and object must not be empty".into());
     }
-    if resource != "repo" && resource != "*" {
-        return Err(format!("unsupported resource {resource:?} (want 'repo')"));
-    }
     if effect != "allow" {
         return Err(format!(
             "unsupported effect {effect:?} (forklift enforces allow only)"
         ));
     }
     if action == "*" {
-        action = ACTION_ADMIN.to_string();
+        if resource != "*" {
+            return Err(format!(
+                "'{resource}, *' is not a permission, grant each {resource}.* permission or use '*, *, *'"
+            ));
+        }
+        return Ok((role, vec![(String::new(), ALL.to_string())]));
     }
-    if !valid_role_action(&action) {
-        return Err(format!("invalid action {action:?}"));
+    let resource = if resource == "*" { "repo" } else { resource };
+    let name = format!("{resource}.{action}");
+    if let Some(def) = permission(&name) {
+        let legacy_superuser = name == super::authz::REPO_ADMIN && pattern == "*";
+        if !legacy_superuser {
+            return match def.scope {
+                PermissionScope::Repo => Ok((role, vec![(pattern, name)])),
+                PermissionScope::Global if pattern == "*" => {
+                    Ok((role, vec![(String::new(), name)]))
+                }
+                PermissionScope::Global => Err(format!(
+                    "{name} is a global permission, its object must be '*'"
+                )),
+            };
+        }
     }
-    Ok((role, pattern, action))
+    if resource != "repo" || !matches!(action, "audit" | "admin") {
+        return Err(format!("unknown permission {name:?}"));
+    }
+    let entries: Vec<(String, String)> = translate_legacy(&pattern, &[action.to_string()])
+        .into_iter()
+        .flat_map(|(p, acts)| acts.into_iter().map(move |a| (p.clone(), a)))
+        .collect();
+    tracing::warn!(
+        role = %role,
+        line = %format!("repo, {action}, {pattern}"),
+        grants = %entries.iter().map(|(_, a)| a.as_str()).collect::<Vec<_>>().join(","),
+        "deprecated policy permission, write the catalog permissions instead"
+    );
+    Ok((role, entries))
 }
 
 /// Returns `(subject, role)` for a grant line.
@@ -164,20 +195,6 @@ fn build_roles(
             }),
         })
         .collect()
-}
-
-/// Reports whether `action` is a grantable RBAC action.
-fn valid_role_action(action: &str) -> bool {
-    matches!(
-        action,
-        ACTION_READ
-            | ACTION_WRITE
-            | ACTION_DELETE
-            | ACTION_APPROVE
-            | ACTION_AUDIT
-            | ACTION_SECURITY
-            | ACTION_ADMIN
-    )
 }
 
 fn split_csv(line: &str) -> Vec<String> {
@@ -224,13 +241,11 @@ g, bob, dev
             dev.permissions
         );
         assert_eq!(dev.permissions[0].repo_pattern, "team-a-*");
-        assert_eq!(dev.permissions[0].actions, "read,write");
+        assert_eq!(dev.permissions[0].actions, "repo.read,repo.write");
 
-        // '*' action resolves to admin.
-        assert_eq!(
-            got.roles[2].permissions[0].actions, ACTION_ADMIN,
-            "super action"
-        );
+        // '*, *, *' grants everything with no pattern.
+        assert_eq!(got.roles[2].permissions[0].actions, ALL, "super action");
+        assert_eq!(got.roles[2].permissions[0].repo_pattern, "");
 
         // Group vs user subjects.
         assert_eq!(
@@ -262,6 +277,9 @@ g, bob, dev
             ("bad action", "p, r, repo, frobnicate, *, allow"),
             ("deny effect", "p, r, repo, read, *, deny"),
             ("bad resource", "p, r, secret, read, *, allow"),
+            ("global with pattern", "p, r, user, read, team-*, allow"),
+            ("category wildcard", "p, r, repo, *, *, allow"),
+            ("unknown global verb", "p, r, user, delete, *, allow"),
             ("short perm", "p, r, repo, read"),
             ("empty role", "p, , repo, read, *, allow"),
             ("grant arity", "g, user:alice"),
@@ -286,5 +304,47 @@ g, bob, dev
             err.to_string().contains("line 2"),
             "error should point at line 2: {err}"
         );
+    }
+
+    #[test]
+    fn parse_policy_global_and_legacy() {
+        let policy = "
+p, auditor, user, read, *
+p, auditor, audit, read, *, allow
+p, auditor, repo, approve, *, allow
+p, legacy, repo, audit, *, allow
+p, legacy, repo, admin, npm-*, allow
+p, oldadmin, repo, admin, *, allow
+";
+        let got = parse_policy(policy).expect("parse_policy");
+        let perms = |name: &str| -> Vec<(String, String)> {
+            got.roles
+                .iter()
+                .find(|r| r.name == name)
+                .expect("role")
+                .permissions
+                .iter()
+                .map(|p| (p.repo_pattern.clone(), p.actions.clone()))
+                .collect()
+        };
+        assert_eq!(
+            perms("auditor"),
+            vec![
+                (String::new(), "user.read,audit.read".to_string()),
+                ("*".to_string(), "repo.approve".to_string()),
+            ]
+        );
+        assert_eq!(
+            perms("legacy"),
+            vec![
+                (
+                    String::new(),
+                    "audit.read,user.read,role.read,approval.read,notification.read,insights.read"
+                        .to_string()
+                ),
+                ("npm-*".to_string(), "repo.admin".to_string()),
+            ]
+        );
+        assert_eq!(perms("oldadmin"), vec![(String::new(), ALL.to_string())]);
     }
 }

@@ -4,9 +4,11 @@ import { openApiQueryOptions } from "@/query/v1/openapi-query-options";
 import { Link } from "@tanstack/react-router";
 import { Alert } from "@/components/app-ui/alert";
 import { Badge } from "@/components/app-ui/badge";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { SortableHead, Table, TableBody, TableCell, TableHeader, TableRow, TableWrap, useSort } from "@/components/app-ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { useTranslation } from "@/lib/i18n";
+import { sortPermissions } from "@/lib/permission-catalog";
 
 export function RepoPermissions({ repoId }: { repoId: number }) {
   const { t } = useTranslation();
@@ -59,10 +61,10 @@ export function RepoPermissions({ repoId }: { repoId: number }) {
               {sortedPerms.map((p, i) => (
                 <TableRow key={`${p.role_id}-${i}`}>
                   <TableCell><Link to="/access/roles/$id" params={{ id: String(p.role_id) }}>{p.role}</Link></TableCell>
-                  <TableCell className="font-mono text-xs">{p.repo_pattern}</TableCell>
+                  <TableCell className="font-mono text-xs">{p.repo_pattern || <span className="font-sans text-muted-foreground">{t("permission.global")}</span>}</TableCell>
                   <TableCell>
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      {p.actions.map((a) => <Badge key={a}>{a}</Badge>)}
+                      {sortPermissions(p.actions).map((a) => <Badge key={a} className="font-mono">{a}</Badge>)}
                     </div>
                   </TableCell>
                   <TableCell>{p.user_count}</TableCell>
@@ -95,14 +97,18 @@ export function RepoPermissions({ repoId }: { repoId: number }) {
                   <TableCell>{tok.owner || <span className="text-muted-foreground">{t("common.unknown")}</span>}</TableCell>
                   <TableCell className="font-mono text-xs">
                     {tok.unscoped
-                      ? <span className="text-muted-foreground" title="Unscoped token: inherits the owner's role access to every repository.">{t("token.unscoped")}</span>
-                      : tok.repo_pattern}
+                      ? (
+                        <HintTooltip content={t("token.unscoped-help")}>
+                          <span tabIndex={0} className="font-sans text-muted-foreground">{t("token.unscoped")}</span>
+                        </HintTooltip>
+                      )
+                      : tok.repo_pattern || <span className="font-sans text-muted-foreground">{t("permission.global")}</span>}
                   </TableCell>
                   <TableCell>
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                       {tok.unscoped
                         ? <span className="text-muted-foreground">{t("token.per-owner-roles")}</span>
-                        : tok.actions.map((a) => <Badge key={a}>{a}</Badge>)}
+                        : sortPermissions(tok.actions).map((a) => <Badge key={a} className="font-mono">{a}</Badge>)}
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{tok.expires_at ? new Date(tok.expires_at).toLocaleDateString() : t("common.never")}</TableCell>

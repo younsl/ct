@@ -44,17 +44,15 @@ struct RefreshDTO {
     started: bool,
 }
 
-/// Who sees the whole report: administrators, auditors and security
-/// reviewers. Without an authorization service (tests) everyone does.
+/// Who sees the whole report: holders of `insights.read`. Without an
+/// authorization service (tests) everyone does.
 fn sees_everything(h: &Handler, parts: &Parts) -> bool {
-    h.authz.is_none()
-        || auth::from_request_parts(parts)
-            .is_some_and(|p| p.is_admin() || p.can_audit_any() || p.can_security_any())
+    h.authz.is_none() || auth::from_request_parts(parts).is_some_and(|p| p.has(auth::INSIGHTS_READ))
 }
 
 fn may_refresh(h: &Handler, parts: &Parts) -> bool {
     h.authz.is_none()
-        || auth::from_request_parts(parts).is_some_and(|p| p.is_admin() || p.can_security_any())
+        || auth::from_request_parts(parts).is_some_and(|p| p.has(auth::INSIGHTS_WRITE))
 }
 
 /// Keeps only what a caller limited to some repositories may see: findings
@@ -156,7 +154,7 @@ pub(super) async fn get(State(h): State<Arc<Handler>>, request: Request) -> Resp
             let can_read = |repo: &str| {
                 principal
                     .as_ref()
-                    .is_some_and(|p| p.can(repo, auth::ACTION_READ))
+                    .is_some_and(|p| p.can(repo, auth::REPO_READ))
             };
             narrow(report, can_read);
             let username = principal.as_ref().map_or_default(|p| p.username.clone());

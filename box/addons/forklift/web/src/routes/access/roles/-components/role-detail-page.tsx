@@ -10,6 +10,7 @@ import { RoleAssignedUsersPanel } from "@/routes/access/roles/-components/role-a
 import { RoleDangerPanel } from "@/routes/access/roles/-components/role-danger-panel";
 import { RolePermissionsPanel } from "@/routes/access/roles/-components/role-permissions-panel";
 import { useRoleDetail } from "@/routes/access/roles/-hooks/use-role-detail";
+import { canManageRoles, canViewUsers } from "@/utils/permissions";
 
 import type { Me } from "@/services/v1/openapi-types";
 
@@ -22,7 +23,8 @@ export function RoleDetailPage({ me }: { me: Me }) {
   const navigate = useNavigate();
   const { id } = useParams({ strict: false }) as { id?: string };
   const roleId = Number(id);
-  const { error, isLoading, members, role, runAction } = useRoleDetail(roleId);
+  const showMembers = canViewUsers(me);
+  const { error, isLoading, members, role, runAction } = useRoleDetail(roleId, { includeMembers: showMembers });
 
   if (isLoading) return <div className="text-sm text-muted-foreground">{t("common.loading")}</div>;
   // Both lists loaded and no role matched: the id in the URL is not a role.
@@ -32,7 +34,7 @@ export function RoleDetailPage({ me }: { me: Me }) {
   // read-only via the API. Gate every edit control on !role.managed so an admin
   // never sees a button that would only return a 409; the backend still enforces
   // this regardless of the UI.
-  const isEditable = Boolean(me.admin) && !role.managed;
+  const isEditable = canManageRoles(me) && !role.managed;
 
   return (
     <div data-testid="page-role-detail">
@@ -61,7 +63,7 @@ export function RoleDetailPage({ me }: { me: Me }) {
       {error && <Alert className="mb-4">{error}</Alert>}
 
       <RolePermissionsPanel role={role} canWrite={isEditable} runAction={runAction} />
-      <RoleAssignedUsersPanel members={members} />
+      {showMembers && <RoleAssignedUsersPanel members={members} />}
       {isEditable && <RoleDangerPanel role={role} runAction={runAction} />}
     </div>
   );

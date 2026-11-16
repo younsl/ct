@@ -1,4 +1,12 @@
-import { canReviewApprovals } from "@/utils/permissions";
+import {
+  canManageSystem,
+  canReviewApprovals,
+  canViewApprovalQueue,
+  canViewNotifications,
+  canViewRoles,
+  canViewSystem,
+  canViewUsers,
+} from "@/utils/permissions";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
@@ -31,6 +39,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { openApiQueryOptions } from "@/query/v1/openapi-query-options";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useUserPreferences, useUserPreferenceActions } from "@/stores/user-preferences";
@@ -154,7 +163,13 @@ function ImpersonationBanner({ me }: { me: Me }) {
 
 function Sidebar({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const { t } = useTranslation();
+  const canSeeApprovals = canViewApprovalQueue(me);
   const canApprove = canReviewApprovals(me);
+  const showUsers = canViewUsers(me);
+  const showRoles = canViewRoles(me);
+  const showAnnouncement = canManageSystem(me);
+  const showNotifications = canViewNotifications(me);
+  const showSystem = canViewSystem(me);
   // Desktop-only collapse (Backstage-style icon rail); the mobile layout keeps
   // its horizontal bar, so every collapsed override is lg-scoped.
   const collapsed = useUserPreferences((state) => state.isSidebarCollapsed);
@@ -216,7 +231,7 @@ function Sidebar({ me, onLogout }: { me: Me; onLogout: () => void }) {
           <Link
             to="/workspace/repositories"
             className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground hover:no-underline hover:opacity-85"
-            title="forklift"
+            aria-label="forklift"
           >
             <Logo />
             <span className={cn("truncate", labelClass)}>fork<span className="text-accent-ink">lift</span></span>
@@ -224,18 +239,19 @@ function Sidebar({ me, onLogout }: { me: Me; onLogout: () => void }) {
           {/* Icon-only collapse toggle, pinned top-right of the sidebar (below
               the logo in the collapsed rail). Desktop only: the mobile bar has
               nothing to collapse. */}
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            title={collapsed ? t("nav.expand") : t("nav.collapse")}
-            aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
-            aria-expanded={!collapsed}
-            className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-[var(--fx-surface-hover)] hover:text-foreground max-lg:hidden"
-          >
-            {collapsed
-              ? <PanelLeftOpen className="size-4" aria-hidden="true" />
-              : <PanelLeftClose className="size-4" aria-hidden="true" />}
-          </button>
+          <HintTooltip content={collapsed ? t("nav.expand") : t("nav.collapse")} side="right">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
+              aria-expanded={!collapsed}
+              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-[var(--fx-surface-hover)] hover:text-foreground max-lg:hidden"
+            >
+              {collapsed
+                ? <PanelLeftOpen className="size-4" aria-hidden="true" />
+                : <PanelLeftClose className="size-4" aria-hidden="true" />}
+            </button>
+          </HintTooltip>
         </div>
         {version && (
           <span className={cn("ml-9 mt-1 block shrink-0 text-[11px] font-medium text-[var(--fx-text-subtle)] max-lg:m-0 max-sm:hidden", labelClass)}>
@@ -251,92 +267,126 @@ function Sidebar({ me, onLogout }: { me: Me; onLogout: () => void }) {
       </div>
       <nav className="-mx-1 flex flex-col gap-0.5 px-1 max-lg:flex-row max-lg:overflow-x-auto max-lg:pb-1 max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden">
         <NavGroup title={t("nav.group.workspace")} collapsed={collapsed}>
-          <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/workspace/repositories" title={collapsed ? t("nav.repositories") : undefined}>
-            <Boxes className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-            <span className={labelClass}>{t("nav.repositories")}</span>
-            {repoCount !== null && <Badge data-testid="value-nav-repository-count" variant="outline" className={cn("ml-2 min-w-5 justify-center px-1.5 lg:ml-auto", labelClass)}>{repoCount}</Badge>}
-          </Link>
-          {canApprove && (
-            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/workspace/approvals" title={collapsed ? t("nav.approvals") : undefined}>
-              <ClipboardCheck className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-              <span className={labelClass}>{t("nav.approvals")}</span>
-              {pendingCount !== null && pendingCount > 0 && <Badge data-testid="value-nav-pending-count" className={cn("ml-2 min-w-5 justify-center bg-primary text-primary-foreground lg:ml-auto", labelClass)}>{pendingCount}</Badge>}
+          <HintTooltip content={collapsed ? t("nav.repositories") : undefined} side="right">
+            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/workspace/repositories" aria-label={collapsed ? t("nav.repositories") : undefined}>
+              <Boxes className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+              <span className={labelClass}>{t("nav.repositories")}</span>
+              {repoCount !== null && <Badge data-testid="value-nav-repository-count" variant="outline" className={cn("ml-2 min-w-5 justify-center px-1.5 lg:ml-auto", labelClass)}>{repoCount}</Badge>}
             </Link>
+          </HintTooltip>
+          {canSeeApprovals && (
+            <HintTooltip content={collapsed ? t("nav.approvals") : undefined} side="right">
+              <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/workspace/approvals" aria-label={collapsed ? t("nav.approvals") : undefined}>
+                <ClipboardCheck className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+                <span className={labelClass}>{t("nav.approvals")}</span>
+                {canApprove && pendingCount !== null && pendingCount > 0 && <Badge data-testid="value-nav-pending-count" className={cn("ml-2 min-w-5 justify-center bg-primary text-primary-foreground lg:ml-auto", labelClass)}>{pendingCount}</Badge>}
+              </Link>
+            </HintTooltip>
           )}
           {/* Insights (security analysis and Forklift coverage) sits with the
               workspace rather than under Admin: every signed-in user acts on
               it, and the page narrows what each one sees. */}
-          <Link className={navLinkClass(insightsActive)} to="/workspace/insights" title={collapsed ? t("nav.insights") : undefined}>
-            <ShieldCheck className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-            <span className={labelClass}>{t("nav.insights")}</span>
-            {urgentFindings !== null && urgentFindings > 0 && <Badge data-testid="value-nav-insights-urgent" className={cn("ml-2 min-w-5 justify-center bg-primary text-primary-foreground lg:ml-auto", labelClass)}>{urgentFindings}</Badge>}
-          </Link>
+          <HintTooltip content={collapsed ? t("nav.insights") : undefined} side="right">
+            <Link className={navLinkClass(insightsActive)} to="/workspace/insights" aria-label={collapsed ? t("nav.insights") : undefined}>
+              <ShieldCheck className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+              <span className={labelClass}>{t("nav.insights")}</span>
+              {urgentFindings !== null && urgentFindings > 0 && <Badge data-testid="value-nav-insights-urgent" className={cn("ml-2 min-w-5 justify-center bg-primary text-primary-foreground lg:ml-auto", labelClass)}>{urgentFindings}</Badge>}
+            </Link>
+          </HintTooltip>
         </NavGroup>
         <NavGroup title={t("nav.group.access")} collapsed={collapsed}>
-          <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/workspace/tokens" title={collapsed ? t("nav.tokens") : undefined}>
-            <KeyRound className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-            <span className={labelClass}>{t("nav.tokens")}</span>
-          </Link>
-          {(me.admin || me.auditor) && (
-            <>
-              <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/access/users" title={collapsed ? t("nav.users") : undefined}>
+          <HintTooltip content={collapsed ? t("nav.tokens") : undefined} side="right">
+            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/workspace/tokens" aria-label={collapsed ? t("nav.tokens") : undefined}>
+              <KeyRound className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+              <span className={labelClass}>{t("nav.tokens")}</span>
+            </Link>
+          </HintTooltip>
+          {showUsers && (
+            <HintTooltip content={collapsed ? t("nav.users") : undefined} side="right">
+              <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/access/users" aria-label={collapsed ? t("nav.users") : undefined}>
                 <UserRound className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
                 <span className={labelClass}>{t("nav.users")}</span>
               </Link>
-              <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/access/roles" title={collapsed ? t("nav.roles") : undefined}>
+            </HintTooltip>
+          )}
+          {showRoles && (
+            <HintTooltip content={collapsed ? t("nav.roles") : undefined} side="right">
+              <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/access/roles" aria-label={collapsed ? t("nav.roles") : undefined}>
                 <UsersRound className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
                 <span className={labelClass}>{t("nav.roles")}</span>
               </Link>
-            </>
+            </HintTooltip>
           )}
         </NavGroup>
         <NavGroup title={t("nav.group.preferences")} collapsed={collapsed}>
-          <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/settings" title={collapsed ? t("nav.settings") : undefined}>
-            <Settings className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-            <span className={labelClass}>{t("nav.settings")}</span>
-          </Link>
+          <HintTooltip content={collapsed ? t("nav.settings") : undefined} side="right">
+            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/settings" aria-label={collapsed ? t("nav.settings") : undefined}>
+              <Settings className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+              <span className={labelClass}>{t("nav.settings")}</span>
+            </Link>
+          </HintTooltip>
         </NavGroup>
-        {me.admin && (
+        {(showAnnouncement || showNotifications || showSystem) && (
           <NavGroup title={t("nav.group.admin")} collapsed={collapsed}>
-            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/announcement" title={collapsed ? t("nav.announcement") : undefined}>
-              <Megaphone className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-              <span className={labelClass}>{t("nav.announcement")}</span>
-            </Link>
-            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/notifications" title={collapsed ? t("nav.notifications") : undefined}>
-              <Bell className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-              <span className={labelClass}>{t("nav.notifications")}</span>
-            </Link>
-            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/storage" title={collapsed ? t("nav.storage") : undefined}>
-              <HardDrive className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-              <span className={labelClass}>{t("nav.storage")}</span>
-            </Link>
-            <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/ha" title={collapsed ? t("nav.ha") : undefined}>
-              <SlidersHorizontal className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-              <span className={labelClass}>{t("nav.ha")}</span>
-            </Link>
+            {showAnnouncement && (
+              <HintTooltip content={collapsed ? t("nav.announcement") : undefined} side="right">
+                <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/announcement" aria-label={collapsed ? t("nav.announcement") : undefined}>
+                  <Megaphone className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+                  <span className={labelClass}>{t("nav.announcement")}</span>
+                </Link>
+              </HintTooltip>
+            )}
+            {showNotifications && (
+              <HintTooltip content={collapsed ? t("nav.notifications") : undefined} side="right">
+                <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/notifications" aria-label={collapsed ? t("nav.notifications") : undefined}>
+                  <Bell className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+                  <span className={labelClass}>{t("nav.notifications")}</span>
+                </Link>
+              </HintTooltip>
+            )}
+            {showSystem && (
+              <HintTooltip content={collapsed ? t("nav.storage") : undefined} side="right">
+                <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/storage" aria-label={collapsed ? t("nav.storage") : undefined}>
+                  <HardDrive className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+                  <span className={labelClass}>{t("nav.storage")}</span>
+                </Link>
+              </HintTooltip>
+            )}
+            {showSystem && (
+              <HintTooltip content={collapsed ? t("nav.ha") : undefined} side="right">
+                <Link className={navLinkClass()} activeProps={{ className: navLinkClass(true) }} to="/admin/ha" aria-label={collapsed ? t("nav.ha") : undefined}>
+                  <SlidersHorizontal className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+                  <span className={labelClass}>{t("nav.ha")}</span>
+                </Link>
+              </HintTooltip>
+            )}
           </NavGroup>
         )}
       </nav>
       <div className="flex-1" />
       <div className="mt-3 flex flex-col gap-1 border-t border-[var(--fx-border-subtle)] pt-3 max-lg:mt-2 max-lg:flex-row max-lg:items-center max-lg:justify-between max-lg:gap-3 max-lg:overflow-x-auto max-lg:pt-2 max-sm:gap-2">
-        <a className={navLinkClass()} href="/api-docs" target="_blank" rel="noreferrer" title={collapsed ? t("nav.api-docs") : undefined}>
-          <BookOpen className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
-          <span className={labelClass}>{t("nav.api-docs")}</span>
-        </a>
+        <HintTooltip content={collapsed ? t("nav.api-docs") : undefined} side="right">
+          <a className={navLinkClass()} href="/api-docs" target="_blank" rel="noreferrer" aria-label={collapsed ? t("nav.api-docs") : undefined}>
+            <BookOpen className="size-4 opacity-75 group-hover:opacity-100" aria-hidden="true" />
+            <span className={labelClass}>{t("nav.api-docs")}</span>
+          </a>
+        </HintTooltip>
         <div className={cn("min-w-0 px-2 text-xs text-muted-foreground max-lg:flex max-lg:items-center max-lg:gap-2 max-lg:px-0 max-sm:ml-auto max-sm:w-auto", collapsed && "lg:px-0")}>
           <div className={cn("truncate", labelClass)}>
             {me.username} {me.admin ? `(${t("role.admin")})` : me.auditor ? `(${t("role.auditor")})` : ""}
           </div>
-          <Button
-            className={cn("mt-2 w-full gap-1.5 max-lg:mt-0 max-lg:w-auto max-sm:shrink-0", collapsed && "lg:px-0")}
-            variant="outline"
-            type="button"
-            title={collapsed ? t("nav.logout") : undefined}
-            onClick={onLogout}
-          >
-            <LogOut className="size-3.5" aria-hidden="true" />
-            <span className={labelClass}>{t("nav.logout")}</span>
-          </Button>
+          <HintTooltip content={collapsed ? t("nav.logout") : undefined} side="right">
+            <Button
+              className={cn("mt-2 w-full gap-1.5 max-lg:mt-0 max-lg:w-auto max-sm:shrink-0", collapsed && "lg:px-0")}
+              variant="outline"
+              type="button"
+              aria-label={collapsed ? t("nav.logout") : undefined}
+              onClick={onLogout}
+            >
+              <LogOut className="size-3.5" aria-hidden="true" />
+              <span className={labelClass}>{t("nav.logout")}</span>
+            </Button>
+          </HintTooltip>
         </div>
       </div>
     </aside>

@@ -69,7 +69,7 @@ pub(crate) async fn handle_npm_audit(m: Arc<Manager>, req: Request) -> Response 
         Ok(res) => res,
         Err(resp) => return resp,
     };
-    if let Err(resp) = m.authorize(&parts, &res.repo.name, auth::ACTION_READ, res.cfg.public) {
+    if let Err(resp) = m.authorize(&parts, &res.repo.name, auth::REPO_READ, res.cfg.public) {
         return resp;
     }
     let packages = match read_request(parts.headers.get(CONTENT_ENCODING), body).await {

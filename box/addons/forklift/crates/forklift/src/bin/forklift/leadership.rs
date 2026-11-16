@@ -33,6 +33,9 @@ pub(crate) async fn apply_declarative_state(
     store: &Arc<meta::Store>,
     authz: &Arc<auth::Service>,
 ) -> anyhow::Result<()> {
+    auth::migrate_permission_vocabulary(store)
+        .await
+        .context("migrate permission vocabulary")?;
     authz
         .bootstrap_admin(
             &cfg.auth.bootstrap_admin_user,

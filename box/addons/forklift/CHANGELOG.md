@@ -11,15 +11,25 @@ Notable changes per release. Container image versions come from the
 - `FORKLIFT_DATABASE_SSLMODE` follows libpq. `prefer` and `require` now encrypt the PostgreSQL connection without checking the server certificate. Before, every mode but `disable` verified it. An install that relied on that check sets `verify-full`, or `verify-ca` to skip the host name check.
 - `FORKLIFT_DATABASE_CA_FILE` (chart: `database.external.caBundle`) needs `verify-ca` or `verify-full`. Startup and the chart render fail with any other mode, so a bundle is never accepted and then left unread.
 - Chart: `database.external.sslMode` defaults to `require` instead of `prefer`. A server without TLS needs `disable`.
+- Permissions are named `<category>.<verb>`. Repository permissions (`repo.read`, `repo.write`, `repo.delete`, `repo.approve`, `repo.security`, `repo.admin`) take a repository pattern, and the global ones (`user.*`, `role.*`, `audit.read`, `approval.read`, `notification.*`, `coverage.*`, `insights.*`, `system.*`) take none. `*` grants everything. The API accepts only the new names, stored role permissions and token scopes are rewritten once at startup, and the chart policy still reads the old lines with a warning. See [Access control](docs/access-control.md#upgrading-from-the-previous-action-names) for the mapping.
+- A personal access token can no longer issue, edit or revoke tokens. Those calls need a signed-in session and answer 403 to a token.
+- A token whose scopes are empty or unreadable is rejected instead of acting with its owner's full access.
+- `repo.admin` on a pattern now covers updating, disabling and deleting matching repositories, bulk deletes, and creating a repository whose name matches. Those used to need the instance administrator. A group repository needs `repo.admin` on every member.
+- Delegated access management cannot escalate. `role.write` grants only permissions the caller holds, and `user.write` acts only on users whose permissions the caller holds as well.
+- `audit.read` no longer opens users, roles, the approval queue, receivers or insights. Each has its own read permission, and a stored `audit` grant is rewritten into all of them.
 
 ### Added
 
 - `FORKLIFT_DATABASE_SSLMODE` accepts `verify-ca` and `verify-full`, also inside `FORKLIFT_DATABASE_URL`. A managed service such as Amazon RDS is reachable with `require` and no CA bundle, and certificate verification is opt-in.
 - A pod connects and logs in to PostgreSQL before it opens its HTTP port, and logs the user, database, server version and whether the session is encrypted. A refused login, a missing database or a rejected server certificate stops the pod at once with the reason, instead of retrying for four minutes. An unreachable server is still retried.
 - `GET /api/v1/ha` reports the `active-active` mode for a PostgreSQL install and the new `database` field (`sqlite` or `postgres`).
+- `GET /api/v1/me` lists the caller's permissions in `permissions`, and a repository's `capabilities` report `security` and `admin`.
+- Tokens may carry the global read permissions (`user.read`, `role.read`, `audit.read`, `approval.read`, `notification.read`, `coverage.read`, `insights.read`, `system.read`), so read-only automation no longer needs a password.
+- Creating a role, adding a permission to a role, issuing a token from Access Tokens or from Users, and editing a token's scopes share one permission picker. It groups permissions by category and asks for a repository pattern only when a `repo.*` permission is selected.
 
 ### Fixed
 
+- `forklift_create_role` and `forklift_create_user_token` in forklift-mcp sent request bodies the API rejected.
 - The HA Status page drew an active-active install as a leader with a standby. It now draws every API pod as serving, PostgreSQL as the shared metadata store, and the Lease as the choice of the pod that runs the background jobs. The diagram is titled with the installation mode (Standalone, Active - Passive or Active - Active).
 
 ## 0.21.1 (2026-11-16)

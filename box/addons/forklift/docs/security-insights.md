@@ -122,7 +122,7 @@ The score is shown out of 100 (for example 45 / 100). Acknowledged checks do not
 
 ## Who sees what
 
-Every signed-in user can open Insights. Administrators, auditors and security reviewers see the whole report with its 30-day trend. Everyone else sees the findings about repositories they can read, cut down to those repositories and rescored, plus the coverage finding (coverage is readable by everyone). Their page says so: the score is labelled as the score for their repositories, and the figures under it count only their repositories, artifacts, images and the scan coverage of those, and their own access tokens. Account, token and client findings are never shown to them. Starting a run requires admin or the security action.
+Every signed-in user can open Insights. Holders of `insights.read` see the whole report with its 30-day trend. Everyone else sees the findings about repositories they can read, cut down to those repositories and rescored, plus the coverage finding (coverage is readable by everyone). Their page says so: the score is labelled as the score for their repositories, and the figures under it count only their repositories, artifacts, images and the scan coverage of those, and their own access tokens. Account, token and client findings are never shown to them. Starting a run requires `insights.write`.
 
 In the console, a viewer limited to some repositories sees the check list and each check's status, dimmed and not clickable: the check pages (`/workspace/insights/<check>`) are for administrators, auditors and security reviewers, and a direct link shows that instead of the details. The Settings button and page are for administrators and security reviewers.
 

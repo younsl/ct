@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { useAuth } from "@/authContext";
 import { Redirect } from "@/components/app/redirect";
+import { canManageRoles } from "@/utils/permissions";
 import { RoleNewPage } from "@/routes/access/roles/-components/role-new-page";
 
 export const Route = createFileRoute("/access/roles/new")({
@@ -16,5 +17,5 @@ function RoleNewRoute() {
   // Signed out: the shell redirects to /login, so do not compete with it.
   if (!me.authenticated) return null;
 
-  return me.admin ? <RoleNewPage /> : <Redirect to="/workspace/repositories" replace />;
+  return canManageRoles(me) ? <RoleNewPage /> : <Redirect to="/workspace/repositories" replace />;
 }

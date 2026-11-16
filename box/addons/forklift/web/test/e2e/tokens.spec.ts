@@ -39,7 +39,8 @@ test.describe("tokens", () => {
       await page.locator("#token-description").fill("e2e round trip");
       await page.locator("#expires-on").fill(isoDaysFromNow(30));
       // Enter commits the pattern; see typeRepositoryPattern for why typing it
-      // is not enough. Actions default to read, so the scope is complete here.
+      // is not enough. The picker opens on repo.read, so the scope is complete
+      // here.
       await typeRepositoryPattern(page, SEEDED_REPOSITORY);
       await page.getByRole("button", { name: "Add permission" }).click();
       await page.getByRole("button", { name: "Create token", exact: true }).click();
@@ -57,24 +58,33 @@ test.describe("tokens", () => {
       await expect(page).toHaveURL(/\/workspace\/tokens\/?$/);
       const row = page.getByTestId(`row-${name}`);
       await expect(row).toBeVisible();
-      await expect(row).toContainText(`${SEEDED_REPOSITORY}: read`);
+      await expect(row).toContainText(`${SEEDED_REPOSITORY}: repo.read`);
 
       await row.getByRole("button", { name: "Edit" }).click();
 
-      // The modal is the only thing on this page carrying a repository-pattern
-      // field, an "Add permission" button or a "Save", so these are unambiguous
-      // at page level. It is a hand-rolled overlay, not a dialog, so there is no
-      // role to scope into.
-      await expect(page.getByRole("heading", { name: "Edit permissions" })).toBeVisible();
-      await typeRepositoryPattern(page, "npm-*");
-      await page.getByRole("button", { name: "Add permission" }).click();
-      await page.getByRole("button", { name: "Save", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Edit permissions" });
+      await expect(dialog).toBeVisible();
+      // Session-only permissions are not offered for a token.
+      await expect(dialog.getByRole("checkbox", { name: "repo.approve" })).toHaveCount(0);
+      await expect(dialog.getByRole("checkbox", { name: "*", exact: true })).toHaveCount(0);
 
-      await expect(page.getByRole("heading", { name: "Edit permissions" })).toBeHidden();
-      // The list re-reads the token, so the new scope arriving here is also the
-      // proof that the save reached the server.
-      await expect(row).toContainText("npm-*: read");
-      await expect(row).toContainText(`${SEEDED_REPOSITORY}: read`);
+      await typeRepositoryPattern(dialog, "npm-*");
+      await dialog.getByRole("button", { name: "Add permission" }).click();
+
+      // A global read rides as its own entry, without a pattern.
+      await dialog.getByRole("checkbox", { name: "repo.read" }).click();
+      await dialog.getByRole("checkbox", { name: "audit.read" }).click();
+      await expect(dialog.getByPlaceholder(/repo pattern/i)).toBeHidden();
+      await dialog.getByRole("button", { name: "Add permission" }).click();
+
+      await dialog.getByRole("button", { name: "Save", exact: true }).click();
+
+      await expect(dialog).toBeHidden();
+      // The list re-reads the token, so the new scopes arriving here are also
+      // the proof that the save reached the server.
+      await expect(row).toContainText("npm-*: repo.read");
+      await expect(row).toContainText("Global: audit.read");
+      await expect(row).toContainText(`${SEEDED_REPOSITORY}: repo.read`);
 
       await row.getByRole("button", { name: "Revoke" }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Revoke" }).click();

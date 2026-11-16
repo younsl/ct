@@ -13,12 +13,14 @@ import { useTranslation } from "@/lib/i18n";
 // repositories created later - so the names only assist, never constrain.
 // Shared by role permissions and token scopes, which enter the same thing.
 export function RepositoryPatternCombobox({
+  id,
   className,
   options,
   types,
   value,
   onValueChange,
 }: {
+  id?: string;
   className?: string;
   options: string[];
   types: Record<string, string>;
@@ -48,6 +50,7 @@ export function RepositoryPatternCombobox({
           own handler still runs, so picking a listed option with Enter keeps
           working. */}
       <ComboboxInput
+        id={id}
         placeholder={t("common.repo-pattern-placeholder")}
         className={className}
         onKeyDown={(event) => {

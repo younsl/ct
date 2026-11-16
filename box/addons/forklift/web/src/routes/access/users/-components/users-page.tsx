@@ -7,6 +7,7 @@ import { getErrorMessageIfAny } from "@/lib/http/error/api-error";
 import { useTranslation } from "@/lib/i18n";
 import { UsersTable } from "@/routes/access/users/-components/users-table";
 import { useUsersList } from "@/routes/access/users/-hooks/use-users-list";
+import { canManageUsers } from "@/utils/permissions";
 
 import type { Me } from "@/services/v1/openapi-types";
 
@@ -29,7 +30,7 @@ export function UsersPage({ me }: { me: Me }) {
             <span className="text-base font-normal text-muted-foreground">{users.length}</span>
           </span>
         }
-        actions={me.admin && (
+        actions={canManageUsers(me) && (
           <Button onClick={() => navigate({ to: "/access/users/new" })}>
             {t("user.create")}
           </Button>

@@ -10,10 +10,10 @@ import type { E2ERole } from "./setup/accounts";
 // that check was done by opening 23 URLs by hand.
 //
 // The gates are read from the route files, not invented here:
-//   canViewAccessManagement  admin, auditor
-//   canViewApprovalQueue     admin, auditor, approver
-//   canViewAdministration    admin
-//   me.admin                 admin
+//   canViewUsers, canViewRoles             admin, auditor
+//   canViewApprovalQueue                   admin, auditor, approver
+//   user.write, role.write, repo.admin,
+//   notification.*, system.*               admin
 type Screen = {
   path: string;
   // The heading that only this screen shows.

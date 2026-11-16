@@ -402,22 +402,31 @@ auth:
     enabled: true
     # -- (string) Default role for every authenticated user (ArgoCD policy.default). Empty means deny-all until a role is granted.
     policyDefault: readonly
-    # -- (string) ArgoCD-style policy: "p, <role>, repo, <action>, <repo-glob>, allow" permissions and "g, <group:name|user:name>, <role>" grants.
+    # -- (string) ArgoCD-style policy: "p, <role>, <category>, <verb>, <object>, allow" grants the <category>.<verb> permission ("repo, read, team-a-*" is repo.read on team-a-*, "user, read, *" is the global user.read, "*, *, *" is everything) and "g, <group:name|user:name>, <role>" assigns roles.
     policy: |
-      # The `administrator` role (admin on every repository) is created
-      # automatically for the bootstrap admin on first run, so it is not declared
-      # here; reference it in grant lines below to assign full access to others.
+      # The `administrator` role (*, every permission) is created automatically
+      # for the bootstrap admin on first run, so it is not declared here;
+      # reference it in grant lines below to assign full access to others.
+      #
+      # repo.* permissions take a repository glob as the object. Every other
+      # permission is global and takes `*`.
 
       # readonly: read-only (pull) access to every repository. Default role for
       # all authenticated users.
       p, readonly, repo, read, *, allow
 
-      # auditor (security engineer): read-only across all administrative surfaces
-      # (audit) plus package approval decisions, security policy edits and
-      # repository reads, but no create/update/delete and no access to upstream
-      # credentials. Drop the `security` line to leave the Security tab
-      # read-only while keeping approval rights.
-      p, auditor, repo, audit, *, allow
+      # auditor (security engineer): read-only across the administrative
+      # surfaces, package approval decisions, security policy edits, insights
+      # management and repository reads, but no repository administration and no
+      # access to upstream credentials. Drop the `repo, security` line to leave
+      # the Security tab read-only while keeping approval rights.
+      p, auditor, audit, read, *, allow
+      p, auditor, user, read, *, allow
+      p, auditor, role, read, *, allow
+      p, auditor, approval, read, *, allow
+      p, auditor, notification, read, *, allow
+      p, auditor, insights, read, *, allow
+      p, auditor, insights, write, *, allow
       p, auditor, repo, approve, *, allow
       p, auditor, repo, security, *, allow
       p, auditor, repo, read, *, allow

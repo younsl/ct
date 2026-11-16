@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { useAuth } from "@/authContext";
 import { Redirect } from "@/components/app/redirect";
+import { canCreateRepositories } from "@/utils/permissions";
 import { RepositoryNewPage } from "@/routes/workspace/repositories/-components/repository-new-page";
 
 export const Route = createFileRoute("/workspace/repositories/new")({
@@ -15,5 +16,5 @@ function RepositoryNewRoute() {
   // Signed out: the shell redirects to /login, so do not compete with it.
   if (!me.authenticated) return null;
 
-  return me.admin ? <RepositoryNewPage /> : <Redirect to="/workspace/repositories" replace />;
+  return canCreateRepositories(me) ? <RepositoryNewPage /> : <Redirect to="/workspace/repositories" replace />;
 }

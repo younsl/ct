@@ -555,7 +555,7 @@ impl Handler {
         // No authorization service (tests) allows everything.
         let allowed = self.authz.is_none()
             || auth::from_request_parts(parts)
-                .is_some_and(|p| p.can(repo_name, auth::ACTION_APPROVE));
+                .is_some_and(|p| p.can(repo_name, auth::REPO_APPROVE));
         if allowed {
             return None;
         }
@@ -870,7 +870,15 @@ pub(crate) mod tests {
             .admin_do(
                 Method::POST,
                 &format!("/roles/{role_id}/permissions"),
-                r#"{"repo_pattern":"*","actions":["read","audit"]}"#,
+                r#"{"repo_pattern":"*","actions":["repo.read"]}"#,
+            )
+            .await;
+        assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
+        let resp = srv
+            .admin_do(
+                Method::POST,
+                &format!("/roles/{role_id}/permissions"),
+                r#"{"actions":["audit.read","approval.read","user.read","role.read"]}"#,
             )
             .await;
         assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -1033,7 +1041,7 @@ pub(crate) mod tests {
             .admin_do(
                 Method::POST,
                 &format!("/roles/{role_id}/permissions"),
-                r#"{"repo_pattern":"npm-*","actions":["read","approve"]}"#,
+                r#"{"repo_pattern":"npm-*","actions":["repo.read","repo.approve"]}"#,
             )
             .await;
         assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -1149,7 +1157,7 @@ pub(crate) mod tests {
             "pw123456",
             Method::POST,
             "/tokens",
-            r#"{"name":"ci","description":"ci token","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"720h"}"#,
+            r#"{"name":"ci","description":"ci token","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"720h"}"#,
         )
         .await;
         assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -1175,7 +1183,7 @@ pub(crate) mod tests {
             "pw123456",
             Method::POST,
             "/tokens",
-            r#"{"name":"bad","description":"x","scopes":[{"repo_pattern":"*","actions":["approve"]}],"expires_in":"720h"}"#,
+            r#"{"name":"bad","description":"x","scopes":[{"repo_pattern":"*","actions":["repo.approve"]}],"expires_in":"720h"}"#,
         )
         .await;
         assert_eq!(resp.status, StatusCode::BAD_REQUEST, "{}", resp.text());

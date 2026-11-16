@@ -291,7 +291,7 @@ pub(crate) mod tests {
             .add_permission(meta::Permission {
                 role_id: role.id,
                 repo_pattern: "*".into(),
-                actions: "read".into(),
+                actions: "repo.read".into(),
                 ..Default::default()
             })
             .await
@@ -306,13 +306,13 @@ pub(crate) mod tests {
         let parts = session_request(&t.svc, "dev", meta::SOURCE_OIDC, &[]);
         let p = t.svc.resolve(&parts).await.unwrap();
         assert!(
-            p.is_some_and(|p| !p.can("any-repo", ACTION_READ)),
+            p.is_some_and(|p| !p.can("any-repo", REPO_READ)),
             "groupless session should have no perms"
         );
         let parts = session_request(&t.svc, "dev", meta::SOURCE_OIDC, &["team-x".to_string()]);
         let p = t.svc.resolve(&parts).await.unwrap();
         assert!(
-            p.is_some_and(|p| p.can("any-repo", ACTION_READ)),
+            p.is_some_and(|p| p.can("any-repo", REPO_READ)),
             "group-mapped session should read"
         );
     }

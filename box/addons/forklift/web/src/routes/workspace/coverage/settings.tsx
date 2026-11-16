@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Globe, Send, XCircle } from "lucide-react";
 import { useAuth } from "@/authContext";
 import { Alert } from "@/components/app-ui/alert";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { AlarmPreview } from "@/components/app-ui/alarm-preview";
 import { PageDescription, PageHeader } from "@/components/app-ui/page";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -39,6 +40,7 @@ import { validateExternalDomain, type HostProblem } from "@/lib/coverage-host";
 import { Redirect } from "@/components/app/redirect";
 import { COMMON_TIMEZONES } from "@/lib/timezones";
 import { AlarmHistory, alarmHistoryKey } from "@/routes/workspace/insights/-components/alarm-history";
+import { canManageCoverage, canViewCoverageSettings } from "@/utils/permissions";
 
 export const Route = createFileRoute("/workspace/coverage/settings")({
   component: CoverageSettingsRoute,
@@ -50,7 +52,9 @@ export const Route = createFileRoute("/workspace/coverage/settings")({
 // surface they have.
 function CoverageSettingsRoute() {
   const { me } = useAuth();
-  return me.admin ? <CoverageSettingsPage /> : <Redirect to="/workspace/coverage" replace />;
+  return canViewCoverageSettings(me)
+    ? <CoverageSettingsPage canWrite={canManageCoverage(me)} />
+    : <Redirect to="/workspace/coverage" replace />;
 }
 
 // Form mirrors the settings, with the list fields held as the comma-separated
@@ -125,7 +129,7 @@ const HOST_PROBLEM_KEY: Record<HostProblem, MessageKey> = {
   "not-external": "coverage.host-not-external",
 };
 
-function CoverageSettingsPage() {
+function CoverageSettingsPage({ canWrite }: { canWrite: boolean }) {
   const { t } = useTranslation();
   const formatDateTime = useDateTime();
   const queryClient = useQueryClient();
@@ -140,7 +144,10 @@ function CoverageSettingsPage() {
     // form is seeded from this query.
     staleTime: 60_000,
   });
-  const { data: receivers = [] } = useQuery(openApiQueryOptions.listNotificationReceivers());
+  const { data: receivers = [] } = useQuery({
+    ...openApiQueryOptions.listNotificationReceivers(),
+    enabled: canWrite,
+  });
   const { data: preview } = useQuery(openApiQueryOptions.getCoverageNotificationPreview());
 
   // Seeded once, not on every change of the query data. A background refetch
@@ -211,7 +218,7 @@ function CoverageSettingsPage() {
   const { data: dnsCheck, isFetching: dnsChecking } = useQuery({
     queryKey: ["coverage-host-check", dnsQueryHost],
     queryFn: () => postCheckHostCoverageSettings({ body: { forklift_host: dnsQueryHost } }),
-    enabled: dnsQueryHost !== "",
+    enabled: canWrite && dnsQueryHost !== "",
     staleTime: 60_000,
     retry: false,
   });
@@ -323,19 +330,22 @@ function CoverageSettingsPage() {
             <Link to="/workspace/coverage" className={buttonVariants({ variant: "outline" })}>
               {t("coverage.title")}
             </Link>
-            <Button
-              onClick={onSave}
-              disabled={save.isPending || saveBlocked}
-              title={saveBlocked ? t("coverage.fill-required") : undefined}
-            >
-              {t("common.save")}
-            </Button>
+            {canWrite && (
+              <HintTooltip content={saveBlocked ? t("coverage.fill-required") : undefined} wrap>
+                <Button onClick={onSave} disabled={save.isPending || saveBlocked}>
+                  {t("common.save")}
+                </Button>
+              </HintTooltip>
+            )}
           </>
         }
       />
       <PageDescription>{t("coverage.settings-description")}</PageDescription>
 
       {error && <Alert className="mb-4">{error}</Alert>}
+      {!canWrite && <p className="mb-4 text-sm text-muted-foreground">{t("coverage.settings-readonly")}</p>}
+
+      <fieldset className="m-0 min-w-0 border-0 p-0 disabled:opacity-65" disabled={!canWrite}>
 
       <Card className="mb-4">
         <CardContent className="pt-4">
@@ -592,6 +602,8 @@ function CoverageSettingsPage() {
           </FieldGroup>
         </CardContent>
       </Card>
+
+      </fieldset>
 
       <AlarmHistory feature="coverage" />
 

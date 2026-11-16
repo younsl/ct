@@ -45,7 +45,7 @@ async fn security_action_for_security_engineers() {
         .admin_do(
             Method::POST,
             &format!("/roles/{role_id}/permissions"),
-            r#"{"repo_pattern":"npm-*","actions":["read","security"]}"#,
+            r#"{"repo_pattern":"npm-*","actions":["repo.read","repo.security"]}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());
@@ -178,7 +178,7 @@ async fn security_route_denied_without_action() {
         .admin_do(
             Method::POST,
             &format!("/roles/{role_id}/permissions"),
-            r#"{"repo_pattern":"*","actions":["read","approve","audit"]}"#,
+            r#"{"repo_pattern":"*","actions":["repo.read","repo.approve"]}"#,
         )
         .await;
     assert_eq!(resp.status, StatusCode::CREATED, "{}", resp.text());

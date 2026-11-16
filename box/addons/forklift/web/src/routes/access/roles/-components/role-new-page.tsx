@@ -1,18 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { useAuth } from "@/authContext";
 import { Alert } from "@/components/app-ui/alert";
+import { Badge } from "@/components/app-ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageDescription, PageHeader } from "@/components/app-ui/page";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { PermissionPicker, type PermissionEntry } from "@/components/app/permission-picker/permission-picker";
 import { NAME_PATTERN } from "@/lib/name-pattern";
 import { useTranslation } from "@/lib/i18n";
-import { PermissionBuilder } from "@/routes/access/roles/-components/permission-builder";
 import { useRoleCreateSubmit } from "@/routes/access/roles/-hooks/use-role-create-submit";
-
-import type { PermissionCreate } from "@/services/v1/openapi-types";
+import { hasPermission } from "@/utils/permissions";
 
 // Admin-only role creation, reached from the Create button on /access/roles.
 // Permissions can be granted here at creation, or added later on the role's
@@ -20,9 +21,10 @@ import type { PermissionCreate } from "@/services/v1/openapi-types";
 export function RoleNewPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { me } = useAuth();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [permissions, setPermissions] = useState<PermissionCreate[]>([]);
+  const [permissions, setPermissions] = useState<PermissionEntry[]>([]);
   const { error, isPending, submit } = useRoleCreateSubmit();
 
   const onSubmit = (event: FormEvent) => {
@@ -57,7 +59,6 @@ export function RoleNewPage() {
                   autoFocus
                   required
                   pattern={NAME_PATTERN}
-                  title={t("common.name-rule-64")}
                 />
                 <FieldDescription>{t("common.name-rule")}</FieldDescription>
               </Field>
@@ -73,7 +74,21 @@ export function RoleNewPage() {
               </Field>
             </FieldGroup>
 
-            <PermissionBuilder permissions={permissions} onChange={setPermissions} />
+            <section aria-labelledby="role-permissions-heading" className="flex min-w-0 flex-col gap-3 border-t border-border pt-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 id="role-permissions-heading" className="m-0 text-sm font-semibold">{t("common.permissions")}</h2>
+                  <p className="mt-1 mb-0 text-sm text-muted-foreground">{t("role.permissions-description")}</p>
+                </div>
+                <Badge className="mt-0.5">{permissions.length}</Badge>
+              </div>
+              <PermissionPicker
+                mode="role"
+                value={permissions}
+                onChange={setPermissions}
+                grantable={(permission) => hasPermission(me, permission)}
+              />
+            </section>
 
             {error && <Alert>{error}</Alert>}
 

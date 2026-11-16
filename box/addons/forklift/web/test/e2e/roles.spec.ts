@@ -25,37 +25,47 @@ test.describe("roles", () => {
       await page.goto("/access/roles/new");
       await page.locator("#role-name").fill(name);
       await page.locator("#role-description").fill("e2e round trip");
-      // One permission at creation; the second is added on the detail page, so
-      // both paths into a role's permissions are exercised.
-      //
-      // Escape after typing: the pattern combobox opens its suggestion list on
-      // the first keystroke and that popup covers the button below it, so a
-      // click would land on the list instead. This is what a person does too.
-      await page.getByRole("combobox").first().fill("*");
-      await page.keyboard.press("Escape");
+      // One permission at creation; the rest are added on the detail page, so
+      // both paths into a role's permissions are exercised. The picker opens on
+      // repo.read over every repository, which is the grant wanted here.
+      await expect(page.getByRole("checkbox", { name: "repo.read" })).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByLabel("Repository pattern")).toHaveValue("*");
       await page.getByRole("button", { name: "Add permission" }).click();
+      await expect(page.getByRole("listitem", { name: "*: repo.read", exact: true })).toBeVisible();
       await page.getByRole("button", { name: "Create role", exact: true }).click();
 
       await expect(page).toHaveURL(/\/access\/roles\/?$/);
       const row = page.getByTestId(`row-${name}`);
       await expect(row).toBeVisible();
-      await expect(row).toContainText("*: read");
+      await expect(row).toContainText("*: repo.read");
 
       await row.getByRole("button", { name: "Modify" }).click();
       await expect(page.getByTestId("page-role-detail")).toBeVisible();
 
       const permissions = page.getByTestId("panel-permissions");
-      await permissions.getByRole("combobox").fill("maven-*");
+      await permissions.getByRole("button", { name: "Add permission" }).click();
+      // Escape after typing: the pattern combobox opens its suggestion list on
+      // the first keystroke and that popup covers the controls below it.
+      await permissions.getByLabel("Repository pattern").fill("maven-*");
       await page.keyboard.press("Escape");
-      await permissions.getByRole("checkbox", { name: "write" }).click();
-      await permissions.getByRole("button", { name: "Add", exact: true }).click();
-      await expect(permissions.getByText("maven-*: read,write")).toBeVisible();
+      await permissions.getByRole("checkbox", { name: "repo.write" }).click();
+      await permissions.getByRole("button", { name: "Add permission" }).click();
+      await expect(permissions.getByRole("listitem", { name: "maven-*: repo.read, repo.write" }))
+        .toBeVisible();
 
-      // Exact text: "maven-*: read,write" contains "*: read" as a substring, so
-      // a loose match would still find the permission this step removes.
-      await permissions.getByRole("button", { name: "Remove permission" }).first().click();
-      await expect(permissions.getByText("*: read", { exact: true })).toBeHidden();
-      await expect(permissions.getByText("maven-*: read,write")).toBeVisible();
+      // A global permission takes no pattern: choosing only global ones hides
+      // the repository field altogether.
+      await permissions.getByRole("button", { name: "Add permission" }).click();
+      await permissions.getByRole("checkbox", { name: "repo.read" }).click();
+      await permissions.getByRole("checkbox", { name: "audit.read" }).click();
+      await expect(permissions.getByLabel("Repository pattern")).toBeHidden();
+      await permissions.getByRole("button", { name: "Add permission" }).click();
+      await expect(permissions.getByRole("listitem", { name: "Global: audit.read" })).toBeVisible();
+
+      await permissions.getByRole("button", { name: "Remove permission *: repo.read", exact: true }).click();
+      await expect(permissions.getByRole("listitem", { name: "*: repo.read", exact: true })).toBeHidden();
+      await expect(permissions.getByRole("listitem", { name: "maven-*: repo.read, repo.write" }))
+        .toBeVisible();
 
       await page.getByTestId("panel-danger-zone").getByRole("button", { name: "Delete role" })
         .click();
@@ -86,6 +96,8 @@ test.describe("roles", () => {
     // are gone, because the API answers those with a 409.
     await expect(page.getByTestId("panel-permissions")).toBeVisible();
     await expect(page.getByTestId("panel-permissions").getByRole("combobox")).toBeHidden();
+    await expect(page.getByTestId("panel-permissions").getByRole("button", { name: "Add permission" }))
+      .toBeHidden();
     await expect(page.getByTestId("panel-danger-zone")).toBeHidden();
   });
 
@@ -124,7 +136,7 @@ async function createRole(adminApi: APIRequestContext, name: string): Promise<nu
     data: {
       name,
       description: "e2e fixture",
-      permissions: [{ repo_pattern: "*", actions: ["read"] }],
+      permissions: [{ repo_pattern: "*", actions: ["repo.read"] }],
     },
   });
   expect(response.ok()).toBe(true);

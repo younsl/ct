@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ExternalLink, VolumeX } from "lucide-react";
 import { useAuth } from "@/authContext";
+import { canManageCoverage, canViewCoverageSettings } from "@/utils/permissions";
 import { Alert } from "@/components/app-ui/alert";
 import { Badge } from "@/components/app-ui/badge";
 import { GitlabCiView } from "@/components/app-ui/gitlab-ci-view";
@@ -88,7 +89,7 @@ function CoverageProjectRoute() {
   });
   const { data: pipeline, isFetching: pipelineLoading } = useQuery({
     ...openApiQueryOptions.getCoverageProjectPipeline(params),
-    enabled: showPipeline && me.admin && !!path,
+    enabled: showPipeline && canViewCoverageSettings(me) && !!path,
   });
 
   // The whole selection travels on every change, so what is left out is what
@@ -156,7 +157,7 @@ function CoverageProjectRoute() {
                 GitLab
               </a>
             )}
-            {me.admin && (
+            {canManageCoverage(me) && (
               <Popover>
                 <PopoverTrigger
                   render={<Button type="button" variant={mutedScopes.length > 0 ? "default" : "outline"} />}
@@ -394,7 +395,7 @@ function CoverageProjectRoute() {
         </CardContent>
       </Card>
 
-      {me.admin && (
+      {canViewCoverageSettings(me) && (
         <section className="mt-6">
           <div className="mb-2 flex items-center justify-between gap-3">
             <h2 className="text-sm font-medium">{t("coverage.pipeline")}</h2>

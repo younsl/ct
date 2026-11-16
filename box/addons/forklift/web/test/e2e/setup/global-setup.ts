@@ -58,13 +58,11 @@ async function createAccount(admin: ApiContext, account: E2EAccount) {
 
   if (account.grants) {
     const name = `${account.username}-role`;
-    // "*" because these accounts test what the UI reveals, not which
-    // repositories a pattern matches.
     const created = await admin.post("/api/v1/roles", {
       data: {
         name,
         description: `e2e ${account.role}`,
-        permissions: [{ repo_pattern: "*", actions: account.grants }],
+        permissions: account.grants,
       },
     });
 

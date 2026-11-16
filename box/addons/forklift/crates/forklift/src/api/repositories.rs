@@ -48,6 +48,8 @@ struct RepositoryCapabilitiesDTO {
     write: bool,
     delete: bool,
     upload: bool,
+    security: bool,
+    admin: bool,
 }
 
 fn to_dto(r: &Repository) -> Result<RepositoryDTO, repoconfig::Error> {
@@ -84,10 +86,12 @@ impl Handler {
             self.authz.is_none() || p.as_ref().is_some_and(|p| p.can(&repository.name, action))
         };
         dto.capabilities = RepositoryCapabilitiesDTO {
-            read: can(auth::ACTION_READ),
-            write: can(auth::ACTION_WRITE),
-            delete: can(auth::ACTION_DELETE),
+            read: can(auth::REPO_READ),
+            write: can(auth::REPO_WRITE),
+            delete: can(auth::REPO_DELETE),
             upload: false,
+            security: can(auth::REPO_SECURITY),
+            admin: can(auth::REPO_ADMIN),
         };
         dto.capabilities.upload = self.upload_enabled()
             && self
@@ -198,7 +202,7 @@ pub(super) async fn list(State(h): State<Arc<Handler>>, request: Request) -> Res
         if h.authz.is_some()
             && !p
                 .as_ref()
-                .is_some_and(|p| p.can(&repository.name, auth::ACTION_READ))
+                .is_some_and(|p| p.can(&repository.name, auth::REPO_READ))
         {
             continue;
         }
@@ -271,6 +275,9 @@ pub(super) async fn create(State(h): State<Arc<Handler>>, request: Request) -> R
             &format!("invalid repository name: {NAME_RULE_MSG}"),
         );
     }
+    if let Some(resp) = h.can_admin_repo(&parts, &req.name) {
+        return resp;
+    }
     if !valid_format(&req.format) {
         return write_error(StatusCode::BAD_REQUEST, "invalid format");
     }
@@ -300,6 +307,9 @@ pub(super) async fn create(State(h): State<Arc<Handler>>, request: Request) -> R
             repo::validate_group_members(&h.store, &req.format, &cfg.group.members).await
         {
             return write_error(StatusCode::BAD_REQUEST, &err.to_string());
+        }
+        if let Some(resp) = h.can_admin_members(&parts, &cfg.group.members) {
+            return resp;
         }
     } else if !cfg.group.members.is_empty() {
         return write_error(
@@ -512,7 +522,7 @@ impl Handler {
     pub(super) fn can_read_repo(&self, parts: &Parts, repo_name: &str) -> Option<Response> {
         // No authorization service (tests) allows everything.
         let allowed = self.authz.is_none()
-            || auth::from_request_parts(parts).is_some_and(|p| p.can(repo_name, auth::ACTION_READ));
+            || auth::from_request_parts(parts).is_some_and(|p| p.can(repo_name, auth::REPO_READ));
         if allowed {
             return None;
         }
@@ -522,8 +532,7 @@ impl Handler {
     /// Enforces the per-repository write permission.
     fn can_write_repo(&self, parts: &Parts, repo_name: &str) -> Option<Response> {
         let allowed = self.authz.is_none()
-            || auth::from_request_parts(parts)
-                .is_some_and(|p| p.can(repo_name, auth::ACTION_WRITE));
+            || auth::from_request_parts(parts).is_some_and(|p| p.can(repo_name, auth::REPO_WRITE));
         if allowed {
             return None;
         }
@@ -533,6 +542,27 @@ impl Handler {
         ))
     }
 
+    /// Enforces `repo.admin` on one repository (or on the name of one being
+    /// created).
+    pub(super) fn can_admin_repo(&self, parts: &Parts, repo_name: &str) -> Option<Response> {
+        let allowed = self.authz.is_none()
+            || auth::from_request_parts(parts).is_some_and(|p| p.can(repo_name, auth::REPO_ADMIN));
+        if allowed {
+            return None;
+        }
+        Some(write_error(
+            StatusCode::FORBIDDEN,
+            &format!("admin permission required for repository {repo_name}"),
+        ))
+    }
+
+    /// Enforces `repo.admin` on every member of a group repository. A group
+    /// serves its members without checking them again, so listing a repository
+    /// the caller does not administer would expose it through the group.
+    fn can_admin_members(&self, parts: &Parts, members: &[String]) -> Option<Response> {
+        members.iter().find_map(|m| self.can_admin_repo(parts, m))
+    }
+
     /// Enforces the per-repository security permission (admin qualifies via
     /// admin-implies-all). Neither approve nor audit is accepted here: deciding
     /// one package and reading the admin surfaces are separate capabilities from
@@ -540,7 +570,7 @@ impl Handler {
     fn can_security(&self, parts: &Parts, repo_name: &str) -> Option<Response> {
         let allowed = self.authz.is_none()
             || auth::from_request_parts(parts)
-                .is_some_and(|p| p.can(repo_name, auth::ACTION_SECURITY));
+                .is_some_and(|p| p.can(repo_name, auth::REPO_SECURITY));
         if allowed {
             return None;
         }
@@ -577,7 +607,7 @@ pub(super) async fn get(
         ..Default::default()
     };
     if let Some(p) = auth::from_request_parts(&parts) {
-        item.can_write = p.can(&repository.name, auth::ACTION_WRITE);
+        item.can_write = p.can(&repository.name, auth::REPO_WRITE);
     }
     // The pending-approval count so the detail page (policy flow) can badge the
     // approval gate and link to the queue. Proxy/hosted only; best-effort.
@@ -629,6 +659,9 @@ pub(super) async fn update(
         Ok(existing) => existing,
         Err(err) => return map_error(err),
     };
+    if let Some(resp) = h.can_admin_repo(&parts, &existing.name) {
+        return resp;
+    }
     // Clients only ever see masked upstream secrets; restore the stored values
     // for any field that came back as the mask.
     if let Ok(existing_cfg) = repoconfig::parse(&existing.config_json) {
@@ -643,6 +676,9 @@ pub(super) async fn update(
                 .await
         {
             return write_error(StatusCode::BAD_REQUEST, &err.to_string());
+        }
+        if let Some(resp) = h.can_admin_members(&parts, &req.config.group.members) {
+            return resp;
         }
     } else if !req.config.group.members.is_empty() {
         return write_error(
@@ -842,6 +878,9 @@ pub(super) async fn set_disabled(
         Ok(repository) => repository,
         Err(err) => return map_error(err),
     };
+    if let Some(resp) = h.can_admin_repo(&parts, &repository.name) {
+        return resp;
+    }
     if let Err(err) = h.store.set_repository_disabled(id, req.disabled).await {
         return map_error(err);
     }
@@ -902,7 +941,10 @@ pub(super) async fn permissions(
     }
     let out: Vec<RepoPermissionDTO> = perms
         .into_iter()
-        .filter(|p| auth::match_repo_pattern(&p.repo_pattern, &repository.name))
+        .filter(|p| {
+            auth::match_repo_pattern(&p.repo_pattern, &repository.name)
+                || p.actions.split(',').any(|a| a.trim() == auth::ALL)
+        })
         .map(|p| RepoPermissionDTO {
             role_id: p.role_id,
             role: role_name.get(&p.role_id).cloned().unwrap_or_default(),
@@ -927,8 +969,8 @@ struct RepoTokenDTO {
 }
 
 /// Lists personal access tokens that can reach this repository: tokens with a
-/// scope whose pattern matches the repo (scoped grant), plus unscoped tokens
-/// (which inherit the owner's role access to any repo). The effective access of a
+/// repository scope whose pattern matches the repo. A token without scopes is
+/// rejected at authentication, so it reaches nothing. The effective access of a
 /// scoped token is still bounded by its owner's roles.
 pub(super) async fn tokens(
     State(h): State<Arc<Handler>>,
@@ -961,20 +1003,6 @@ pub(super) async fn tokens(
     let mut out = Vec::new();
     for t in tokens {
         let scopes: Vec<TokenScope> = serde_json::from_str(&t.scopes_json).unwrap_or_default();
-        if scopes.is_empty() {
-            // Unscoped: inherits the owner's role access to any repository.
-            out.push(RepoTokenDTO {
-                token_id: t.id,
-                name: t.name,
-                owner: owner.get(&t.user_id).cloned().unwrap_or_default(),
-                repo_pattern: "*".to_string(),
-                actions: Vec::new(),
-                unscoped: true,
-                expires_at: t.expires_at,
-                last_used_at: t.last_used_at,
-            });
-            continue;
-        }
         let mut matched = String::new();
         let mut seen = std::collections::HashSet::new();
         let mut actions = Vec::new();
@@ -1445,10 +1473,10 @@ pub(super) async fn list_artifacts(
     let p = auth::from_request_parts(&parts);
     let can_write = h.authz.is_none()
         || p.as_ref()
-            .is_some_and(|p| p.can(&repository.name, auth::ACTION_WRITE));
+            .is_some_and(|p| p.can(&repository.name, auth::REPO_WRITE));
     let can_delete = h.authz.is_none()
         || p.as_ref()
-            .is_some_and(|p| p.can(&repository.name, auth::ACTION_DELETE));
+            .is_some_and(|p| p.can(&repository.name, auth::REPO_DELETE));
     let publication_out: Vec<PublicationDTO> = publications
         .into_iter()
         .map(|publication| {
@@ -1826,6 +1854,9 @@ pub(super) async fn delete_artifact(
         Ok(repository) => repository,
         Err(err) => return map_error(err),
     };
+    if let Some(resp) = h.can_admin_repo(&parts, &repository.name) {
+        return resp;
+    }
 
     let path = query.path.trim().to_string();
     let force = query.force == "true";
@@ -2113,6 +2144,9 @@ pub(super) async fn delete(
         Ok(repository) => repository,
         Err(err) => return map_error(err),
     };
+    if let Some(resp) = h.can_admin_repo(&parts, &repository.name) {
+        return resp;
+    }
     // Predefined seed repositories are protected: deleting one would break the
     // groups that reference it and it would reappear on the next startup, so it
     // is refused regardless of the caller's admin rights.

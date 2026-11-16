@@ -1,10 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
 
 import { Badge } from "@/components/app-ui/badge";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { Button } from "@/components/ui/button";
 import { DataTable, type ColumnDef } from "@/components/app-ui/table";
 import { useTranslation } from "@/lib/i18n";
-import { formatRolePermission } from "@/routes/access/roles/-utils/role-permissions";
+import { formatPermissionEntry } from "@/lib/permission-entries";
 
 import type { Role } from "@/services/v1/openapi-types";
 
@@ -22,13 +23,11 @@ export function RolesTable({ roles }: { roles: Role[] }) {
       header: t("common.source"),
       accessorFn: (role) => (role.managed ? 1 : 0),
       cell: ({ row }) => (
-        <Badge
-          title={row.original.managed
-            ? "Managed by the declarative RBAC policy and not editable in the UI."
-            : "Created in the UI or API and editable here."}
-        >
-          {row.original.managed ? t("common.status.managed") : t("common.status.local")}
-        </Badge>
+        <HintTooltip content={row.original.managed ? t("role.source-managed-help") : t("role.source-local-help")}>
+          <Badge tabIndex={0}>
+            {row.original.managed ? t("common.status.managed") : t("common.status.local")}
+          </Badge>
+        </HintTooltip>
       ),
     },
     {
@@ -54,8 +53,12 @@ export function RolesTable({ roles }: { roles: Role[] }) {
       cell: ({ row }) => (
         <div className="flex flex-wrap gap-1.5">
           {row.original.permissions.map((permission) => (
-            <Badge key={permission.id} className="font-mono">
-              {formatRolePermission(permission)}
+            <Badge
+              key={permission.id}
+              variant={permission.repo_pattern ? "default" : "secondary"}
+              className="font-mono"
+            >
+              {formatPermissionEntry(permission, t("permission.global"))}
             </Badge>
           ))}
           {row.original.permissions.length === 0 && (

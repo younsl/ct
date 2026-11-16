@@ -11,8 +11,9 @@ import {
 // means "no scopes recorded", never a broken page.
 describe("parseTokenScopes", () => {
   test("reads a scope list", () => {
-    expect(parseTokenScopes('[{"repo_pattern":"maven-*","actions":["read"]}]')).toEqual([
-      { repo_pattern: "maven-*", actions: ["read"] },
+    expect(parseTokenScopes('[{"repo_pattern":"maven-*","actions":["repo.read"]},{"actions":["audit.read"]}]')).toEqual([
+      { repo_pattern: "maven-*", actions: ["repo.read"] },
+      { actions: ["audit.read"] },
     ]);
   });
 
@@ -25,14 +26,19 @@ describe("parseTokenScopes", () => {
 });
 
 describe("formatting", () => {
-  test("a scope reads as pattern then actions", () => {
-    expect(formatTokenScope({ repo_pattern: "maven-*", actions: ["read", "write"] }))
-      .toBe("maven-*: read,write");
+  test("a repository scope reads as pattern then permissions", () => {
+    expect(formatTokenScope({ repo_pattern: "maven-*", actions: ["repo.read", "repo.write"] }, "Global"))
+      .toBe("maven-*: repo.read, repo.write");
+  });
+
+  test("a scope without a pattern reads as global", () => {
+    expect(formatTokenScope({ repo_pattern: "", actions: ["audit.read"] }, "Global")).toBe("Global: audit.read");
+    expect(formatTokenScope({ actions: ["user.read"] }, "Global")).toBe("Global: user.read");
   });
 
   test("a whole list joins for sorting", () => {
     expect(
-      formatTokenScopes('[{"repo_pattern":"a","actions":["read"]},{"repo_pattern":"b","actions":["write"]}]'),
-    ).toBe("a: read, b: write");
+      formatTokenScopes('[{"repo_pattern":"a","actions":["repo.read"]},{"actions":["system.read"]}]', "Global"),
+    ).toBe("a: repo.read, Global: system.read");
   });
 });

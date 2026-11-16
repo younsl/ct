@@ -382,7 +382,7 @@ pub(crate) mod tests {
                     name: "readonly".into(),
                     permissions: vec![Permission {
                         repo_pattern: "*".into(),
-                        actions: "read".into(),
+                        actions: "repo.read".into(),
                         ..Permission::default()
                     }],
                     ..ManagedRole::default()
@@ -391,7 +391,7 @@ pub(crate) mod tests {
                     name: "dev".into(),
                     permissions: vec![Permission {
                         repo_pattern: "team-*".into(),
-                        actions: "read,write".into(),
+                        actions: "repo.read,repo.write".into(),
                         ..Permission::default()
                     }],
                     ..ManagedRole::default()
@@ -429,7 +429,10 @@ pub(crate) mod tests {
         assert_eq!(alice.source, SOURCE_OIDC, "alice source, want oidc");
         let perms = s.permissions_for_user(alice.id).await.unwrap();
         assert_eq!(perms.len(), 1, "alice perms = {perms:?}");
-        assert_eq!(perms[0].actions, "read,write", "alice perms = {perms:?}");
+        assert_eq!(
+            perms[0].actions, "repo.read,repo.write",
+            "alice perms = {perms:?}"
+        );
 
         // Group mapping resolves to readonly.
         let names = s
@@ -454,7 +457,7 @@ pub(crate) mod tests {
         s.add_permission(Permission {
             role_id: unmanaged.id,
             repo_pattern: "*".into(),
-            actions: "read".into(),
+            actions: "repo.read".into(),
             ..Permission::default()
         })
         .await
@@ -601,7 +604,7 @@ pub(crate) mod tests {
                 name: "dev".into(),
                 permissions: vec![Permission {
                     repo_pattern: "*".into(),
-                    actions: "read".into(),
+                    actions: "repo.read".into(),
                     ..Permission::default()
                 }],
                 ..ManagedRole::default()

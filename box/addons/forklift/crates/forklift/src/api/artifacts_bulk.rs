@@ -210,6 +210,9 @@ pub(super) async fn bulk_delete(
         Ok(repo) => repo,
         Err(err) => return map_error(err),
     };
+    if let Some(resp) = h.can_admin_repo(&parts, &repo.name) {
+        return resp;
+    }
     let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
         return write_error(StatusCode::BAD_REQUEST, "invalid json body");
     };
@@ -301,7 +304,7 @@ pub(crate) mod tests {
             "pw123456",
             "npm-writer",
             "npmjs",
-            r#""read","write""#,
+            r#""repo.read","repo.write""#,
         )
         .await;
 
@@ -416,7 +419,7 @@ pub(crate) mod tests {
             "pw123456",
             "npm-writer",
             "npmjs",
-            r#""read","write""#,
+            r#""repo.read","repo.write""#,
         )
         .await;
         let url = format!("/repositories/{repo_id}/artifacts/bulk-delete");

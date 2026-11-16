@@ -39,12 +39,16 @@ export function TokensTable({
       // Sorted on the patterns alone; the actions vary per pattern and would
       // make the ordering read as arbitrary.
       accessorFn: (token) =>
-        parseTokenScopes(token.scopes_json).map((scope) => scope.repo_pattern).join(","),
+        parseTokenScopes(token.scopes_json).map((scope) => scope.repo_pattern ?? "").join(","),
       cell: ({ row }) => (
         <>
           {parseTokenScopes(row.original.scopes_json).map((scope, index) => (
-            <Badge key={index} className="mr-1 font-mono">
-              {formatTokenScope(scope)}
+            <Badge
+              key={index}
+              variant={scope.repo_pattern ? "default" : "secondary"}
+              className="mr-1 font-mono"
+            >
+              {formatTokenScope(scope, t("permission.global"))}
             </Badge>
           ))}
         </>

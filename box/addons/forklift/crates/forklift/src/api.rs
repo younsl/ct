@@ -465,226 +465,294 @@ pub fn routes(h: Arc<Handler>) -> Router {
             authenticated.route_layer(axum::middleware::from_fn(auth_service::require_auth));
     }
 
-    // Administrative mutations: administrators only.
-    // Administrative reads: administrators plus principals holding the audit
-    // action (e.g. a security auditor). Read-only views of the admin surfaces.
-    let mut auditor = Router::new()
-        .route(
-            "/repositories/{id}/audit-logs",
-            axum::routing::get(repositories::list_audit_logs),
-        )
-        .route(
-            "/repositories/{id}/permissions",
-            axum::routing::get(repositories::permissions),
-        )
-        .route(
-            "/repositories/{id}/tokens",
-            axum::routing::get(repositories::tokens),
-        )
-        .route("/users", axum::routing::get(auth::list_users))
-        .route(
-            "/users/{id}/tokens",
-            axum::routing::get(auth::list_user_tokens),
-        )
-        .route("/roles", axum::routing::get(auth::list_roles))
-        .route(
-            "/group-mappings",
-            axum::routing::get(auth::list_group_mappings),
-        )
-        .route(
-            // Notification receivers are listed for admins/auditors so the
-            // repository settings UI can offer them for selection.
+    let gate = |router: Router<Arc<Handler>>, perm: &'static str| {
+        if guarded {
+            router.route_layer(axum::middleware::from_fn_with_state(
+                perm,
+                auth_service::require,
+            ))
+        } else {
+            router
+        }
+    };
+    let gate_any = |router: Router<Arc<Handler>>, perms: &'static [&'static str]| {
+        if guarded {
+            router.route_layer(axum::middleware::from_fn_with_state(
+                perms,
+                auth_service::require_any,
+            ))
+        } else {
+            router
+        }
+    };
+
+    let user_read = gate(
+        Router::new()
+            .route("/users", axum::routing::get(auth::list_users))
+            .route(
+                "/users/{id}/tokens",
+                axum::routing::get(auth::list_user_tokens),
+            ),
+        auth_service::USER_READ,
+    );
+    let user_write = gate(
+        Router::new()
+            .route("/users", axum::routing::post(auth::create_user))
+            .route(
+                "/users/{id}",
+                axum::routing::put(auth::update_user).delete(auth::delete_user),
+            )
+            .route(
+                "/users/{id}/impersonate",
+                axum::routing::post(auth::impersonate_user),
+            )
+            .route("/users/{id}/roles", axum::routing::post(auth::assign_role))
+            .route(
+                "/users/{id}/roles/{roleID}",
+                axum::routing::delete(auth::remove_role),
+            )
+            .route(
+                "/users/{id}/tokens",
+                axum::routing::post(auth::create_user_token),
+            )
+            .route(
+                "/users/{id}/tokens/{tokenID}",
+                axum::routing::patch(auth::update_user_token).delete(auth::delete_user_token),
+            ),
+        auth_service::USER_WRITE,
+    );
+    let role_read = gate(
+        Router::new()
+            .route("/roles", axum::routing::get(auth::list_roles))
+            .route(
+                "/group-mappings",
+                axum::routing::get(auth::list_group_mappings),
+            ),
+        auth_service::ROLE_READ,
+    );
+    let role_write = gate(
+        Router::new()
+            .route("/roles", axum::routing::post(auth::create_role))
+            .route("/roles/{id}", axum::routing::delete(auth::delete_role))
+            .route(
+                "/roles/{id}/permissions",
+                axum::routing::post(auth::add_permission),
+            )
+            .route(
+                "/roles/{id}/permissions/{permID}",
+                axum::routing::delete(auth::delete_permission),
+            )
+            .route(
+                "/group-mappings",
+                axum::routing::post(auth::create_group_mapping),
+            )
+            .route(
+                "/group-mappings/{id}",
+                axum::routing::delete(auth::delete_group_mapping),
+            ),
+        auth_service::ROLE_WRITE,
+    );
+    let audit_read = gate(
+        Router::new()
+            .route(
+                "/repositories/{id}/audit-logs",
+                axum::routing::get(repositories::list_audit_logs),
+            )
+            .route(
+                "/repositories/{id}/permissions",
+                axum::routing::get(repositories::permissions),
+            )
+            .route(
+                "/repositories/{id}/tokens",
+                axum::routing::get(repositories::tokens),
+            ),
+        auth_service::AUDIT_READ,
+    );
+    // Repository settings offer receivers for selection, so whoever may edit
+    // them may list receivers too.
+    let notification_read = gate_any(
+        Router::new().route(
             "/notification/receivers",
             axum::routing::get(notifications::list),
-        );
-    if guarded {
-        auditor = auditor.route_layer(axum::middleware::from_fn(auth_service::require_auditor));
-    }
-
-    let mut admin = Router::new()
-        .route("/ha", axum::routing::get(ha::get_status))
-        .route("/ha/step-down", axum::routing::post(ha::step_down))
-        .route("/storage", axum::routing::get(storage::get_stats))
-        .route("/storage/health", axum::routing::get(storage::get_health))
-        .route(
-            "/storage/migrations",
-            axum::routing::get(storage::list_migrations),
-        )
-        .route(
-            "/storage/migrations/{id}",
-            axum::routing::get(storage::get_migration),
-        )
-        .route(
-            "/repositories/{id}/artifacts/bulk-delete",
-            axum::routing::post(artifacts_bulk::bulk_delete),
-        )
-        .route("/announcement", axum::routing::put(announcement::put))
-        .route("/repositories", axum::routing::post(repositories::create))
-        .route(
-            "/repositories/check-upstream",
-            axum::routing::post(repositories::check_upstream),
-        )
-        .route(
-            "/repositories/{id}",
-            axum::routing::put(repositories::update).delete(repositories::delete),
-        )
-        .route(
-            "/repositories/{id}/disabled",
-            axum::routing::post(repositories::set_disabled),
-        )
-        .route(
-            "/repositories/{id}/artifacts",
-            axum::routing::delete(repositories::delete_artifact),
-        )
-        .route("/users", axum::routing::post(auth::create_user))
-        .route(
-            "/users/{id}",
-            axum::routing::put(auth::update_user).delete(auth::delete_user),
-        )
-        .route(
-            "/users/{id}/impersonate",
-            axum::routing::post(auth::impersonate_user),
-        )
-        .route("/users/{id}/roles", axum::routing::post(auth::assign_role))
-        .route(
-            "/users/{id}/roles/{roleID}",
-            axum::routing::delete(auth::remove_role),
-        )
-        .route(
-            "/users/{id}/tokens",
-            axum::routing::post(auth::create_user_token),
-        )
-        .route(
-            "/users/{id}/tokens/{tokenID}",
-            axum::routing::patch(auth::update_user_token).delete(auth::delete_user_token),
-        )
-        .route("/roles", axum::routing::post(auth::create_role))
-        .route("/roles/{id}", axum::routing::delete(auth::delete_role))
-        .route(
-            "/roles/{id}/permissions",
-            axum::routing::post(auth::add_permission),
-        )
-        .route(
-            "/roles/{id}/permissions/{permID}",
-            axum::routing::delete(auth::delete_permission),
-        )
-        .route(
-            "/group-mappings",
-            axum::routing::post(auth::create_group_mapping),
-        )
-        .route(
-            "/group-mappings/{id}",
-            axum::routing::delete(auth::delete_group_mapping),
-        )
-        .route(
-            "/notification/receivers",
-            axum::routing::post(notifications::create),
-        )
-        .route(
-            "/notification/receivers/{id}",
-            axum::routing::put(notifications::update).delete(notifications::delete),
-        )
-        .route(
-            "/notification/receivers/{id}/test",
-            axum::routing::post(notifications::test),
-        )
-        .route(
-            "/notification/test",
-            axum::routing::post(notifications::test_adhoc),
-        )
-        .route(
-            "/repositories/{id}/notification/sample",
-            axum::routing::get(notifications::preview_repo_sample)
-                .post(notifications::send_repo_sample),
-        )
-        // Coverage administration: the scan itself, what counts towards it, and
-        // where the report is sent. The pipeline viewer is here too — it reads
-        // GitLab CI definitions, which is a narrower surface than repository
-        // source but still more than the dashboard needs.
-        .route(
-            "/coverage/settings",
-            axum::routing::get(coverage::get_settings).put(coverage::update_settings),
-        )
-        .route(
-            "/coverage/settings/check-host",
-            axum::routing::post(coverage::check_host),
-        )
-        .route(
-            "/coverage/gitlab-check",
-            axum::routing::get(coverage::gitlab_check),
-        )
-        .route("/coverage/scan", axum::routing::post(coverage::start_scan))
-        .route(
-            "/coverage/project/mute",
-            axum::routing::put(coverage::update_project_mute),
-        )
-        .route(
-            "/coverage/project/pipeline",
-            axum::routing::get(coverage::get_project_pipeline),
-        )
-        .route(
-            "/coverage/notification/preview",
-            axum::routing::get(coverage::preview_alarm),
-        )
-        .route(
-            "/coverage/notification/send",
-            axum::routing::post(coverage::send_alarm),
-        )
-        .route(
-            "/coverage/notification/history",
-            axum::routing::get(coverage::alarm_history),
-        );
-    if guarded {
-        admin = admin.route_layer(axum::middleware::from_fn(auth_service::require_admin));
-    }
-
-    // Package approvals: administrators plus principals holding the approve
-    // action (e.g. a security-engineer role) or the audit action (a security
-    // auditor, read-only). Auditors may view this surface but not decide;
-    // mutations are enforced per repository inside the handlers via the approve
-    // action.
-    let mut approver_or_auditor = Router::new()
-        .route(
-            "/approvals",
-            axum::routing::get(approvals::list).post(approvals::create),
-        )
-        .route("/approvals/count", axum::routing::get(approvals::count))
-        .route(
-            "/approvals/pending-repos",
-            axum::routing::get(approvals::pending_repos),
-        )
-        .route("/approvals/{id}", axum::routing::get(approvals::get))
-        .route(
-            "/approvals/approve-all",
-            axum::routing::post(approvals::approve_all_pending),
-        )
-        .route(
-            "/approvals/{id}/approve",
-            axum::routing::post(approvals::approve),
-        )
-        .route(
-            "/approvals/{id}/reject",
-            axum::routing::post(approvals::reject),
-        )
-        .route(
-            "/version-denies",
-            axum::routing::get(denies::list).post(denies::create),
-        )
-        .route(
-            "/version-denies/{id}",
-            axum::routing::delete(denies::delete),
-        );
-    if guarded {
-        approver_or_auditor = approver_or_auditor.route_layer(axum::middleware::from_fn(
-            auth_service::require_approver_or_auditor,
-        ));
-    }
+        ),
+        &[
+            auth_service::NOTIFICATION_READ,
+            auth_service::REPO_SECURITY,
+            auth_service::REPO_ADMIN,
+        ],
+    );
+    let notification_write = gate(
+        Router::new()
+            .route(
+                "/notification/receivers",
+                axum::routing::post(notifications::create),
+            )
+            .route(
+                "/notification/receivers/{id}",
+                axum::routing::put(notifications::update).delete(notifications::delete),
+            )
+            .route(
+                "/notification/receivers/{id}/test",
+                axum::routing::post(notifications::test),
+            )
+            .route(
+                "/notification/test",
+                axum::routing::post(notifications::test_adhoc),
+            )
+            .route(
+                "/repositories/{id}/notification/sample",
+                axum::routing::get(notifications::preview_repo_sample)
+                    .post(notifications::send_repo_sample),
+            ),
+        auth_service::NOTIFICATION_WRITE,
+    );
+    let system_read = gate(
+        Router::new()
+            .route("/ha", axum::routing::get(ha::get_status))
+            .route("/storage", axum::routing::get(storage::get_stats))
+            .route("/storage/health", axum::routing::get(storage::get_health))
+            .route(
+                "/storage/migrations",
+                axum::routing::get(storage::list_migrations),
+            )
+            .route(
+                "/storage/migrations/{id}",
+                axum::routing::get(storage::get_migration),
+            ),
+        auth_service::SYSTEM_READ,
+    );
+    let system_write = gate(
+        Router::new()
+            .route("/ha/step-down", axum::routing::post(ha::step_down))
+            .route("/announcement", axum::routing::put(announcement::put)),
+        auth_service::SYSTEM_WRITE,
+    );
+    // The pipeline viewer reads GitLab CI definitions, which is more than the
+    // dashboard needs, so it sits with the other coverage administration reads.
+    let coverage_read = gate(
+        Router::new()
+            .route(
+                "/coverage/settings",
+                axum::routing::get(coverage::get_settings),
+            )
+            .route(
+                "/coverage/project/pipeline",
+                axum::routing::get(coverage::get_project_pipeline),
+            )
+            .route(
+                "/coverage/notification/preview",
+                axum::routing::get(coverage::preview_alarm),
+            )
+            .route(
+                "/coverage/notification/history",
+                axum::routing::get(coverage::alarm_history),
+            ),
+        auth_service::COVERAGE_READ,
+    );
+    let coverage_write = gate(
+        Router::new()
+            .route(
+                "/coverage/settings",
+                axum::routing::put(coverage::update_settings),
+            )
+            .route(
+                "/coverage/settings/check-host",
+                axum::routing::post(coverage::check_host),
+            )
+            .route(
+                "/coverage/gitlab-check",
+                axum::routing::get(coverage::gitlab_check),
+            )
+            .route("/coverage/scan", axum::routing::post(coverage::start_scan))
+            .route(
+                "/coverage/project/mute",
+                axum::routing::put(coverage::update_project_mute),
+            )
+            .route(
+                "/coverage/notification/send",
+                axum::routing::post(coverage::send_alarm),
+            ),
+        auth_service::COVERAGE_WRITE,
+    );
+    // Repository administration: the handlers check `repo.admin` on the
+    // repository they touch, or on the new name for a create.
+    let repo_admin = gate(
+        Router::new()
+            .route("/repositories", axum::routing::post(repositories::create))
+            .route(
+                "/repositories/check-upstream",
+                axum::routing::post(repositories::check_upstream),
+            )
+            .route(
+                "/repositories/{id}",
+                axum::routing::put(repositories::update).delete(repositories::delete),
+            )
+            .route(
+                "/repositories/{id}/disabled",
+                axum::routing::post(repositories::set_disabled),
+            )
+            .route(
+                "/repositories/{id}/artifacts",
+                axum::routing::delete(repositories::delete_artifact),
+            )
+            .route(
+                "/repositories/{id}/artifacts/bulk-delete",
+                axum::routing::post(artifacts_bulk::bulk_delete),
+            ),
+        auth_service::REPO_ADMIN,
+    );
+    // Package approvals: readable with `approval.read` or `repo.approve` on any
+    // pattern. Decisions are checked per repository inside the handlers.
+    let approvals = gate_any(
+        Router::new()
+            .route(
+                "/approvals",
+                axum::routing::get(approvals::list).post(approvals::create),
+            )
+            .route("/approvals/count", axum::routing::get(approvals::count))
+            .route(
+                "/approvals/pending-repos",
+                axum::routing::get(approvals::pending_repos),
+            )
+            .route("/approvals/{id}", axum::routing::get(approvals::get))
+            .route(
+                "/approvals/approve-all",
+                axum::routing::post(approvals::approve_all_pending),
+            )
+            .route(
+                "/approvals/{id}/approve",
+                axum::routing::post(approvals::approve),
+            )
+            .route(
+                "/approvals/{id}/reject",
+                axum::routing::post(approvals::reject),
+            )
+            .route(
+                "/version-denies",
+                axum::routing::get(denies::list).post(denies::create),
+            )
+            .route(
+                "/version-denies/{id}",
+                axum::routing::delete(denies::delete),
+            ),
+        &[auth_service::APPROVAL_READ, auth_service::REPO_APPROVE],
+    );
 
     public
         .merge(authenticated)
-        .merge(approver_or_auditor)
-        .merge(auditor)
-        .merge(admin)
+        .merge(approvals)
+        .merge(user_read)
+        .merge(user_write)
+        .merge(role_read)
+        .merge(role_write)
+        .merge(audit_read)
+        .merge(notification_read)
+        .merge(notification_write)
+        .merge(system_read)
+        .merge(system_write)
+        .merge(coverage_read)
+        .merge(coverage_write)
+        .merge(repo_admin)
         .with_state(Arc::clone(&h))
         .layer(axum::middleware::from_fn(bound_write_wait))
 }

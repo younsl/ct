@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, ExternalLink, Play, RefreshCw, Settings, VolumeX, X } from "lucide-react";
 import { useAuth } from "@/authContext";
 import { Alert } from "@/components/app-ui/alert";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { PageDescription, PageHeader } from "@/components/app-ui/page";
 import {
   SortableHead,
@@ -24,6 +25,7 @@ import type { CoverageGroup, CoverageOverview } from "@/services/v1/openapi-type
 import { useDateTime, useTranslation } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { InsightsTabs } from "@/routes/workspace/insights/-components/insights-tabs";
+import { canManageCoverage, canViewCoverageSettings } from "@/utils/permissions";
 
 // While a scan runs the picture changes every few seconds, so the page polls;
 // once it settles there is nothing to poll for until the next scan.
@@ -89,7 +91,7 @@ export function CoverageShell({
       <PageHeader
         title={t("coverage.title")}
         actions={
-          me.admin ? (
+          canViewCoverageSettings(me) ? (
             <>
               <Link
                 to="/workspace/coverage/settings"
@@ -98,18 +100,21 @@ export function CoverageShell({
                 <Settings className="size-4" aria-hidden="true" />
                 {t("nav.settings")}
               </Link>
-              <Button
-                onClick={() => scan.mutate()}
-                disabled={overview.scanning || scan.isPending || !overview.configured}
-                title={overview.configured ? undefined : t("coverage.not-configured")}
-              >
-                {overview.scanning ? (
-                  <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Play className="size-4" aria-hidden="true" />
-                )}
-                {overview.scanning ? t("coverage.scanning") : t("coverage.scan-now")}
-              </Button>
+              {canManageCoverage(me) && (
+                <HintTooltip content={overview.configured ? undefined : t("coverage.not-configured")} wrap>
+                  <Button
+                    onClick={() => scan.mutate()}
+                    disabled={overview.scanning || scan.isPending || !overview.configured}
+                  >
+                    {overview.scanning ? (
+                      <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Play className="size-4" aria-hidden="true" />
+                    )}
+                    {overview.scanning ? t("coverage.scanning") : t("coverage.scan-now")}
+                  </Button>
+                </HintTooltip>
+              )}
             </>
           ) : null
         }

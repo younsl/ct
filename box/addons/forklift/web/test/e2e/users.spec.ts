@@ -133,7 +133,7 @@ test.describe("users", () => {
       await page.goto(`/access/users/${userId}`);
 
       // The summary and roles panels are readable; every panel that writes -
-      // password, lockout, status, danger zone - is gated on me.admin.
+      // password, lockout, status, danger zone - is gated on user.write.
       await expect(page.getByTestId("panel-summary")).toBeVisible();
       await expect(page.getByTestId("panel-roles").getByRole("combobox")).toBeHidden();
       await expect(page.getByTestId("panel-password")).toBeHidden();
@@ -152,7 +152,7 @@ test.describe("users", () => {
 async function createRole(adminApi: APIRequestContext, name: string): Promise<number> {
   await deleteRoleIfPresent(adminApi, name);
   const response = await adminApi.post("/api/v1/roles", {
-    data: { name, description: "e2e fixture", permissions: [{ repo_pattern: "*", actions: ["read"] }] },
+    data: { name, description: "e2e fixture", permissions: [{ repo_pattern: "*", actions: ["repo.read"] }] },
   });
   expect(response.ok()).toBe(true);
 

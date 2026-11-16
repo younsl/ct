@@ -1,6 +1,8 @@
 import { useState } from "react";
 
+import { useAuth } from "@/authContext";
 import { Alert } from "@/components/app-ui/alert";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/overlays/confirm-modal";
@@ -10,19 +12,21 @@ import { HaArchitecture } from "@/routes/admin/-ha/components/ha-architecture";
 import { HaStatusTable } from "@/routes/admin/-ha/components/ha-status-table";
 import { useHaStatus } from "@/routes/admin/-ha/hooks/use-ha-status";
 import { storageUsage } from "@/routes/admin/-ha/utils/ha-status";
+import { canManageSystem } from "@/utils/permissions";
 
 // HaStatusPage renders the live HA cluster topology and status, plus the
 // manual-failover (step-down) control. The step-down danger zone only shows for
 // the active leader.
 export function HaStatusPage() {
   const { t } = useTranslation();
+  const { me } = useAuth();
   const [isConfirmingStepDown, setIsConfirmingStepDown] = useState(false);
   const ha = useHaStatus();
   const { status } = ha;
 
   // Manual failover only makes sense in HA mode when this pod is the active
   // leader; a standby has nothing to release.
-  const canStepDown = Boolean(status?.enabled && status?.is_leader);
+  const canStepDown = Boolean(status?.enabled && status?.is_leader) && canManageSystem(me);
 
   return (
     <div data-testid="page-ha">
@@ -34,16 +38,18 @@ export function HaStatusPage() {
           <div className="mb-4 flex min-w-0 items-center justify-between gap-3 max-sm:flex-col max-sm:flex-wrap max-sm:items-start">
             <h2 className="m-0 text-base font-semibold">{t("ha.cluster-status")}</h2>
             <div className="flex min-w-0 items-center gap-2 max-sm:w-full max-sm:flex-wrap max-sm:justify-between">
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-[9px] py-0.5 text-[11px] tabular-nums text-muted-foreground"
-                title={t("ha.auto-refresh-title")}
-              >
+              <HintTooltip content={t("ha.auto-refresh-title")}>
                 <span
-                  className="size-1.5 flex-none rounded-full bg-[var(--fx-success)] [animation:refresh-pulse_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
-                  aria-hidden="true"
-                />
-                auto-refresh {ha.secondsLeft}s
-              </span>
+                  tabIndex={0}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-[9px] py-0.5 text-[11px] tabular-nums text-muted-foreground"
+                >
+                  <span
+                    className="size-1.5 flex-none rounded-full bg-[var(--fx-success)] [animation:refresh-pulse_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                  auto-refresh {ha.secondsLeft}s
+                </span>
+              </HintTooltip>
               <Button variant="outline" type="button" onClick={ha.refresh}>
                 {t("common.refresh")}
               </Button>

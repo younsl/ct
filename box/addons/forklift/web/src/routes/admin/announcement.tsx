@@ -4,6 +4,7 @@ import { useAuth } from "@/authContext";
 import { AnnouncementForm } from "@/components/app-ui/announcement";
 import { PageDescription, PageHeader } from "@/components/app-ui/page";
 import { Redirect } from "@/components/app/redirect";
+import { canManageSystem } from "@/utils/permissions";
 import { useTranslation } from "@/lib/i18n";
 
 export const Route = createFileRoute("/admin/announcement")({
@@ -15,7 +16,7 @@ function AdminAnnouncementRoute() {
   const { t } = useTranslation();
   // Signed out: the shell redirects to /login, so do not compete with it.
   if (!me.authenticated) return null;
-  if (!me.admin) return <Redirect to="/workspace/repositories" replace />;
+  if (!canManageSystem(me)) return <Redirect to="/workspace/repositories" replace />;
   return (
     <>
       <PageHeader title={t("announce.title")} />

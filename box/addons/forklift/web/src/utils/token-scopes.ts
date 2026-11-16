@@ -3,6 +3,7 @@
 // was copied into the user detail page and the tokens page independently; it
 // lives here so the two cannot drift.
 
+import { formatPermissionEntry } from "@/lib/permission-entries";
 import type { TokenScope } from "@/services/v1/openapi-types";
 
 // The generated type, not a local restatement: its action list is a union the
@@ -24,10 +25,12 @@ export function parseTokenScopes(json: string): TokenScope[] {
   }
 }
 
-export function formatTokenScope(scope: TokenScope): string {
-  return `${scope.repo_pattern}: ${scope.actions.join(",")}`;
+export function formatTokenScope(scope: TokenScope, globalLabel: string): string {
+  return formatPermissionEntry(scope, globalLabel);
 }
 
-export function formatTokenScopes(json: string): string {
-  return parseTokenScopes(json).map(formatTokenScope).join(", ");
+export function formatTokenScopes(json: string, globalLabel: string): string {
+  return parseTokenScopes(json)
+    .map((scope) => formatTokenScope(scope, globalLabel))
+    .join(", ");
 }

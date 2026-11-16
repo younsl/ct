@@ -492,15 +492,19 @@ pub struct UpdateUserArgs {
     pub roles: Option<Vec<i64>>,
 }
 
-/// One repository permission granted by a role.
+/// One permission entry: `repo.*` permissions on a repository pattern, or
+/// global permissions with no pattern.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RolePermission {
-    #[schemars(description = "repository name glob the permission applies to, e.g. * or maven-*")]
+pub struct PermissionEntry {
+    #[serde(default)]
+    #[schemars(
+        description = "repository name glob such as * or maven-*, required for repo.* permissions and empty for global ones"
+    )]
     pub repo_pattern: String,
     #[schemars(
-        description = "granted action: read, write, delete, admin, approve, audit or security"
+        description = "permissions of one kind: repo.read, repo.write, repo.delete, repo.approve, repo.security, repo.admin, or global user.read, user.write, role.read, role.write, audit.read, approval.read, notification.read, notification.write, coverage.read, coverage.write, insights.read, insights.write, system.read, system.write, or * for everything"
     )]
-    pub action: String,
+    pub actions: Vec<String>,
 }
 
 /// Arguments of `forklift_create_role`.
@@ -513,10 +517,10 @@ pub struct CreateRoleArgs {
     pub description: String,
     #[serde(default)]
     #[schemars(
-        with = "Vec<RolePermission>",
-        description = "repository permissions granted by the role"
+        with = "Vec<PermissionEntry>",
+        description = "permissions granted by the role, one entry per repository pattern plus one for global permissions"
     )]
-    pub permissions: Option<Vec<RolePermission>>,
+    pub permissions: Option<Vec<PermissionEntry>>,
 }
 
 /// Arguments of `forklift_delete_role`.
@@ -552,14 +556,11 @@ pub struct CreateUserTokenArgs {
     #[serde(default)]
     #[schemars(description = "what the token is for")]
     pub description: String,
-    #[serde(default)]
     #[schemars(
-        with = "Vec<String>",
-        description = "token scopes as 'repo_pattern:action' entries, e.g. *:read"
+        description = "token scopes, at least one: repo.read, repo.write, repo.delete on a pattern, or global *.read permissions with no pattern. Decisions, administration and global writes cannot be carried by a token"
     )]
-    pub scopes: Option<Vec<String>>,
-    #[serde(default)]
-    #[schemars(description = "lifetime such as 720h; omit for no expiry")]
+    pub scopes: Vec<PermissionEntry>,
+    #[schemars(description = "lifetime such as 720h, at most 8760h")]
     pub expires_in: String,
 }
 
@@ -879,7 +880,7 @@ tool_surface! {
     "forklift_version", NoArgs, forklift_version,
         "Get the forklift server version, commit and whether OIDC login is enabled.";
     "forklift_whoami", NoArgs, forklift_whoami,
-        "Identify the calling principal: username, auth source and whether it holds admin, approver, auditor or security rights. Use to learn what the other tools will be allowed to do.";
+        "Identify the calling principal: username, auth source and the <category>.<verb> permissions it holds (permissions), plus the admin, approver, auditor and security summary flags. Use to learn what the other tools will be allowed to do.";
     "forklift_get_landing_stats", NoArgs, forklift_get_landing_stats,
         "Get coarse instance-wide totals: repository count and artifact count.";
     "forklift_list_repository_names", NoArgs, forklift_list_repository_names,
@@ -921,15 +922,15 @@ tool_surface! {
     "forklift_bulk_label_artifacts", ArtifactBulkLabelArgs, forklift_bulk_label_artifacts,
         "Add or remove one label across many artifacts in a single call, up to 200 paths. Each path is judged on its own permission (admin on the repository, or having uploaded that artifact) and the paths that were refused come back in failed rather than failing the batch.";
     "forklift_bulk_delete_artifacts", ArtifactBulkDeleteArgs, forklift_bulk_delete_artifacts,
-        "Delete many artifacts by exact path in a single call, up to 200 paths. Admin only. A path that refuses is reported in failed rather than failing the batch. Use forklift_delete_artifacts to purge by pattern instead.";
+        "Delete many artifacts by exact path in a single call, up to 200 paths. Needs repo.admin on the repository. A path that refuses is reported in failed rather than failing the batch. Use forklift_delete_artifacts to purge by pattern instead.";
     "forklift_preview_repository_alarm", RepoIdArgs, forklift_preview_repository_alarm,
-        "Render the approval alarm a repository would send, built from its current pending approvals, and the receivers it would target, without sending. Admin only.";
+        "Render the approval alarm a repository would send, built from its current pending approvals, and the receivers it would target, without sending. Needs notification.write.";
     "forklift_get_upload", UploadArgs, forklift_get_upload,
         "Get the state of one artifact upload session: received bytes, expiry and target path.";
     "forklift_list_repository_permissions", RepoIdArgs, forklift_list_repository_permissions,
-        "List the role permissions that grant access to a repository: granting role, matched pattern, actions and how many users hold the role. Admin or auditor.";
+        "List the role permissions that grant access to a repository: granting role, matched pattern, actions and how many users hold the role. Needs audit.read.";
     "forklift_list_repository_tokens", RepoIdArgs, forklift_list_repository_tokens,
-        "List the personal access tokens that can reach a repository, scoped or unscoped, with their owners. Admin or auditor.";
+        "List the personal access tokens that can reach a repository, with their owners. Needs audit.read.";
 
     // --- approvals and version denies ---------------------------------------
     "forklift_list_approvals", ListApprovalsArgs, forklift_list_approvals,
@@ -957,33 +958,33 @@ tool_surface! {
 
     // --- users, roles, group mappings, tokens -------------------------------
     "forklift_list_users", NoArgs, forklift_list_users,
-        "List all user accounts with roles, sources (local/OIDC), lock state and token counts. Admin only.";
+        "List all user accounts with roles, sources (local/OIDC), lock state and token counts. Needs user.read.";
     "forklift_create_user", CreateUserArgs, forklift_create_user,
-        "Create a local user or robot account. Admin only.";
+        "Create a local user or robot account. Needs user.write.";
     "forklift_update_user", UpdateUserArgs, forklift_update_user,
-        "Update a user's password, email, disabled state, lockout or role list. Omitted fields are left unchanged. Admin only.";
+        "Update a user's password, email, disabled state, lockout or role list. Omitted fields are left unchanged. Needs user.write.";
     "forklift_delete_user", UserIdArgs, forklift_delete_user,
-        "Delete a user account and its tokens. Irreversible. Admin only.";
+        "Delete a user account and its tokens. Irreversible. Needs user.write.";
     "forklift_list_roles", NoArgs, forklift_list_roles,
         "List RBAC roles with their repository permissions and user counts.";
     "forklift_create_role", CreateRoleArgs, forklift_create_role,
-        "Create an RBAC role granting repository-pattern permissions. Admin only.";
+        "Create an RBAC role granting <category>.<verb> permissions: repo.* on a repository pattern, others global. Needs role.write.";
     "forklift_delete_role", RoleIdArgs, forklift_delete_role,
-        "Delete an RBAC role. Users holding it lose the role's permissions. Admin only.";
+        "Delete an RBAC role. Users holding it lose the role's permissions. Needs role.write.";
     "forklift_list_group_mappings", NoArgs, forklift_list_group_mappings,
         "List OIDC group-to-role mappings.";
     "forklift_create_group_mapping", CreateGroupMappingArgs, forklift_create_group_mapping,
-        "Map an OIDC group to a role so group members inherit it on login. Admin only.";
+        "Map an OIDC group to a role so group members inherit it on login. Needs role.write.";
     "forklift_delete_group_mapping", GroupMappingIdArgs, forklift_delete_group_mapping,
-        "Remove an OIDC group-to-role mapping. Admin only.";
+        "Remove an OIDC group-to-role mapping. Needs role.write.";
     "forklift_list_user_tokens", UserIdArgs, forklift_list_user_tokens,
-        "List a user's personal access tokens (metadata only, never the secret). Admin only.";
+        "List a user's personal access tokens (metadata only, never the secret). Needs user.read.";
     "forklift_create_user_token", CreateUserTokenArgs, forklift_create_user_token,
-        "Create a personal access token for a user. The plaintext token is returned once, only here. Admin only.";
+        "Create a personal access token for a user. The plaintext token is returned once, only here. Needs user.write.";
     "forklift_list_my_tokens", NoArgs, forklift_list_my_tokens,
         "List the personal access tokens owned by the calling principal.";
     "forklift_revoke_user_token", UserTokenIdArgs, forklift_revoke_user_token,
-        "Revoke (delete) a user's personal access token. Admin only.";
+        "Revoke (delete) a user's personal access token. Needs user.write.";
 
     // --- coverage -----------------------------------------------------------
     "forklift_get_coverage", NoArgs, forklift_get_coverage,
@@ -997,35 +998,35 @@ tool_surface! {
     "forklift_get_coverage_project_last_commit", CoverageProjectArgs, forklift_get_coverage_project_last_commit,
         "Get the tip commit of the branch a project's coverage verdict came from.";
     "forklift_get_coverage_project_pipeline", CoveragePipelineArgs, forklift_get_coverage_project_pipeline,
-        "Read a project's GitLab CI definition (.gitlab-ci.yml and includes) as the scan sees it. Admin only.";
+        "Read a project's GitLab CI definition (.gitlab-ci.yml and includes) as the scan sees it. Needs coverage.read.";
     "forklift_set_coverage_project_muted", CoverageMuteArgs, forklift_set_coverage_project_muted,
-        "Mute a project so it no longer counts towards coverage, or mute only one half of its wiring (ci, registry) so that check stops being required. Unmute by sending muted=false or an empty scopes list. Admin only.";
+        "Mute a project so it no longer counts towards coverage, or mute only one half of its wiring (ci, registry) so that check stops being required. Unmute by sending muted=false or an empty scopes list. Needs coverage.write.";
     "forklift_get_coverage_settings", NoArgs, forklift_get_coverage_settings,
-        "Get coverage scan settings: forklift host, GitLab URL, excluded topics, schedule, report receiver and scan limits. Admin only.";
+        "Get coverage scan settings: forklift host, GitLab URL, excluded topics, schedule, report receiver and scan limits. Needs coverage.read.";
     "forklift_update_coverage_settings", CoverageSettingsArgs, forklift_update_coverage_settings,
-        "Update coverage scan settings. Omitted fields are left unchanged. Admin only.";
+        "Update coverage scan settings. Omitted fields are left unchanged. Needs coverage.write.";
     "forklift_check_coverage_host", CoverageHostCheckArgs, forklift_check_coverage_host,
-        "Check whether a forklift host value is well-formed and resolves in DNS, before saving it as the coverage target. Admin only.";
+        "Check whether a forklift host value is well-formed and resolves in DNS, before saving it as the coverage target. Needs coverage.write.";
     "forklift_get_coverage_gitlab_check", NoArgs, forklift_get_coverage_gitlab_check,
-        "Check whether the configured GitLab instance answers and accepts the scan token. Admin only.";
+        "Check whether the configured GitLab instance answers and accepts the scan token. Needs coverage.write.";
     "forklift_start_coverage_scan", NoArgs, forklift_start_coverage_scan,
-        "Start a coverage scan now. Fails with 409 while a scan is already running. Admin only.";
+        "Start a coverage scan now. Fails with 409 while a scan is already running. Needs coverage.write.";
     "forklift_preview_coverage_alarm", NoArgs, forklift_preview_coverage_alarm,
-        "Render the coverage report as it would be sent to the configured receiver, without sending it. Admin only.";
+        "Render the coverage report as it would be sent to the configured receiver, without sending it. Needs coverage.read.";
     "forklift_send_coverage_alarm", NoArgs, forklift_send_coverage_alarm,
-        "Send the coverage report to the configured receiver now. Notifies real people; use only when asked to send it. Admin only.";
+        "Send the coverage report to the configured receiver now. Notifies real people; use only when asked to send it. Needs coverage.write.";
 
     // --- operations ---------------------------------------------------------
     "forklift_list_notification_receivers", NoArgs, forklift_list_notification_receivers,
-        "List notification receivers (Slack, webhook, ...) that repository and coverage alarms can be sent to. Admin or auditor.";
+        "List notification receivers (Slack, webhook, ...) that repository and coverage alarms can be sent to. Needs notification.read.";
     "forklift_get_announcement", NoArgs, forklift_get_announcement,
         "Get the site-wide announcement shown to every signed-in user (Markdown source; empty when none is set).";
     "forklift_get_storage_status", NoArgs, forklift_get_storage_status,
-        "Get storage backend status: backend kind, blob counts and bytes, volume or bucket fullness, dangling blobs. Admin only.";
+        "Get storage backend status: backend kind, blob counts and bytes, volume or bucket fullness, dangling blobs. Needs system.read.";
     "forklift_get_ha_status", NoArgs, forklift_get_ha_status,
-        "Get high-availability status: mode, current leader, lease and fencing token. Admin only.";
+        "Get high-availability status: mode, current leader, lease and fencing token. Needs system.read.";
     "forklift_ha_step_down", NoArgs, forklift_ha_step_down,
-        "Ask the current HA leader to step down and trigger a failover. Disruptive; use only when asked to fail over. Admin only.";
+        "Ask the current HA leader to step down and trigger a failover. Disruptive; use only when asked to fail over. Needs system.write.";
 }
 
 /// Shorthand for one proxied call with no query and no body.
@@ -1749,15 +1750,13 @@ impl Server {
         auth: Option<&str>,
         a: CreateUserTokenArgs,
     ) -> Result<CallToolResult, ErrorData> {
-        let mut b = Body::new()
+        let scopes = serde_json::to_value(&a.scopes)
+            .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+        let b = Body::new()
             .set("name", a.name)
             .str("description", &a.description)
-            .str("expires_in", &a.expires_in);
-        if let Some(scopes) = a.scopes
-            && !scopes.is_empty()
-        {
-            b = b.set("scopes", scopes);
-        }
+            .str("expires_in", &a.expires_in)
+            .set("scopes", scopes);
         let path = format!("/api/v1/users/{}/tokens", a.user_id);
         result(
             self.client
@@ -2514,11 +2513,13 @@ pub(crate) mod tests {
                 .body(json!({"disabled": false})),
                 case(
                     "forklift_create_user_token",
-                    json!({"user_id": 5, "name": "ci", "expires_in": "720h", "scopes": ["*:read"]}),
+                    json!({"user_id": 5, "name": "ci", "expires_in": "720h",
+                           "scopes": [{"repo_pattern": "maven-*", "actions": ["repo.read"]}]}),
                     "POST",
                     "/api/v1/users/5/tokens",
                 )
-                .body(json!({"name": "ci", "expires_in": "720h", "scopes": ["*:read"]})),
+                .body(json!({"name": "ci", "expires_in": "720h",
+                             "scopes": [{"repo_pattern": "maven-*", "actions": ["repo.read"]}]})),
                 case(
                     "forklift_revoke_user_token",
                     json!({"user_id": 5, "token_id": 9}),
@@ -2527,12 +2528,12 @@ pub(crate) mod tests {
                 ),
                 case(
                     "forklift_create_role",
-                    json!({"name": "readers", "permissions": [{"repo_pattern": "maven-*", "action": "read"}]}),
+                    json!({"name": "readers", "permissions": [{"repo_pattern": "maven-*", "actions": ["repo.read"]}]}),
                     "POST",
                     "/api/v1/roles",
                 )
                 .body(json!({"name": "readers",
-                             "permissions": [{"repo_pattern": "maven-*", "action": "read"}]})),
+                             "permissions": [{"repo_pattern": "maven-*", "actions": ["repo.read"]}]})),
                 case(
                     "forklift_create_group_mapping",
                     json!({"group_name": "/devs", "role_id": 2}),

@@ -6,7 +6,9 @@ export interface RoleRef { id: number; name: string; }
 
 export interface RoleCreate { name: string; description?: string; permissions?: PermissionCreate[]; }
 
-export interface PermissionCreate { repo_pattern: string; actions: ("read" | "write" | "delete" | "approve" | "audit" | "security" | "admin")[]; }
+export interface PermissionCreate { repo_pattern?: string; actions: PermissionName[]; }
+
+export type PermissionName = "repo.read" | "repo.write" | "repo.delete" | "repo.approve" | "repo.security" | "repo.admin" | "user.read" | "user.write" | "role.read" | "role.write" | "audit.read" | "approval.read" | "notification.read" | "notification.write" | "coverage.read" | "coverage.write" | "insights.read" | "insights.write" | "system.read" | "system.write" | "*";
 
 export interface Permission { id: number; repo_pattern: string; actions: string[]; }
 
@@ -18,7 +20,7 @@ export interface Token { id: number; name: string; description: string; scopes_j
 
 export interface GroupMapping { id: number; group_name: string; role_id: number; managed: boolean; }
 
-export interface Me { authenticated: boolean; username?: string; source?: string; admin?: boolean; approver?: boolean; auditor?: boolean; security?: boolean; csrf_token?: string; impersonator?: string; }
+export interface Me { authenticated: boolean; username?: string; source?: string; admin?: boolean; approver?: boolean; auditor?: boolean; security?: boolean; permissions?: PermissionName[]; csrf_token?: string; impersonator?: string; }
 
 export interface OCITagInfo { path: string; labels: ArtifactLabel[]; can_label: boolean; name: string; tag: string; digest: string; media_type: string; kind: "chart" | "image" | "artifact" | "index"; size: number; platforms: string[]; pushed_at: string; pulled_at: string | null; pushed_by: string; pulled_by: string; expires_at?: string; }
 
@@ -38,7 +40,7 @@ export interface Repository { id: number; name: string; format: "maven" | "npm" 
 
 export type RepositoryListItem = Repository & { artifact_count: number; total_size: number; pending_approval_count: number; can_write: boolean; scanned_count: number; clean_count: number; };
 
-export interface RepositoryCapabilities { read: boolean; write: boolean; delete: boolean; upload: boolean; }
+export interface RepositoryCapabilities { read: boolean; write: boolean; delete: boolean; upload: boolean; security: boolean; admin: boolean; }
 
 export interface RepositoryCreate { name: string; format: "maven" | "npm" | "cargo" | "go" | "pypi" | "raw" | "oci"; type: "hosted" | "proxy" | "group"; upstream_url?: string; config?: RepoConfig; description?: string; }
 
@@ -124,7 +126,7 @@ export interface PendingApprovalRepo { id: number; repo_name: string; format: st
 
 export interface IssuedToken { id: number; name: string; description: string; token: string; expires_at: string | null; }
 
-export interface TokenScope { repo_pattern: string; actions: ("read" | "write" | "delete" | "audit")[]; }
+export interface TokenScope { repo_pattern?: string; actions: ("repo.read" | "repo.write" | "repo.delete" | "user.read" | "role.read" | "audit.read" | "approval.read" | "notification.read" | "coverage.read" | "insights.read" | "system.read")[]; }
 
 export interface HAStatus { enabled: boolean; mode: string; backend: "fs" | "s3"; database: "sqlite" | "postgres"; storage_endpoint?: string; identity: string; leader: string; is_leader: boolean; role: "leader" | "standby"; lease_name?: string; fencing_token?: number; started_at?: string; version?: string; runtime?: string; }
 

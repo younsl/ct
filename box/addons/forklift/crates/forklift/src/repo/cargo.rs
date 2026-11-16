@@ -209,15 +209,14 @@ impl Manager {
             ),
             CargoApiOp::Search => {
                 if let Err(resp) =
-                    self.authorize(parts, &res.repo.name, auth::ACTION_READ, res.cfg.public)
+                    self.authorize(parts, &res.repo.name, auth::REPO_READ, res.cfg.public)
                 {
                     return resp;
                 }
                 self.cargo_search(parts, res).await
             }
             CargoApiOp::Publish | CargoApiOp::SetYanked { .. } => {
-                if let Err(resp) = self.authorize(parts, &res.repo.name, auth::ACTION_WRITE, false)
-                {
+                if let Err(resp) = self.authorize(parts, &res.repo.name, auth::REPO_WRITE, false) {
                     return resp;
                 }
                 if res.repo.r#type != meta::TYPE_HOSTED {

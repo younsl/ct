@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Badge } from "@/components/app-ui/badge";
+import { HintTooltip } from "@/components/app-ui/hint-tooltip";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/overlays/confirm-modal";
@@ -52,7 +53,7 @@ export function UserTokensPanel({
   const { sorted, sort } = useSort(tokens, {
     name: (token) => token.name,
     description: (token) => token.description,
-    permissions: (token) => formatTokenScopes(token.scopes_json),
+    permissions: (token) => formatTokenScopes(token.scopes_json, t("permission.global")),
     created: (token) => token.created_at,
     expires: (token) => token.expires_at,
     lastUsed: (token) => token.last_used_at,
@@ -70,18 +71,19 @@ export function UserTokensPanel({
             </span>
           </h2>
           {canWrite && (
-            <Button
-              disabled={atCap}
-              title={atCap ? t("token.limit-reached") : undefined}
-              onClick={() =>
-                navigate({
-                  to: "/access/users/$id/tokens/new",
-                  params: { id: String(user.id) },
-                })
-              }
-            >
-              {t("token.new")}
-            </Button>
+            <HintTooltip content={atCap ? t("token.limit-reached") : undefined} wrap>
+              <Button
+                disabled={atCap}
+                onClick={() =>
+                  navigate({
+                    to: "/access/users/$id/tokens/new",
+                    params: { id: String(user.id) },
+                  })
+                }
+              >
+                {t("token.new")}
+              </Button>
+            </HintTooltip>
           )}
         </div>
         <TableWrap>
@@ -104,8 +106,12 @@ export function UserTokensPanel({
                   <TableCell className="text-muted-foreground">{token.description}</TableCell>
                   <TableCell>
                     {parseTokenScopes(token.scopes_json).map((scope, index) => (
-                      <Badge key={index} className="mr-1 font-mono">
-                        {formatTokenScope(scope)}
+                      <Badge
+                        key={index}
+                        variant={scope.repo_pattern ? "default" : "secondary"}
+                        className="mr-1 font-mono"
+                      >
+                        {formatTokenScope(scope, t("permission.global"))}
                       </Badge>
                     ))}
                   </TableCell>

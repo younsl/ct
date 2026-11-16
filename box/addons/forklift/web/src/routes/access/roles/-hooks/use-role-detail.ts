@@ -8,7 +8,7 @@ import { openApiQueryOptions } from "@/query/v1/openapi-query-options";
 // per-role endpoint: the role comes from the role list, and its membership from
 // the user list, because a user carries its roles rather than a role carrying
 // its users. That is not visible from the calls alone, hence this note.
-export function useRoleDetail(roleId: number) {
+export function useRoleDetail(roleId: number, { includeMembers = true }: { includeMembers?: boolean } = {}) {
   const [actionError, setActionError] = useState("");
   // A non-numeric :id in the URL would otherwise fetch both lists only to match
   // nothing; skip the requests and let the screen report the miss.
@@ -21,7 +21,7 @@ export function useRoleDetail(roleId: number) {
   });
   const usersQuery = useQuery({
     ...openApiQueryOptions.listUsers(),
-    enabled,
+    enabled: enabled && includeMembers,
     meta: { suppressGlobalErrorToast: true },
   });
 
@@ -39,7 +39,7 @@ export function useRoleDetail(roleId: number) {
       actionError ||
       getErrorMessageIfAny(rolesQuery.error) ||
       getErrorMessageIfAny(usersQuery.error),
-    isLoading: rolesQuery.isPending || usersQuery.isPending,
+    isLoading: rolesQuery.isPending || (includeMembers && usersQuery.isPending),
     members,
     role,
     // Awaits a mutation and turns its rejection into the screen's error. The

@@ -14,6 +14,7 @@ import { UserStatusPanel } from "@/routes/access/users/-components/user-status-p
 import { UserSummaryPanel } from "@/routes/access/users/-components/user-summary-panel";
 import { UserTokensPanel } from "@/routes/access/users/-components/user-tokens-panel";
 import { useUserDetail } from "@/routes/access/users/-hooks/use-user-detail";
+import { canManageUsers, canViewRoles } from "@/utils/permissions";
 
 import type { Me } from "@/services/v1/openapi-types";
 
@@ -25,7 +26,10 @@ export function UserDetailPage({ me }: { me: Me }) {
   const navigate = useNavigate();
   const { id } = useParams({ strict: false }) as { id?: string };
   const userId = Number(id);
-  const { error, isLoading, roles, tokens, user, runAction, setError } = useUserDetail(userId);
+  const canWrite = canManageUsers(me);
+  const { error, isLoading, roles, tokens, user, runAction, setError } = useUserDetail(userId, {
+    includeRoles: canViewRoles(me),
+  });
 
   if (isLoading) return <div className="text-sm text-muted-foreground">{t("common.loading")}</div>;
   if (!user) return <Alert className="my-2.5">{error || "User not found."}</Alert>;
@@ -33,7 +37,7 @@ export function UserDetailPage({ me }: { me: Me }) {
   const isSelf = user.username === me.username;
   // Password, lockout: only meaningful for a local account that can sign in.
   // An OIDC user's credentials live in the provider; a robot has none.
-  const hasLocalCredentials = me.admin && user.source === "local" && !user.robot;
+  const hasLocalCredentials = canWrite && user.source === "local" && !user.robot;
 
   return (
     <div data-testid="page-user-detail">
@@ -54,18 +58,18 @@ export function UserDetailPage({ me }: { me: Me }) {
       {error && <Alert className="mb-4">{error}</Alert>}
 
       <UserSummaryPanel user={user} />
-      <UserRolesPanel user={user} roles={roles} canWrite={Boolean(me.admin)} runAction={runAction} />
+      <UserRolesPanel user={user} roles={roles} canWrite={canWrite} runAction={runAction} />
       <QuotasPanel tokenUsed={tokens.length} loginFailures={user.failed_login_count ?? 0} robot={user.robot} />
       <UserTokensPanel
         user={user}
         tokens={tokens}
-        canWrite={Boolean(me.admin)}
+        canWrite={canWrite}
         runAction={runAction}
       />
       {hasLocalCredentials && <UserPasswordPanel user={user} onError={setError} />}
       {hasLocalCredentials && <UserLockoutPanel user={user} runAction={runAction} />}
-      {me.admin && <UserStatusPanel user={user} isSelf={isSelf} runAction={runAction} />}
-      {me.admin && (
+      {canWrite && <UserStatusPanel user={user} isSelf={isSelf} runAction={runAction} />}
+      {canWrite && (
         <UserDangerPanel user={user} isSelf={isSelf} me={me} runAction={runAction} />
       )}
     </div>

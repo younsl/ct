@@ -127,7 +127,7 @@ describe("a write refreshes every screen that shows what it changed", () => {
     await act(async () => {
       await mutation.result.current.mutateAsync({
         roleId: 7,
-        permission: { repo_pattern: "maven-*", actions: ["read"] },
+        permission: { repo_pattern: "maven-*", actions: ["repo.read"] },
       });
     });
 
@@ -183,7 +183,7 @@ describe("a write refreshes every screen that shows what it changed", () => {
         body: {
           name: "ci",
           description: "d",
-          scopes: [{ repo_pattern: "maven-*", actions: ["read"] }],
+          scopes: [{ repo_pattern: "maven-*", actions: ["repo.read"] }],
           expires_in: "24h",
         },
       });

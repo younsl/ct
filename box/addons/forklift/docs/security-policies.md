@@ -35,7 +35,7 @@ policy to an active build fleet.
 
 Proxy repositories can gate what they serve at four independent points: package approval, version denies, vulnerability policy, and license policy. Age policy (quarantining freshly published versions) is configured per repository in the UI or REST API.
 
-Who can change these: administrators, plus roles carrying the `security` action; `approve` decides individual packages. See [Access control](access-control.md).
+Who can change these: roles carrying `repo.security` (or `repo.admin`) on the repository. `repo.approve` decides individual packages. See [Access control](access-control.md).
 
 ## Package approval (quarantine)
 
@@ -55,7 +55,7 @@ curl -u "admin:${FORKLIFT_PASSWORD}" -X PUT http://forklift/api/v1/repositories/
 - `auto_approve` glob patterns (e.g. an internal npm scope) bypass approval entirely.
 - In a group, a blocked gated member is authoritative: the group returns 403 instead of falling through to the next member.
 - Pending queue size is exported as `forklift_approval_pending`; decisions land in the repository audit log as `approval.request/approve/reject` events.
-- Who can decide: administrators, plus any role carrying the `approve` action, scoped by repo pattern like every other permission. This lets a security team approve packages without repository management rights, e.g. `{"repo_pattern":"npm-*","actions":["read","approve"]}`. Personal access tokens can never approve: token scopes accept only read/write/delete/audit, so a leaked CI token cannot taint approval decisions.
+- Who can decide: any role carrying `repo.approve`, scoped by repo pattern like every other repository permission. This lets a security team approve packages without repository management rights, e.g. `{"repo_pattern":"npm-*","actions":["repo.read","repo.approve"]}`. The queue itself is readable with `approval.read`. Personal access tokens can never approve: token scopes accept only `repo.read`, `repo.write`, `repo.delete` and global read permissions, so a leaked CI token cannot taint approval decisions.
 
 ## Version denies
 
@@ -70,7 +70,7 @@ curl -u "admin:${FORKLIFT_PASSWORD}" -X POST http://forklift/api/v1/version-deni
 - A deny is an explicit security decision, so it always enforces: it works on any proxy repository regardless of the approval policy, ignores audit mode, and overrides package-level approval.
 - The deny runs before any cache lookup, so already-cached copies stop being served immediately. Requests for the version return 403 (`version denied: <pkg>@<ver>`); other versions keep flowing.
 - The version is matched exactly as it appears in request paths (go modules keep the `v` prefix). Metadata still lists denied versions; the artifact fetch fails loudly, which for a poisoned release beats the resolver silently picking another version.
-- Manage from the Version denies section on the Approvals page (or the repository's Approvals tab), or via `GET/POST /api/v1/version-denies` and `DELETE /api/v1/version-denies/{id}`. The same `approve` permission applies, scoped per repository.
+- Manage from the Version denies section on the Approvals page (or the repository's Approvals tab), or via `GET/POST /api/v1/version-denies` and `DELETE /api/v1/version-denies/{id}`. The same `repo.approve` permission applies, scoped per repository.
 - Blocks are counted in `forklift_version_deny_blocked_total{repo}`; changes and blocked attempts land in the repository audit log as `deny.create/delete/block` events.
 - Deny entries are deleted with their repository, so a recreated same-name repo does not inherit them.
 
@@ -128,6 +128,6 @@ The full license workflow, including the UI surfaces, is in [license-scanning.md
 
 ## Related documents
 
-- [Access control](access-control.md) for the `approve`, `audit` and `security` actions.
+- [Access control](access-control.md) for `repo.approve`, `repo.security` and the rest of the permission catalog.
 - [Metrics](metrics.md) for the gate counters above.
 - [designs/policy-pipeline.md](designs/policy-pipeline.md) for the evaluation order these gates run in.

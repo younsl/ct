@@ -6,7 +6,7 @@ import { PageDescription, PageHeader } from "@/components/app-ui/page";
 import { useTranslation } from "@/lib/i18n";
 import { RepositoriesTable } from "@/routes/workspace/repositories/-components/repositories-table";
 import { useRepositoriesList } from "@/routes/workspace/repositories/-hooks/use-repositories-list";
-import { canViewRepositoryPolicy } from "@/utils/permissions";
+import { canCreateRepositories, canViewRepositoryPolicy } from "@/utils/permissions";
 
 import type { Me } from "@/services/v1/openapi-types";
 
@@ -19,7 +19,7 @@ export function RepositoriesPage({ me }: { me: Me }) {
     <>
       <PageHeader
         title={t("common.repositories")}
-        actions={me.admin && (
+        actions={canCreateRepositories(me) && (
           <Button onClick={() => navigate({ to: "/workspace/repositories/new" })}>
             {t("repo.new")}
           </Button>

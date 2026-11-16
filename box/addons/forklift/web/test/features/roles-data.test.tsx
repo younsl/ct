@@ -24,7 +24,7 @@ const role = {
   description: "",
   created_at: "2026-01-01T00:00:00Z",
   managed: false,
-  permissions: [{ id: 3, repo_pattern: "maven-*", actions: ["read"] }],
+  permissions: [{ id: 3, repo_pattern: "maven-*", actions: ["repo.read"] }],
   user_count: 1,
 };
 
@@ -150,7 +150,7 @@ describe("role permission mutations", () => {
     mockedRoles.createRolePermissions.mockResolvedValue({
       id: 4,
       repo_pattern: "npm-*",
-      actions: ["read"],
+      actions: ["repo.read"],
     });
     mockedRoles.deleteRolePermissions.mockResolvedValue(undefined);
   });
@@ -165,13 +165,13 @@ describe("role permission mutations", () => {
     await act(async () => {
       await mutation.result.current.mutateAsync({
         roleId: 7,
-        permission: { repo_pattern: "npm-*", actions: ["read"] },
+        permission: { repo_pattern: "npm-*", actions: ["repo.read"] },
       });
     });
 
     expect(mockedRoles.createRolePermissions).toHaveBeenCalledWith({
       path: { id: 7 },
-      body: { repo_pattern: "npm-*", actions: ["read"] },
+      body: { repo_pattern: "npm-*", actions: ["repo.read"] },
     });
     // Without the invalidation the page would keep showing the old permission
     // set until a reload.
@@ -208,7 +208,7 @@ describe("role permission mutations", () => {
       await expect(
         mutation.result.current.mutateAsync({
           roleId: 7,
-          permission: { repo_pattern: "npm-*", actions: ["read"] },
+          permission: { repo_pattern: "npm-*", actions: ["repo.read"] },
         }),
       ).rejects.toThrow("managed role");
     });

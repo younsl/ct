@@ -22,7 +22,7 @@ const token = {
   id: 11,
   name: "ci",
   description: "build agent",
-  scopes_json: '[{"repo_pattern":"maven-*","actions":["read"]}]',
+  scopes_json: '[{"repo_pattern":"maven-*","actions":["repo.read"]}]',
   expires_at: null,
   last_used_at: null,
   created_at: "2026-01-01T00:00:00Z",
@@ -72,13 +72,13 @@ describe("the current user's tokens", () => {
     await act(async () => {
       await mutation.result.current.mutateAsync({
         tokenId: 11,
-        scopes: [{ repo_pattern: "npm-*", actions: ["read", "write"] }],
+        scopes: [{ repo_pattern: "npm-*", actions: ["repo.read", "repo.write"] }],
       });
     });
 
     expect(mockedTokens.updateToken).toHaveBeenCalledWith({
       path: { id: 11 },
-      body: { scopes: [{ repo_pattern: "npm-*", actions: ["read", "write"] }] },
+      body: { scopes: [{ repo_pattern: "npm-*", actions: ["repo.read", "repo.write"] }] },
     });
     await waitFor(() => expect(mockedTokens.listTokens).toHaveBeenCalledTimes(2));
   });
@@ -99,7 +99,7 @@ describe("creating a token for one identity or another", () => {
   const body = {
     name: "ci",
     description: "build agent",
-    scopes: [{ repo_pattern: "maven-*", actions: ["read" as const] }],
+    scopes: [{ repo_pattern: "maven-*", actions: ["repo.read" as const] }],
     expires_in: "24h",
   };
 

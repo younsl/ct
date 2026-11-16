@@ -1123,8 +1123,12 @@ pub(crate) mod tests {
             .unwrap();
         let c = s.count_tokens(u.id).await.expect("count_tokens");
         assert_eq!(c, 1, "count_tokens = {c}");
-        s.update_token_scopes(u.id, tok.id, r#"[{"repo_pattern":"*","actions":["read"]}]"#)
-            .await
-            .expect("update_token_scopes");
+        s.update_token_scopes(
+            u.id,
+            tok.id,
+            r#"[{"repo_pattern":"*","actions":["repo.read"]}]"#,
+        )
+        .await
+        .expect("update_token_scopes");
     }
 }

@@ -1,4 +1,4 @@
-import { test as base, expect, request, type APIRequestContext, type Page } from "@playwright/test";
+import { test as base, expect, request, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import { ADMIN_USERNAME, E2E_PASSWORD, storageStatePath, type E2ERole } from "./accounts";
 
@@ -198,10 +198,12 @@ export async function requestBlockedPackage(
 //
 // Shared because three screens use the same control: role permissions, token
 // scopes, and the token scope modal.
-export async function typeRepositoryPattern(page: Page, pattern: string) {
-  const input = page.getByPlaceholder(/repo pattern/i);
+export async function typeRepositoryPattern(scope: Page | Locator, pattern: string) {
+  const input = scope.getByPlaceholder(/repo pattern/i);
 
   await input.click();
+  // The field opens on "*", so typing would append to it.
+  await input.fill("");
   await input.pressSequentially(pattern);
   await input.press("Enter");
 }

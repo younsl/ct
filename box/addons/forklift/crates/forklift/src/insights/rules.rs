@@ -323,9 +323,9 @@ pub const CATALOG: &[Rule] = &[
         category: Category::Access,
         audiences: &[Audience::Security, Audience::Devops],
         title: "Administrator tokens without scopes",
-        rationale: "An unscoped token carries all of its owner's rights. For an administrator that is full control of forklift, exercised by whatever holds the token.",
-        criteria: "Red (high): a token of an account with global admin has no scopes.",
-        recommendation: "Scope automation tokens to the repositories and actions they need, or issue them from a robot account with a narrow role.",
+        rationale: "Forklift rejects a token without scopes, so such a token is a leftover that breaks whatever still uses it, and it would grant its owner's full rights if that rule were ever relaxed.",
+        criteria: "Red (high): a token of an account holding * has no scopes.",
+        recommendation: "Revoke the token and issue a scoped one, or issue it from a robot account with a narrow role.",
     },
     Rule {
         id: "tokens-unused",
@@ -1221,17 +1221,12 @@ fn storage_capacity(s: &DataSnapshot) -> Option<Finding> {
     )
 }
 
-/// Users whose roles grant admin on every repository.
+/// Users whose roles grant `*`, the instance administrator.
 fn admin_user_ids(s: &DataSnapshot) -> HashSet<i64> {
     let admin_roles: HashSet<i64> = s
         .permissions
         .iter()
-        .filter(|p| {
-            p.repo_pattern == "*"
-                && p.actions
-                    .split(',')
-                    .any(|a| a.trim() == crate::auth::ACTION_ADMIN)
-        })
+        .filter(|p| p.actions.split(',').any(|a| a.trim() == crate::auth::ALL))
         .map(|p| p.role_id)
         .collect();
     s.roles_by_user
@@ -1338,7 +1333,7 @@ fn unused_roles(s: &DataSnapshot) -> Option<Finding> {
         grants.iter().any(|p| {
             p.actions
                 .split(',')
-                .any(|a| a.trim() == crate::auth::ACTION_ADMIN)
+                .any(|a| matches!(a.trim(), crate::auth::ALL | crate::auth::REPO_ADMIN))
         })
     };
     roles.sort_by_key(|(r, grants)| (!admin(grants), r.created_at));
@@ -1360,7 +1355,13 @@ fn unused_roles(s: &DataSnapshot) -> Option<Finding> {
                 } else {
                     grants
                         .iter()
-                        .map(|p| format!("{} on {}", p.actions, p.repo_pattern))
+                        .map(|p| {
+                            if p.repo_pattern.is_empty() {
+                                p.actions.clone()
+                            } else {
+                                format!("{} on {}", p.actions, p.repo_pattern)
+                            }
+                        })
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
@@ -1501,7 +1502,7 @@ fn unscoped_admin_tokens(s: &DataSnapshot, admins: &HashSet<i64>) -> Option<Find
             id: "tokens-unscoped-admin",
             severity: Severity::High,
             summary: format!(
-                "{count} tokens of administrators carry no scopes, so each one is full admin over the API and every repository."
+                "{count} tokens of administrators carry no scopes. Forklift rejects them, so revoke and reissue them with scopes."
             ),
             params: Vec::new(),
         },
@@ -2012,20 +2013,20 @@ mod tests {
             permissions: vec![
                 Permission {
                     role_id: 1,
-                    repo_pattern: "*".to_string(),
-                    actions: "admin".to_string(),
+                    repo_pattern: String::new(),
+                    actions: "*".to_string(),
                     ..Default::default()
                 },
                 Permission {
                     role_id: 4,
                     repo_pattern: "npm-*".to_string(),
-                    actions: "read,write".to_string(),
+                    actions: "repo.read,repo.write".to_string(),
                     ..Default::default()
                 },
                 Permission {
                     role_id: 5,
-                    repo_pattern: "*".to_string(),
-                    actions: "admin".to_string(),
+                    repo_pattern: String::new(),
+                    actions: "*".to_string(),
                     ..Default::default()
                 },
             ],
@@ -2042,7 +2043,8 @@ mod tests {
                     id: 2,
                     user_id: 3,
                     name: "scoped".to_string(),
-                    scopes_json: r#"[{"repo_pattern":"npm-*","actions":["read"]}]"#.to_string(),
+                    scopes_json: r#"[{"repo_pattern":"npm-*","actions":["repo.read"]}]"#
+                        .to_string(),
                     expires_at: Some(now + TimeDelta::days(10)),
                     last_used_at: Some(now),
                     created_at: now,
@@ -2176,8 +2178,8 @@ mod tests {
             "held, mapped, default and new roles are skipped"
         );
         assert_eq!(roles.affected[0].label, "old-admins", "admin grants first");
-        assert_eq!(roles.affected[0].detail, "admin on * (chart policy)");
-        assert_eq!(roles.affected[1].detail, "read,write on npm-*");
+        assert_eq!(roles.affected[0].detail, "* (chart policy)");
+        assert_eq!(roles.affected[1].detail, "repo.read,repo.write on npm-*");
         assert_eq!(roles.affected[1].role_id, Some(4));
         assert_eq!(roles.affected[1].user_count, Some(0));
         assert!(roles.affected[1].created_at.is_some());

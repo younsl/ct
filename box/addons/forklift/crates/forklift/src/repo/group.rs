@@ -71,7 +71,7 @@ pub(crate) async fn grouped(m: Arc<Manager>, req: Request, h: HandlerFn) -> Resp
         );
     };
     let (mut parts, body) = req.into_parts();
-    if let Err(resp) = m.authorize(&parts, &name, auth::ACTION_READ, cfg.public) {
+    if let Err(resp) = m.authorize(&parts, &name, auth::REPO_READ, cfg.public) {
         return resp;
     }
     // The group's own ACL governs access through it; member ACLs are skipped
@@ -509,7 +509,7 @@ pub(crate) mod tests {
                 repoconfig::default(),
             )
             .await;
-            grant_role(&tm.store, "reader", USER_PASS, "mvn-*", "read").await;
+            grant_role(&tm.store, "reader", USER_PASS, "mvn-*", "repo.read").await;
             let h = authz_mux(&tm.manager, svc);
             let path = "/maven/mvn-hosted/com/acme/a/1.0/a-1.0.jar";
 
@@ -656,7 +656,7 @@ pub(crate) mod tests {
             .await;
             mk_group(&tm.store, "mvn-public", &["mvn-hosted"]).await;
             // The reader may only access the group, not the member.
-            grant_role(&tm.store, "reader", USER_PASS, "mvn-public", "read").await;
+            grant_role(&tm.store, "reader", USER_PASS, "mvn-public", "repo.read").await;
             let h = authz_mux(&tm.manager, svc);
 
             let resp = do_authz(

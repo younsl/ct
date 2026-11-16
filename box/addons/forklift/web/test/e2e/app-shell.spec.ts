@@ -112,9 +112,9 @@ test.describe("the sidebar", () => {
       await expect(page.getByTestId("value-nav-repository-count")).toHaveText(/^\d+$/);
       await expect(page.getByTestId("value-nav-pending-count")).toHaveText(/^\d+$/);
 
-      // An auditor may open the approval queue but may not decide anything in
-      // it, so the sidebar does not offer it - and the badge for work waiting
-      // to be reviewed belongs to whoever can review it.
+      // An auditor holds approval.read, so the sidebar offers the queue, but it
+      // may not decide anything in it: the badge for work waiting to be
+      // reviewed belongs to whoever holds repo.approve.
       const auditor = await signedInAs("auditor");
       await auditor.goto("/workspace/repositories");
 

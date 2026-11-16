@@ -405,7 +405,7 @@ pub(crate) mod tests {
             ("/users", r#"{"username":"bad user","password":"pw"}"#),
             (
                 "/tokens",
-                r#"{"name":"bad name","description":"d","scopes":[{"repo_pattern":"*","actions":["read"]}],"expires_in":"1h"}"#,
+                r#"{"name":"bad name","description":"d","scopes":[{"repo_pattern":"*","actions":["repo.read"]}],"expires_in":"1h"}"#,
             ),
         ] {
             let resp = srv.admin_do(Method::POST, url, body).await;

@@ -290,7 +290,7 @@ impl Handler {
         let Some(p) = auth::from_request_parts(parts) else {
             return false;
         };
-        if p.can(repo_name, auth::ACTION_ADMIN) {
+        if p.can(repo_name, auth::REPO_ADMIN) {
             return true;
         }
         // An anonymous upload records no principal, so it has no owner to match:
@@ -402,7 +402,7 @@ impl Handler {
         let Some(p) = auth::from_request_parts(parts) else {
             return LabelPermission::default();
         };
-        if p.can(repo_name, auth::ACTION_ADMIN) {
+        if p.can(repo_name, auth::REPO_ADMIN) {
             return LabelPermission {
                 all: true,
                 ..Default::default()

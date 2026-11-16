@@ -316,6 +316,44 @@ impl Store {
         .await
     }
 
+    /// Replaces one permission row with `entries` (`repo_pattern`, `actions`)
+    /// for the same role, keeping its managed flag: the first entry updates the
+    /// row, the rest are inserted, and no entries delete it.
+    pub async fn rewrite_permission(&self, id: i64, entries: Vec<(String, String)>) -> Result<()> {
+        self.write(move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| Error::sqlite("begin rewrite permission", e))?;
+            let (role_id, managed): (i64, i64) = tx
+                .query_row(
+                    "SELECT role_id, managed FROM role_permissions WHERE id = ?",
+                    params![id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(|e| Error::sqlite("lookup permission", e))?;
+            let mut rest = entries.into_iter();
+            if let Some((pattern, actions)) = rest.next() {
+                tx.execute(
+                    "UPDATE role_permissions SET repo_pattern = ?, actions = ? WHERE id = ?",
+                    params![pattern, actions, id],
+                )
+                .map_err(|e| Error::sqlite("update permission", e))?;
+            } else {
+                tx.execute("DELETE FROM role_permissions WHERE id = ?", params![id])
+                    .map_err(|e| Error::sqlite("delete permission", e))?;
+            }
+            for (pattern, actions) in rest {
+                tx.execute(
+                    "INSERT INTO role_permissions(role_id, repo_pattern, actions, managed) VALUES(?, ?, ?, ?)",
+                    params![role_id, pattern, actions, managed],
+                )
+                .map_err(|e| Error::sqlite("insert permission", e))?;
+            }
+            tx.commit().map_err(|e| Error::sqlite("commit rewrite permission", e))
+        })
+        .await
+    }
+
     /// Removes one permission from a role.
     pub async fn delete_permission(&self, role_id: i64, id: i64) -> Result<()> {
         self.write(move |conn| {
@@ -866,7 +904,7 @@ pub(crate) mod tests {
         s.add_permission(Permission {
             role_id: role.id,
             repo_pattern: "maven-*".into(),
-            actions: "read,write".into(),
+            actions: "repo.read,repo.write".into(),
             ..Permission::default()
         })
         .await
@@ -1071,7 +1109,7 @@ pub(crate) mod tests {
             .add_permission(Permission {
                 role_id: r1.id,
                 repo_pattern: "*".into(),
-                actions: "read".into(),
+                actions: "repo.read".into(),
                 ..Permission::default()
             })
             .await
@@ -1079,7 +1117,7 @@ pub(crate) mod tests {
         s.add_permission(Permission {
             role_id: r2.id,
             repo_pattern: "maven-*".into(),
-            actions: "write".into(),
+            actions: "repo.write".into(),
             ..Permission::default()
         })
         .await

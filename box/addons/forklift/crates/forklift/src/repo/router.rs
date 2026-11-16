@@ -521,11 +521,11 @@ impl Manager {
         if super::group::via_group(parts) {
             return Ok(());
         }
-        if action == auth::ACTION_READ && public {
+        if action == auth::REPO_READ && public {
             return Ok(());
         }
         let Some(p) = auth::from_request_parts(parts) else {
-            if action == auth::ACTION_READ && authz.anonymous_read() {
+            if action == auth::REPO_READ && authz.anonymous_read() {
                 return Ok(());
             }
             return Err(auth::unauthorized_basic());
@@ -643,9 +643,9 @@ pub(crate) struct Resolved {
 /// Maps an HTTP method to an RBAC action.
 pub(crate) const fn action_for_method(method: &Method) -> &'static str {
     match *method {
-        Method::PUT | Method::POST | Method::PATCH => auth::ACTION_WRITE,
-        Method::DELETE => auth::ACTION_DELETE,
-        _ => auth::ACTION_READ,
+        Method::PUT | Method::POST | Method::PATCH => auth::REPO_WRITE,
+        Method::DELETE => auth::REPO_DELETE,
+        _ => auth::REPO_READ,
     }
 }
 

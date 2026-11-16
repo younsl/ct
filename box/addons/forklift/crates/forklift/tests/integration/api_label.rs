@@ -51,10 +51,18 @@ async fn artifact_label_permissions() {
         "pw123456",
         "npm-writer",
         "npmjs",
-        r#""read","write""#,
+        r#""repo.read","repo.write""#,
     )
     .await;
-    mk_role_user(&srv, "eve", "pw123456", "npm-reader", "npmjs", r#""read""#).await;
+    mk_role_user(
+        &srv,
+        "eve",
+        "pw123456",
+        "npm-reader",
+        "npmjs",
+        r#""repo.read""#,
+    )
+    .await;
 
     let add = async |user: &str, pass: &str, path: &str, label: &str| -> TestResponse {
         srv.do_as(
@@ -206,7 +214,15 @@ async fn artifact_label_audit() {
         })
         .await
         .expect("put artifact");
-    mk_role_user(&srv, "eve", "pw123456", "npm-reader", "npmjs", r#""read""#).await;
+    mk_role_user(
+        &srv,
+        "eve",
+        "pw123456",
+        "npm-reader",
+        "npmjs",
+        r#""repo.read""#,
+    )
+    .await;
 
     let resp = srv
         .admin_do(
@@ -350,10 +366,18 @@ async fn artifact_labels_in_listings() {
         "pw123456",
         "npm-writer",
         "npmjs",
-        r#""read","write""#,
+        r#""repo.read","repo.write""#,
     )
     .await;
-    mk_role_user(&srv, "eve", "pw123456", "npm-reader", "npmjs", r#""read""#).await;
+    mk_role_user(
+        &srv,
+        "eve",
+        "pw123456",
+        "npm-reader",
+        "npmjs",
+        r#""repo.read""#,
+    )
+    .await;
 
     let listing = async |srv: &TestServer, user: &str, pass: &str| -> Value {
         let resp = srv

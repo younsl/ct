@@ -22,7 +22,13 @@ import { RepoPermissions } from "@/routes/workspace/repositories/-components/det
 import { Security } from "@/routes/workspace/repositories/-components/detail/security-tab";
 import { Settings } from "@/routes/workspace/repositories/-components/detail/settings-tab";
 import { Statistics } from "@/routes/workspace/repositories/-components/detail/statistics-tab";
-import { canEditRepositorySecurity, canReviewApprovals } from "@/utils/permissions";
+import {
+  canAdministerRepository,
+  canEditRepositorySecurity,
+  canReviewApprovals,
+  canViewAudit,
+  hasFullAccess,
+} from "@/utils/permissions";
 import { getRepositoryEndpoint } from "@/utils/repository-endpoint";
 
 export function RepositoryDetail({ me }: { me: Me }) {
@@ -53,12 +59,16 @@ export function RepositoryDetail({ me }: { me: Me }) {
   // Direct URL access to a hidden tab redirects to Artifacts.
   const gated = (repo.type === "proxy" || repo.type === "hosted") && Boolean(repo.config.approval?.enabled);
   const canApprove = canReviewApprovals(me);
-  const canAdminView = me.admin || me.auditor;
+  const canAudit = canViewAudit(me);
+  const canEditSecurity = canEditRepositorySecurity(me, repo.capabilities);
+  const canAdminister = canAdministerRepository(me, repo.capabilities);
   const tabs = [
     { key: "artifacts", label: t("common.artifacts") },
     { key: "statistics", label: t("common.statistics") },
     ...((repo.type === "proxy" || repo.type === "hosted") && canApprove ? [{ key: "approvals", label: t("approval.title") }] : []),
-    ...(canAdminView ? [{ key: "permissions", label: t("common.permissions") }, { key: "audit", label: "Audit" }, { key: "security", label: t("common.security") }, { key: "settings", label: "Settings" }] : []),
+    ...(canAudit ? [{ key: "permissions", label: t("common.permissions") }, { key: "audit", label: "Audit" }] : []),
+    ...(canAudit || canEditSecurity || canAdminister ? [{ key: "security", label: t("common.security") }] : []),
+    ...(canAudit || canAdminister ? [{ key: "settings", label: "Settings" }] : []),
   ];
 
   if (!tabs.some((t) => t.key === tab)) {
@@ -134,16 +144,16 @@ export function RepositoryDetail({ me }: { me: Me }) {
       </nav>
 
       {tab === "artifacts" && (repo.format === "oci"
-        ? <OCIImagesTab repo={repo} canDelete={repo.capabilities?.delete ?? !!me.admin} />
-        : <Artifacts repo={repo} canDelete={repo.capabilities?.delete ?? !!me.admin} />)}
+        ? <OCIImagesTab repo={repo} canDelete={repo.capabilities?.delete ?? hasFullAccess(me)} />
+        : <Artifacts repo={repo} canDelete={repo.capabilities?.delete ?? hasFullAccess(me)} />)}
       {tab === "statistics" && <Statistics repo={repo} />}
       {tab === "permissions" && <RepoPermissions repoId={repo.id} />}
       {tab === "audit" && <AuditLogs repo={repo} />}
       {tab === "approvals" && (repo.type === "proxy" || repo.type === "hosted") && (
         gated && <ApprovalList repo={repo.name} showRepo={false} repoNames={[repo.name]} />
       )}
-      {tab === "security" && <Security repo={repo} canWrite={canEditRepositorySecurity(me)} />}
-      {tab === "settings" && <Settings repo={repo} canWrite={Boolean(me.admin)} />}
+      {tab === "security" && <Security repo={repo} canWrite={canEditSecurity} />}
+      {tab === "settings" && <Settings repo={repo} canWrite={canAdminister} />}
     </>
   );
 }

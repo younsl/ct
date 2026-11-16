@@ -3,10 +3,17 @@ import { describe, expect, it } from "vitest";
 import { formatMilliseconds } from "@/utils/format-duration";
 import { formatFileSize } from "@/utils/format-file-size";
 import {
+  canAdministerRepository,
+  canCreateRepositories,
   canEditRepositorySecurity,
+  canManageRoles,
+  canManageSystem,
   canReviewApprovals,
-  canViewAccessManagement,
   canViewApprovalQueue,
+  canViewRepositoryPolicy,
+  canViewRoles,
+  canViewUsers,
+  hasPermission,
 } from "@/utils/permissions";
 import { getRepositoryEndpoint } from "@/utils/repository-endpoint";
 
@@ -57,23 +64,52 @@ describe("getRepositoryEndpoint", () => {
 });
 
 describe("permissions", () => {
+  it("holds exactly the permissions the server listed", () => {
+    const me = { permissions: ["user.read" as const, "repo.read" as const] };
+    expect(hasPermission(me, "user.read")).toBe(true);
+    expect(hasPermission(me, "user.write")).toBe(false);
+    expect(hasPermission({}, "repo.read")).toBe(false);
+  });
+
+  it("treats * as every permission", () => {
+    const me = { permissions: ["*" as const] };
+    expect(canViewUsers(me)).toBe(true);
+    expect(canManageRoles(me)).toBe(true);
+    expect(canManageSystem(me)).toBe(true);
+    expect(canCreateRepositories(me)).toBe(true);
+  });
+
+  it("falls back to the admin flag when the list is missing", () => {
+    expect(canManageSystem({ admin: true })).toBe(true);
+    expect(canManageSystem({ admin: false })).toBe(false);
+  });
+
   it("lets an auditor read the access surfaces but not the approval decision", () => {
-    const auditor = { auditor: true };
-    expect(canViewAccessManagement(auditor)).toBe(true);
+    const auditor = { permissions: ["audit.read" as const, "user.read" as const, "role.read" as const, "approval.read" as const] };
+    expect(canViewUsers(auditor)).toBe(true);
+    expect(canViewRoles(auditor)).toBe(true);
+    expect(canManageRoles(auditor)).toBe(false);
     expect(canViewApprovalQueue(auditor)).toBe(true);
     expect(canReviewApprovals(auditor)).toBe(false);
   });
 
-  it("separates reading the security policy from rewriting it", () => {
-    const security = { security: true };
-    expect(canEditRepositorySecurity(security)).toBe(true);
-    expect(canViewAccessManagement(security)).toBe(false);
+  it("opens the approval queue to a reviewer without approval.read", () => {
+    const approver = { permissions: ["repo.approve" as const] };
+    expect(canViewApprovalQueue(approver)).toBe(true);
+    expect(canReviewApprovals(approver)).toBe(true);
   });
 
-  it("gives an admin everything", () => {
-    const admin = { admin: true };
-    expect(canViewAccessManagement(admin)).toBe(true);
-    expect(canReviewApprovals(admin)).toBe(true);
-    expect(canEditRepositorySecurity(admin)).toBe(true);
+  it("reads repository edits from the repository's own capabilities", () => {
+    const security = { permissions: ["repo.security" as const] };
+    expect(canViewRepositoryPolicy(security)).toBe(true);
+    expect(canEditRepositorySecurity(security, { security: true, admin: false })).toBe(true);
+    expect(canEditRepositorySecurity(security, { security: false, admin: false })).toBe(false);
+    expect(canAdministerRepository(security, { security: true, admin: false })).toBe(false);
+    expect(canViewUsers(security)).toBe(false);
+  });
+
+  it("without capabilities only * edits a repository", () => {
+    expect(canAdministerRepository({ permissions: ["repo.admin"] })).toBe(false);
+    expect(canAdministerRepository({ permissions: ["*"] })).toBe(true);
   });
 });
