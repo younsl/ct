@@ -180,7 +180,9 @@ The following table lists the configurable parameters and their default values.
 | database.external.port | int | `5432` | Server port. |
 | database.external.name | string | `"forklift"` | Database name. |
 | database.external.user | string | `"forklift"` | Database user. |
-| database.external.sslMode | string | `"prefer"` | TLS mode: disable, prefer or require. The server certificate is verified against the system roots and outbound.caBundle. |
+| database.external.sslMode | string | `"prefer"` | TLS mode: disable, prefer or require. The server certificate is verified against the system roots, caBundle below and outbound.caBundle. |
+| database.external.caBundle.configMap | string | `""` | ConfigMap with the CA certificates (PEM) of the database server, trusted for the database connection only. Managed services such as Amazon RDS sign with their own CA. Empty disables. |
+| database.external.caBundle.key | string | `"ca.crt"` | Key in the ConfigMap holding the PEM bundle. |
 | database.external.password | string | `""` | Password given inline, stored in the chart Secret. Prefer existingSecret. |
 | database.external.existingSecret | string | `""` | Existing Secret holding the password. |
 | database.external.existingSecretKey | string | `"password"` | Key of the password in existingSecret. |

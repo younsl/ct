@@ -131,6 +131,16 @@ pub fn extra_root_ders() -> Vec<CertificateDer<'static>> {
         .map_or_else(Vec::new, |roots| roots.ders.clone())
 }
 
+/// Roots the PostgreSQL connection trusts on top of the system ones: the
+/// installed bundle plus `ca_file`, which no other client trusts.
+pub fn database_roots(ca_file: &str) -> Result<Vec<CertificateDer<'static>>> {
+    let mut roots = extra_root_ders();
+    if let Some(own) = ExtraRoots::load(ca_file)? {
+        roots.extend(own.ders);
+    }
+    Ok(roots)
+}
+
 /// The installed bundle in PEM form, for clients that take PEM.
 pub fn extra_roots_pem() -> Option<&'static [u8]> {
     EXTRA_ROOTS.get().map(|roots| roots.pem.as_slice())
@@ -185,6 +195,21 @@ eNgCIQDueZI0VOize04VTG2dv5UFzZ667WXzg1B2PhtNagBdNQ==
         let file = tempfile::NamedTempFile::new().expect("temp file");
         std::fs::write(file.path(), contents).expect("write bundle");
         file
+    }
+
+    #[test]
+    fn database_roots_add_the_database_ca_file() {
+        assert_eq!(
+            database_roots("").expect("no file").len(),
+            extra_root_ders().len()
+        );
+        let file = write(TWO_CAS);
+        let roots = database_roots(&file.path().to_string_lossy()).expect("load");
+        assert_eq!(roots.len(), extra_root_ders().len() + 2);
+        assert!(matches!(
+            database_roots("/nonexistent/database-ca.pem"),
+            Err(Error::Read { .. })
+        ));
     }
 
     #[test]

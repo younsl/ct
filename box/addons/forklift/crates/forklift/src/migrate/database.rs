@@ -42,7 +42,7 @@ pub const USAGE: &str = "Usage of forklift migrate-database:
         how long to wait for the writers to stop and for the Lease (default 3m)
 
 The target comes from FORKLIFT_DATABASE_HOST, _PORT, _NAME, _USER, _PASSWORD,
-_SSLMODE and _SCHEMA, or FORKLIFT_DATABASE_URL. The bucket comes from
+_SSLMODE, _CA_FILE and _SCHEMA, or FORKLIFT_DATABASE_URL. The bucket comes from
 FORKLIFT_STORAGE_S3_*, the same settings the server reads.";
 
 /// Tables whose rows only mean something next to files on the pod that wrote
@@ -674,13 +674,15 @@ pub async fn run(cfg: &config::Config, args: &Args) -> Result<Report, String> {
                     .to_string(),
             );
         }
+        let extra_roots = outbound::database_roots(&cfg.database.ca_file)
+            .map_err(|e| format!("load the database ca file: {e}"))?;
         // Opened before the bucket download so a wrong target fails in seconds.
         let target = meta::Store::open_postgres(
             &conn_str,
             meta::PostgresOptions {
                 max_connections: 2,
                 schema: cfg.database.schema.clone(),
-                extra_roots: outbound::extra_root_ders(),
+                extra_roots,
             },
         )
         .await

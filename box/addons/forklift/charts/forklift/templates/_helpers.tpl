@@ -227,6 +227,15 @@ database-password
 {{- end -}}
 
 {{/* PostgreSQL connection environment, shared by the server and the worker. */}}
+{{/*
+ConfigMap holding the CA of an external database, or empty.
+*/}}
+{{- define "forklift.databaseCA" -}}
+{{- if eq (include "forklift.databaseType" .) "external" -}}
+{{- .Values.database.external.caBundle.configMap -}}
+{{- end -}}
+{{- end }}
+
 {{- define "forklift.databaseEnv" -}}
 {{- if eq (include "forklift.postgres" .) "true" }}
 {{- $internal := eq (include "forklift.databaseType" .) "internal" }}
@@ -241,6 +250,10 @@ database-password
   value: {{ ternary "forklift" $ext.user $internal | quote }}
 - name: FORKLIFT_DATABASE_SSLMODE
   value: {{ ternary "disable" $ext.sslMode $internal | quote }}
+{{- if include "forklift.databaseCA" . }}
+- name: FORKLIFT_DATABASE_CA_FILE
+  value: {{ printf "/etc/forklift/database-ca/%s" $ext.caBundle.key | quote }}
+{{- end }}
 - name: FORKLIFT_DATABASE_MAX_CONNECTIONS
   value: {{ .Values.database.maxConnections | quote }}
 {{- with .Values.database.schema }}
@@ -641,6 +654,11 @@ setting a proxy never routes replication or storage through it.
   mountPath: /etc/forklift/ca
   readOnly: true
 {{- end }}
+{{- if include "forklift.databaseCA" . }}
+- name: database-ca
+  mountPath: /etc/forklift/database-ca
+  readOnly: true
+{{- end }}
 {{- end }}
 
 {{- define "forklift.outboundVolumes" -}}
@@ -653,6 +671,14 @@ setting a proxy never routes replication or storage through it.
       - key: {{ .key }}
         path: {{ .key }}
 {{- end }}
+{{- end }}
+{{- with include "forklift.databaseCA" . }}
+- name: database-ca
+  configMap:
+    name: {{ . }}
+    items:
+      - key: {{ $.Values.database.external.caBundle.key }}
+        path: {{ $.Values.database.external.caBundle.key }}
 {{- end }}
 {{- end }}
 

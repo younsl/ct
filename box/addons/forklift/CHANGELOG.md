@@ -10,6 +10,7 @@ Notable changes per release. Container image versions come from the
 
 - The PostgreSQL schema named by `FORKLIFT_DATABASE_SCHEMA` is created at startup when it does not exist, so pointing forklift at a new schema of an existing database needs no manual step. Only the database and the user have to exist beforehand. Pods starting together take turns through the migration lock. Creating a schema needs the `CREATE` privilege on the database, and an existing schema needs nothing extra.
 - `forklift migrate-database` copies the metadata of a SQLite install into PostgreSQL, so an existing install can move to the active-active layout with its repositories, artifacts, users, tokens and audit log. The source is a SQLite file (`-from-sqlite`) or the metadata the s3 backend keeps in the bucket. The copy runs in one transaction, checks the row count of every table, moves the identity sequences past the copied ids, and refuses a non-empty target unless `-overwrite` is given. `-dry-run` reports row counts and problems without writing.
+- `FORKLIFT_DATABASE_CA_FILE` (chart: `database.external.caBundle`) names a CA bundle trusted for the PostgreSQL connection only, for managed services that sign their server certificate with their own CA. Before, the only way was `outbound.caBundle`, which also made every outbound HTTPS client trust that CA.
 - Chart: `database.migration.enabled` runs the copy as a Job with the deployments scaled to zero. The Job waits until no forklift pod is left and holds the HA Lease while it copies.
 
 ### Changed

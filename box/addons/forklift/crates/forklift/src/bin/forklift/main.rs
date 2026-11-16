@@ -672,7 +672,8 @@ async fn open_store(
     let opts = meta::PostgresOptions {
         max_connections: usize::try_from(cfg.database.max_connections).unwrap_or(2),
         schema: cfg.database.schema.clone(),
-        extra_roots: outbound::extra_root_ders(),
+        extra_roots: outbound::database_roots(&cfg.database.ca_file)
+            .context("load the database ca file")?,
     };
     let deadline = tokio::time::Instant::now() + DATABASE_BOOT_BUDGET;
     loop {

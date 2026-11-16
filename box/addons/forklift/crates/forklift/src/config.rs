@@ -408,6 +408,8 @@ pub struct DatabaseConfig {
     pub password: String,
     /// One of disable, prefer, require.
     pub sslmode: String,
+    /// PEM bundle trusted for the database connection only. Empty adds none.
+    pub ca_file: String,
     /// Schema holding the tables. Empty uses the server default.
     pub schema: String,
     /// Sessions this process opens, split between writes and reads.
@@ -632,6 +634,7 @@ impl Config {
                 user: env("FORKLIFT_DATABASE_USER", "forklift"),
                 password: env("FORKLIFT_DATABASE_PASSWORD", ""),
                 sslmode: env("FORKLIFT_DATABASE_SSLMODE", "prefer"),
+                ca_file: env("FORKLIFT_DATABASE_CA_FILE", ""),
                 schema: env("FORKLIFT_DATABASE_SCHEMA", ""),
                 max_connections: env_int64("FORKLIFT_DATABASE_MAX_CONNECTIONS", 16),
             },
