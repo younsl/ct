@@ -60,6 +60,12 @@ securityContext:
     drop:
       - ALL
 
+# -- (string) Pod DNS policy. One of `ClusterFirst`, `ClusterFirstWithHostNet`, `Default`, or `None`. Empty uses the Kubernetes default.
+dnsPolicy: ""
+
+# -- (object) Pod DNS config. Required when dnsPolicy is `None`. See PodDNSConfig spec (nameservers, searches, options).
+dnsConfig: {}
+
 # -- (object) Pod security context.
 podSecurityContext:
   seccompProfile:

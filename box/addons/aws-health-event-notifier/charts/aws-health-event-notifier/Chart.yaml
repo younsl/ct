@@ -3,7 +3,7 @@ name: aws-health-event-notifier
 description: Receives AWS Health events and posts them to Slack
 type: application
 deprecated: false
-version: 0.6.0
+version: 0.7.0
 appVersion: "0.4.0"
 home: https://github.com/younsl/ct
 sources:
@@ -22,7 +22,5 @@ keywords:
 annotations:
   artifacthub.io/changes: |
     - kind: added
-      description: "Lease-based leader election with a ConfigMap delivery ledger (leaderElection.enabled), so two or more replicas run without duplicate Slack posts"
-    - kind: changed
-      description: "Slack 5xx and timeouts are retried up to 3 times, other failures are classified as not posted (retried next cycle) or unknown (never retried)"
+      description: "dnsPolicy and dnsConfig values for the pod, both omitted by default so the Kubernetes default (ClusterFirst) applies"
   artifacthub.io/license: Apache-2.0

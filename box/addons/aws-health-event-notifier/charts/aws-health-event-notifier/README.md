@@ -1,6 +1,6 @@
 # aws-health-event-notifier
 
-![Version: 0.6.0](https://img.shields.io/badge/Version-0.6.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.4.0](https://img.shields.io/badge/AppVersion-0.4.0-informational?style=flat-square)
+![Version: 0.7.0](https://img.shields.io/badge/Version-0.7.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.4.0](https://img.shields.io/badge/AppVersion-0.4.0-informational?style=flat-square)
 
 Receives AWS Health events and posts them to Slack
 
@@ -39,7 +39,7 @@ helm install aws-health-event-notifier oci://ghcr.io/younsl/charts/aws-health-ev
 Install a specific version:
 
 ```console
-helm install aws-health-event-notifier oci://ghcr.io/younsl/charts/aws-health-event-notifier --version 0.6.0
+helm install aws-health-event-notifier oci://ghcr.io/younsl/charts/aws-health-event-notifier --version 0.7.0
 ```
 
 ### Install from local chart
@@ -47,7 +47,7 @@ helm install aws-health-event-notifier oci://ghcr.io/younsl/charts/aws-health-ev
 Download aws-health-event-notifier chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/aws-health-event-notifier --untar --version 0.6.0
+helm pull oci://ghcr.io/younsl/charts/aws-health-event-notifier --untar --version 0.7.0
 helm install aws-health-event-notifier ./aws-health-event-notifier
 ```
 
@@ -90,6 +90,8 @@ The following table lists the configurable parameters and their default values.
 | resources | object | `{"limits":{"memory":"80Mi"},"requests":{"cpu":"20m","memory":"30Mi"}}` | Container resource requests and limits. |
 | resizePolicy | list | `[{"resourceName":"cpu","restartPolicy":"NotRequired"},{"resourceName":"memory","restartPolicy":"RestartContainer"}]` | In-place resize policies for container resources. |
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"runAsUser":65532}` | Container security context (locked-down by default). |
+| dnsPolicy | string | `""` | Pod DNS policy. One of `ClusterFirst`, `ClusterFirstWithHostNet`, `Default`, or `None`. Empty uses the Kubernetes default. |
+| dnsConfig | object | `{}` | Pod DNS config. Required when dnsPolicy is `None`. See PodDNSConfig spec (nameservers, searches, options). |
 | podSecurityContext | object | `{"seccompProfile":{"type":"RuntimeDefault"}}` | Pod security context. |
 | service.type | string | `"ClusterIP"` | Service type. Only exposes the admin (health + metrics) port. |
 | service.adminPort | int | `8081` | Admin port exposed by the Service. |
