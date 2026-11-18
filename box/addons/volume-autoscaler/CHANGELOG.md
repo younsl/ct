@@ -2,6 +2,19 @@
 
 Notable changes to the volume-autoscaler app (the container image), newest first. Entries are headed by the image version and its release date (KST).
 
+## 0.2.1 (2026-11-18)
+
+Dependency update for RUSTSEC advisories. No behavior change.
+
+### Security
+
+Only the crates with an advisory move, so the lockfile stays close to 0.2.0.
+
+- rustls 0.23.46 (RUSTSEC-2026-0346, 0347, 0348, 0349), rustls-webpki 0.103.17 (RUSTSEC-2026-0382), webpki-root-certs 1.0.12 (RUSTSEC-2026-0383).
+- ctutils 0.4.8 (RUSTSEC-2026-0385).
+- tokio 1.54.1 and rustix 1.1.6 for their unsound warnings (RUSTSEC-2026-0386, 0486).
+- The unmaintained warnings for chrono, pin-utils (through the AWS SDK), and unsafe-libyaml (through serde_yaml) remain, as none has a replacement release in the current dependency set.
+
 ## 0.2.0 (2026-11-10)
 
 Adds opt-in orphan PVC cleanup and moves every annotation to the `volume-autoscaler.sh/` prefix.
