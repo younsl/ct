@@ -4,6 +4,28 @@ Notable changes per release. Container image versions come from the
 `org.opencontainers.image.version` label in the `Dockerfile`; chart versions from
 `charts/forklift/Chart.yaml`.
 
+## 0.22.1 (2026-11-18)
+
+### Fixed
+
+- **Scan now** on the coverage page always answered 409 "a scan is already in progress" on a PostgreSQL install. The API pods never lead, so the leader-only trigger refused every request and the refusal was reported as a running scan. Any pod now records the request in the database, and the pod that runs the background jobs starts the scan within a few seconds.
+- **Analyze now** on the security insights page failed the same way and now takes the same path.
+- Every API pod shows the progress of a coverage scan and a running insights analysis, including the scheduled ones the worker runs. Before, only the pod running it did, so the page never showed a scan in active-active mode.
+- A coverage scan that fails on the worker shows its error on every pod.
+- Saving one coverage settings panel on one API pod no longer reverts what another pod saved in the last minute. The save now starts from the stored settings.
+- Muting or unmuting a project on an API pod no longer rolls the stored scan result back to the copy that pod last synced.
+- `GET /api/v1/ha` on an API pod reported that pod as the leader. It now reports a standby and the worker that holds the Lease, so the HA Status page no longer offers a step down that always failed.
+- A trigger that reaches a SQLite standby answers 503 instead of a misleading 409.
+
+### Security
+
+- rustls 0.23.46 (RUSTSEC-2026-0346 to 0349), rustls-webpki 0.103.17 (RUSTSEC-2026-0382) and webpki-root-certs 1.0.12 (RUSTSEC-2026-0383).
+- rusqlite 0.41.1 with the bundled SQLite of libsqlite3-sys 0.39.1 (RUSTSEC-2026-0459).
+- zip 9.7.0 (RUSTSEC-2026-0367, 0368, 0369, 0429, 0545 to 0548). Archive entries whose names cannot be decoded are rejected as invalid archives.
+- openidconnect 4.1.0, which moves crypto-bigint to 0.7.11 (RUSTSEC-2026-0387).
+- rmcp 3.11.0 for forklift-mcp (RUSTSEC-2026-0457, 0461, 0462), ctutils 0.4.8 (RUSTSEC-2026-0385), tokio 1.54.1 and rustix 1.1.6.
+- rsa 0.9.10 (RUSTSEC-2023-0071) remains through openidconnect, which has no release on rsa 0.10. forklift only verifies ID token signatures with public keys, which the timing attack does not reach.
+
 ## 0.22.0 (2026-11-16)
 
 ### Breaking

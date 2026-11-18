@@ -1830,7 +1830,8 @@ fn read_plugin_descriptor(
     let mut descriptor: Option<Vec<u8>> = None;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|_| PluginJarError::Invalid)?;
-        if clamp_archive_path(entry.name()) != "META-INF/maven/plugin.xml" {
+        let name = entry.name().map_err(|_| PluginJarError::Invalid)?;
+        if clamp_archive_path(&name) != "META-INF/maven/plugin.xml" {
             continue;
         }
         if descriptor.is_some() || entry.is_dir() || entry.size() > max_meta_bytes as u64 {

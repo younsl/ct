@@ -800,7 +800,7 @@ fn read_go_module_zip(
         let mut entry = archive
             .by_index(index)
             .map_err(|_| GoZipError::EntryLimit)?;
-        if entry.name() != root {
+        if entry.name().map_err(|_| GoZipError::ZipInvalid)? != root {
             continue;
         }
         if go_mod.is_some() || entry.size() > max_meta_bytes as u64 {
@@ -855,7 +855,10 @@ fn check_module_zip<R: std::io::Read + std::io::Seek>(
         let entry = archive
             .by_index(index)
             .map_err(|_| GoZipError::ZipInvalid)?;
-        let full = entry.name().to_string();
+        let full = entry
+            .name()
+            .map_err(|_| GoZipError::ZipInvalid)?
+            .into_owned();
         let Some(name) = full.strip_prefix(&prefix) else {
             return Err(GoZipError::ZipInvalid);
         };

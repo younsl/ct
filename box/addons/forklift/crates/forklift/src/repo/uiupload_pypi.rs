@@ -892,7 +892,10 @@ fn read_legacy_zip_metadata(
         let mut entry = archive
             .by_index(i)
             .map_err(|_| ZipSdistError::ArchiveInvalid)?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|_| ZipSdistError::ArchiveInvalid)?
+            .into_owned();
         let clean = clean_archive_path(name.strip_prefix("./").unwrap_or(&name));
         if clean.is_empty() || clean.starts_with("../") || name.starts_with('/') {
             return Err(ZipSdistError::Unsafe);
@@ -950,7 +953,10 @@ fn read_wheel_metadata(
         let mut entry = archive
             .by_index(i)
             .map_err(|_| WheelError::ArchiveInvalid)?;
-        let name = entry.name().to_string();
+        let name = entry
+            .name()
+            .map_err(|_| WheelError::ArchiveInvalid)?
+            .into_owned();
         let clean = clean_archive_path(&name);
         let folded = clean.to_lowercase();
         if clean.is_empty()
