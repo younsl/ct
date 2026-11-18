@@ -92,6 +92,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "image": {
+          "$ref": "#/definitions/componentImage"
+        },
         "namespaces": {
           "type": "array",
           "items": {
@@ -206,6 +209,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "image": {
+          "$ref": "#/definitions/componentImage"
+        },
         "replicaCount": {
           "type": "integer",
           "minimum": 0
@@ -678,16 +684,8 @@
           "type": "string",
           "minLength": 1
         },
-        "repository": {
-          "type": "string",
-          "minLength": 1
-        },
         "tag": {
           "type": "string"
-        },
-        "digest": {
-          "type": "string",
-          "pattern": "^(sha256:[a-f0-9]{64})?$"
         },
         "pullPolicy": {
           "type": "string",
@@ -756,6 +754,23 @@
         },
         "key": {
           "type": "string"
+        }
+      }
+    },
+    "componentImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64})?$"
         }
       }
     }

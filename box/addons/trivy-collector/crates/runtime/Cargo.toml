@@ -1,0 +1,28 @@
+[package]
+name = "trivy-collector-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "trivy-collector runtime plumbing shared by both binaries: CLI basics, logging, health, Kubernetes client, lifecycle, and build info"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+prometheus-client.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[build-dependencies]
+vergen-gix.workspace = true
+
+[lints]
+workspace = true

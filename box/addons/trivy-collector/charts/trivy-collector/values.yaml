@@ -22,18 +22,15 @@ replicaCount: 1
 # -- (int) Number of old ReplicaSets to retain for rollback
 revisionHistoryLimit: 10
 
-# -- Container image configuration
+# -- Settings shared by the scraper and server images. Each component sets
+# its own repository and digest under `scraper.image` and `server.image`.
 image:
   # -- (string) Container image registry host
   registry: ghcr.io
-  # -- (string) Container image repository path without registry prefix
-  repository: younsl/trivy-collector
   # -- (string) Image pull policy
   pullPolicy: IfNotPresent
-  # -- (string) Image tag (defaults to chart appVersion)
+  # -- (string) Image tag for both components (defaults to chart appVersion)
   tag: ""
-  # -- (string) Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence
-  digest: ""
 
 # -- (list) Image pull secrets for private registries
 imagePullSecrets: []
@@ -80,11 +77,17 @@ securityContext:
 # -- (string) Cluster name identifier recorded on the Hub's own reports.
 clusterName: "local"
 
-# -- Scraper pod settings. Runs --mode=scraper and owns the only database in
+# -- Scraper pod settings. Runs the scraper image and owns the only database in
 # the release, on its own emptyDir. Also serves the internal read API the
 # server pods proxy through, and evaluates alert rules on the ingest path.
 # One replica by choice: a second would double the watch load for no benefit.
 scraper:
+  # -- Scraper image. Registry, tag, and pull policy come from `image`.
+  image:
+    # -- (string) Image repository path without registry prefix
+    repository: younsl/trivy-collector-scraper
+    # -- (string) Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence
+    digest: ""
   # -- (list) Namespaces the local watcher scans on the Hub's own cluster
   # (empty = all).
   namespaces: []
@@ -170,11 +173,17 @@ scraper:
     # -- (object) Annotations to attach to the ServiceMonitor.
     annotations: {}
 
-# -- Server pod settings. Runs --mode=server. Holds no database and mounts no
+# -- Server pod settings. Runs the server image. Holds no database and mounts no
 # volume: reports come from the scraper's internal API, notes and API tokens
 # from a watched ConfigMap and Secret, request logs from stdout. Scale it
 # freely.
 server:
+  # -- Server image. Registry, tag, and pull policy come from `image`.
+  image:
+    # -- (string) Image repository path without registry prefix
+    repository: younsl/trivy-collector-server
+    # -- (string) Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence
+    digest: ""
   # -- (int) Replica count for the UI / API pod. More than one is supported
   # now that this tier is stateless; set server.mcp.stateless when raising it.
   replicaCount: 1

@@ -1,78 +1,55 @@
 # Development
 
-## Build Commands
+## Workspace layout
+
+trivy-collector is a Cargo workspace. Two binaries ship as two images, and the crate graph decides what each one links: a crate a binary does not depend on is code its image does not carry.
+
+| Crate | Holds | Linked by |
+|---|---|---|
+| `core` | Trivy report types, the `ReportStore` contract, the internal API wire format, authored-state formats, the Hub cluster registry | both |
+| `alertrule-crd` | The `AlertRule` custom resource types and `crdgen` | both |
+| `alerts` | Rule matching, evaluation, readiness controller, Slack delivery | both |
+| `runtime` | CLI basics, logging, health and metrics listener, Kubernetes client, lifecycle, build info | both |
+| `database` | The SQLite report store | scraper |
+| `scraper` | Report watchers, internal API, `export-state`, scraper config and metrics. Builds `trivy-collector-scraper` | scraper image |
+| `server` | Web UI, REST API, MCP server, authentication, remote store, notes, tokens, server config and metrics. Builds `trivy-collector-server` | server image |
+
+`cargo tree -e normal -p trivy-collector-server` must not list `trivy-collector-database` or `sqlx-sqlite`, and the scraper tree must not list `trivy-collector-server`, `rmcp`, or `rust-embed`.
+
+## Build and run
 
 ```bash
-# Build debug binary
-make build
-
-# Build release binary
-make release
-
-# Run server mode locally
-make run
-
-# Run collector mode locally
-make run-collector
-
-# Run with debug logging
-make dev
-
-# Run tests
-make test
-
-# Format code
-make fmt
-
-# Run linter
-make lint
-
-# Clean build artifacts
-make clean
+make build          # both binaries, debug
+make release        # both binaries, release
+make frontend       # build the UI into static/, embedded by the server
+make dev-scraper    # scraper: watchers, database, internal API on :8081
+make dev            # server: UI on :3000, reads from the scraper on :8081
+make dev-all        # both in one process group, Ctrl+C stops both
+make crd            # regenerate the chart CRD from crates/alertrule-crd
 ```
 
-## Docker Commands
+The scraper and the server must share `INTERNAL_TOKEN`. `make dev-all` sets it for both.
+
+## Checks
 
 ```bash
-# Build Docker image
-make docker-build
-
-# Build for all platforms (requires cross)
-make build-all
-
-# Push to registry (update ECR_REGISTRY in Makefile first)
-make docker-push
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo llvm-cov --workspace --fail-under-lines 70
 ```
 
-## Local Testing
+Run them at the workspace root. The release workflow does the same, so a library crate's tests gate both images.
+
+## Images
 
 ```bash
-# Terminal 1: Run server
-MODE=server SCRAPER_URL=http://localhost:8081 INTERNAL_TOKEN=dev LOG_FORMAT=pretty ./target/debug/trivy-collector
-
-# Terminal 2: Run collector (requires Trivy Operator in cluster)
-MODE=scraper STORAGE_PATH=/tmp/trivy-data INTERNAL_TOKEN=dev INTERNAL_PORT=8081 HEALTH_PORT=8090 LOG_FORMAT=pretty ./target/debug/trivy-collector
+make docker-build   # both images for the native arch
+make podman-build   # the same with Podman
 ```
 
-## Release Workflow
-
-Releases are automated via GitHub Actions:
-
-```bash
-# Create and push tag
-git tag trivy-collector/0.1.0
-git push origin trivy-collector/0.1.0
-
-# GitHub Actions automatically:
-# 1. Builds multi-arch Docker images (linux/amd64, linux/arm64)
-# 2. Pushes to GitHub Container Registry (ghcr.io)
-# 3. Creates GitHub release
-```
-
-Container images:
-- `ghcr.io/younsl/trivy-collector:0.1.0` (versioned)
-- `ghcr.io/younsl/trivy-collector:latest` (latest)
+Each image has its own Dockerfile, `crates/scraper/Dockerfile` and `crates/server/Dockerfile`, and its own version label. A release triggers on push to `main` when that label changes, and publishes `ghcr.io/younsl/trivy-collector-scraper` or `ghcr.io/younsl/trivy-collector-server` for `linux/amd64` and `linux/arm64`.
 
 ## Conclusion
 
-Use the `make` targets to build, test, format, and lint, and test locally by running a server and a scraper side by side with the same `INTERNAL_TOKEN` against a cluster that runs Trivy Operator. Releases are built and pushed by GitHub Actions as multi-arch images to `ghcr.io/younsl/trivy-collector`.
+The workspace splits by what each binary needs, so the server image carries no database and the scraper image carries no UI or API. Run fmt, clippy, tests, and coverage at the workspace root, and bump each Dockerfile's version label to release its image.

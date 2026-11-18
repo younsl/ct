@@ -1,5 +1,34 @@
 # Upgrading
 
+## To app 1.8.3 / chart 0.16.0
+
+The single `trivy-collector` image is replaced by two, `trivy-collector-scraper` and `trivy-collector-server`, each built from its own binary.
+
+### Chart values move
+
+`image.repository` and `image.digest` move under each component. `image.registry`, `image.tag`, and `image.pullPolicy` stay shared. The schema rejects the old keys, so an override that sets them fails `helm upgrade` instead of being ignored.
+
+```yaml
+image:
+  registry: ghcr.io
+scraper:
+  image:
+    repository: younsl/trivy-collector-scraper
+server:
+  image:
+    repository: younsl/trivy-collector-server
+```
+
+A registry mirror needs both repositories. The `export-state` Job runs from the scraper image.
+
+### `--mode` and `MODE` are gone
+
+Each binary knows its role, so neither accepts `--mode`, and `MODE` is no longer read. The chart stops setting both. A hand-written manifest that passes `--mode` fails to start until the flag is removed. Each binary also rejects the other's flags.
+
+### Server config page
+
+`GET /api/v1/config` lists only the server's own settings. `MODE`, `CLUSTER_NAME`, `NAMESPACES`, `WATCH_LOCAL`, and `COLLECT_*` belong to the scraper and are no longer reported by the server, which only ever showed its own defaults for them.
+
 ## To app 1.8.0 / chart 0.13.0
 
 Alert rules move out of the `trivy-collector-alerts` ConfigMap and become `AlertRule` custom resources in the `trivy-collector.security.io` API group. See [Alerts](alerts.md) for the full schema.

@@ -10,13 +10,14 @@ the central (Hub) cluster; Edge clusters host only a small read-only
 
 ## Two pods, single responsibility
 
-One Helm release creates two Deployments on the central cluster, distinguished
-by the `--mode` CLI flag:
+One Helm release creates two Deployments on the central cluster, each running its own binary from its own image:
 
-| Pod | Mode | Role |
+| Pod | Image | Role |
 |---|---|---|
-| `trivy-collector-server` | `--mode=server` | HTTP UI + API. Holds no database and mounts no volume; reads reports through the scraper's internal API. No watchers. |
-| `trivy-collector-scraper` | `--mode=scraper` | Runs all watchers, owns the only database, evaluates alert rules, and serves the internal read API on `:8081`. No UI (only `/healthz`, `/readyz`, `/metrics`). |
+| `trivy-collector-server` | `ghcr.io/younsl/trivy-collector-server` | HTTP UI + API. Holds no database and mounts no volume, and reads reports through the scraper's internal API. No watchers. |
+| `trivy-collector-scraper` | `ghcr.io/younsl/trivy-collector-scraper` | Runs all watchers, owns the only database, evaluates alert rules, and serves the internal read API on `:8081`. No UI (only `/healthz`, `/readyz`, `/metrics`). |
+
+Each binary links only the code its role runs. The server image carries no SQLite and no watchers, and the scraper image carries no web UI, REST API, MCP server, or authentication. See [Development](development.md) for the crate layout that enforces this.
 
 The split follows data ownership rather than read and write roles. The scraper owns the SQLite file on its own `emptyDir` and nothing else can see it, which is what makes the server disposable, and a disposable server is the point, since image bumps, config changes, and replica changes on the UI tier are frequent while scraper restarts are rare and self-healing.
 
@@ -124,8 +125,9 @@ simpler:
   the UI without risking duplicate DB writers.
 - **Failure isolation**: a crash in a per-cluster watcher can't bring the UI
   down and vice versa.
-- **Deployment auditability**: a single image with one of two CLI flags is
-  easy to reason about (`--mode=server` vs `--mode=scraper`).
+- **Smaller attack surface**: each image ships only its role's code, so the
+  internet-facing server holds no database driver and the scraper serves no
+  UI.
 
 ## Deletion semantics
 

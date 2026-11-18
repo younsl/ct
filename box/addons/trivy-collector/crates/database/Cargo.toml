@@ -1,0 +1,24 @@
+[package]
+name = "trivy-collector-database"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "trivy-collector SQLite report store, linked by the scraper only"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+trivy-collector-core.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

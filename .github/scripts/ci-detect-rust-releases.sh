@@ -7,8 +7,10 @@
 # Projects come from ci-rust-projects.json, keyed by Dockerfile path. Every field
 # is optional: project defaults to the directory the Dockerfile sits in, binary to
 # project, frontend_manager to none (npm|pnpm otherwise), frontend_dir and
-# embed_dir (the directory the crate embeds assets from) to "-", and ebpf_dir
-# (the aya kernel crate built before the binary) to "-".
+# embed_dir (the directory the crate embeds assets from) to "-", ebpf_dir
+# (the aya kernel crate built before the binary) to "-", and test_dir (where
+# fmt, clippy, tests, and coverage run, relative to the Dockerfile directory)
+# to "." so a workspace member can test its whole workspace.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -72,11 +74,13 @@ done < <(jq -c 'to_entries[]
       frontend_manager: "none",
       frontend_dir: "-",
       embed_dir: "-",
-      ebpf_dir: "-"
+      ebpf_dir: "-",
+      test_dir: "."
     } + .value
-  | . + {binary: (.binary // .project)}' "${TABLE}")
+  | . + {binary: (.binary // .project)}
+  | . + {test_dir: (.base_dir + "/" + .test_dir)}' "${TABLE}")
 
-TEST_JSON=$(jq -c '[ .[] | {project, base_dir, embed_dir} ]' <<< "${RELEASES}")
+TEST_JSON=$(jq -c '[ .[] | {project, base_dir, embed_dir, test_dir} ]' <<< "${RELEASES}")
 
 BINARY_JSON=$(jq -c '[ .[] as $p
   | {"x86_64-unknown-linux-musl": "amd64", "aarch64-unknown-linux-musl": "arm64"}

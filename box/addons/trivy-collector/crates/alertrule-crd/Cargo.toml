@@ -1,0 +1,28 @@
+[package]
+name = "trivy-collector-alertrule-crd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "trivy-collector AlertRule custom resource types and chart CRD rendering"
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "crdgen"
+path = "src/bin/crdgen.rs"
+doc = false
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+utoipa.workspace = true
+
+[lints]
+workspace = true

@@ -51,7 +51,7 @@ spec:
         - name: export-state
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: {{ include "trivy-collector.image" . | quote }}
+          image: {{ include "trivy-collector.image" (dict "root" . "image" .Values.scraper.image) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - export-state

@@ -1,7 +1,8 @@
 {
   "box/addons/aurora-database-insights-exporter/Dockerfile": { "binary": "adie" },
   "box/addons/aws-health-event-notifier/Dockerfile":         {},
-  "box/addons/trivy-collector/Dockerfile":                   { "frontend_manager": "npm", "frontend_dir": "frontend", "embed_dir": "static" },
+  "box/addons/trivy-collector/crates/scraper/Dockerfile":   { "project": "trivy-collector-scraper", "embed_dir": "../../static", "test_dir": "../.." },
+  "box/addons/trivy-collector/crates/server/Dockerfile":    { "project": "trivy-collector-server", "frontend_manager": "npm", "frontend_dir": "../../frontend", "embed_dir": "../../static", "test_dir": "../.." },
   "box/addons/kubernetes-upgrade-operator/Dockerfile":       { "binary": "kuo" },
   "box/addons/kagent-gateway/Dockerfile":                    {},
   "box/addons/argocd-canary-gate/Dockerfile":                {},

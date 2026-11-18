@@ -1,6 +1,6 @@
 # trivy-collector
 
-![Version: 0.15.1](https://img.shields.io/badge/Version-0.15.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.8.2](https://img.shields.io/badge/AppVersion-1.8.2-informational?style=flat-square)
+![Version: 0.16.0](https://img.shields.io/badge/Version-0.16.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.8.3](https://img.shields.io/badge/AppVersion-1.8.3-informational?style=flat-square)
 
 Multi-cluster Trivy report collector and viewer
 
@@ -39,7 +39,7 @@ helm install trivy-collector oci://ghcr.io/younsl/charts/trivy-collector -f valu
 Install a specific version:
 
 ```console
-helm install trivy-collector oci://ghcr.io/younsl/charts/trivy-collector --version 0.15.1
+helm install trivy-collector oci://ghcr.io/younsl/charts/trivy-collector --version 0.16.0
 ```
 
 ### Install from local chart
@@ -47,7 +47,7 @@ helm install trivy-collector oci://ghcr.io/younsl/charts/trivy-collector --versi
 Download trivy-collector chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/trivy-collector --untar --version 0.15.1
+helm pull oci://ghcr.io/younsl/charts/trivy-collector --untar --version 0.16.0
 helm install trivy-collector ./trivy-collector
 ```
 
@@ -82,12 +82,10 @@ The following table lists the configurable parameters and their default values.
 | fullnameOverride | string | `""` | Override the full name of the chart |
 | replicaCount | int | `1` | Default replica count (deprecated, use server.replicaCount for UI pods; scraper always runs as a single replica to avoid split-brain writes). |
 | revisionHistoryLimit | int | `10` | Number of old ReplicaSets to retain for rollback |
-| image | object | `{"digest":"","pullPolicy":"IfNotPresent","registry":"ghcr.io","repository":"younsl/trivy-collector","tag":""}` | Container image configuration |
+| image | object | `{"pullPolicy":"IfNotPresent","registry":"ghcr.io","tag":""}` | Settings shared by the scraper and server images. Each component sets its own repository and digest under `scraper.image` and `server.image`. |
 | image.registry | string | `"ghcr.io"` | Container image registry host |
-| image.repository | string | `"younsl/trivy-collector"` | Container image repository path without registry prefix |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy |
-| image.tag | string | `""` | Image tag (defaults to chart appVersion) |
-| image.digest | string | `""` | Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence |
+| image.tag | string | `""` | Image tag for both components (defaults to chart appVersion) |
 | imagePullSecrets | list | `[]` | Image pull secrets for private registries |
 | serviceAccount | object | `{"annotations":{},"automount":true,"create":true,"name":""}` | ServiceAccount configuration |
 | serviceAccount.create | bool | `true` | Create a ServiceAccount |
@@ -106,6 +104,10 @@ The following table lists the configurable parameters and their default values.
 | securityContext.capabilities | object | `{"drop":["ALL"]}` | Capabilities to drop |
 | securityContext.readOnlyRootFilesystem | bool | `true` | Mount root filesystem as read-only |
 | clusterName | string | `"local"` | Cluster name identifier recorded on the Hub's own reports. |
+| scraper | object | `{"affinity":{},"collect":{"sbomReports":true,"vulnerabilityReports":true},"extraPodSpec":{},"image":{"digest":"","repository":"younsl/trivy-collector-scraper"},"namespaces":[],"nodeSelector":{},"readinessProbe":{"failureThreshold":60,"httpGet":{"path":"/readyz","port":"health"},"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":5},"resizePolicy":[],"resources":{"limits":{"ephemeral-storage":"2Gi","memory":"512Mi"},"requests":{"cpu":"50m","ephemeral-storage":"2Gi","memory":"256Mi"}},"serviceMonitor":{"additionalLabels":{},"annotations":{},"enabled":false,"interval":"30s","scrapeTimeout":""},"storage":{"medium":"","mountPath":"/data","sizeLimit":"2Gi"},"strategy":{"rollingUpdate":{"maxSurge":1,"maxUnavailable":0},"type":"RollingUpdate"},"tolerations":[],"topologySpreadConstraints":[],"watchLocal":true}` | Scraper pod settings. Runs the scraper image and owns the only database in the release, on its own emptyDir. Also serves the internal read API the server pods proxy through, and evaluates alert rules on the ingest path. One replica by choice: a second would double the watch load for no benefit. |
+| scraper.image | object | `{"digest":"","repository":"younsl/trivy-collector-scraper"}` | Scraper image. Registry, tag, and pull policy come from `image`. |
+| scraper.image.repository | string | `"younsl/trivy-collector-scraper"` | Image repository path without registry prefix |
+| scraper.image.digest | string | `""` | Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence |
 | scraper.namespaces | list | `[]` | Namespaces the local watcher scans on the Hub's own cluster (empty = all). |
 | scraper.watchLocal | bool | `true` | Enable the local-cluster watcher (Hub itself). Set to false if Trivy Operator is not installed on the central cluster. |
 | scraper.collect | object | `{"sbomReports":true,"vulnerabilityReports":true}` | Report kinds to watch. Applies to the Hub and to every registered edge cluster. Disabling a kind stops its watch everywhere and excludes it from hydration accounting, so readiness still clears. SbomReports are the bulk of the data, so turning them off is the main lever on database size. |
@@ -130,6 +132,10 @@ The following table lists the configurable parameters and their default values.
 | scraper.serviceMonitor.scrapeTimeout | string | `""` | Scrape timeout (defaults to Prometheus global when empty). |
 | scraper.serviceMonitor.additionalLabels | object | `{}` | Additional labels to attach to the ServiceMonitor. |
 | scraper.serviceMonitor.annotations | object | `{}` | Annotations to attach to the ServiceMonitor. |
+| server | object | `{"affinity":{},"auth":{"mode":"none","rbac":{"defaultPolicy":"role:readonly","policy":"p, role:readonly, reports, get, allow\np, role:readonly, clusters, get, allow\np, role:readonly, stats, get, allow\np, role:readonly, tokens, get, allow\np, role:readonly, tokens, create, allow\np, role:admin, *, *, allow\ng, admin, role:admin\n"},"sso":{"clientId":{"key":"client-id","name":"","value":""},"clientSecret":{"key":"client-secret","name":"","value":""},"issuer":"","redirectUrl":"","scopes":["openid","profile","email","groups"]}},"externalUrl":"","extraPodSpec":{},"gateway":{"enabled":false,"hostnames":["trivy.example.com"],"name":"","parentRefs":[{"group":"gateway.networking.k8s.io","kind":"Gateway","name":"main-gateway","namespace":"gateway-system","sectionName":"https"}],"rules":[{"backendRefs":[{"group":"","kind":"Service","name":"","port":3000,"weight":1}],"filters":[],"matches":[{"path":{"type":"PathPrefix","value":"/"}}]}]},"image":{"digest":"","repository":"younsl/trivy-collector-server"},"mcp":{"allowedHosts":[],"enabled":false,"stateless":false},"nodeSelector":{},"podDisruptionBudget":{"enabled":true,"maxUnavailable":1,"minAvailable":""},"port":3000,"replicaCount":1,"resizePolicy":[],"resources":{"limits":{"memory":"96Mi"},"requests":{"cpu":"20m","memory":"48Mi"}},"serviceMonitor":{"additionalLabels":{},"annotations":{},"enabled":false,"interval":"30s","scrapeTimeout":""},"tolerations":[],"topologySpreadConstraints":[]}` | Server pod settings. Runs the server image. Holds no database and mounts no volume: reports come from the scraper's internal API, notes and API tokens from a watched ConfigMap and Secret, request logs from stdout. Scale it freely. |
+| server.image | object | `{"digest":"","repository":"younsl/trivy-collector-server"}` | Server image. Registry, tag, and pull policy come from `image`. |
+| server.image.repository | string | `"younsl/trivy-collector-server"` | Image repository path without registry prefix |
+| server.image.digest | string | `""` | Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence |
 | server.replicaCount | int | `1` | Replica count for the UI / API pod. More than one is supported now that this tier is stateless; set server.mcp.stateless when raising it. |
 | server.podDisruptionBudget | object | `{"enabled":true,"maxUnavailable":1,"minAvailable":""}` | PodDisruptionBudget for the UI tier. Only meaningful with more than one replica, and skipped otherwise. |
 | server.podDisruptionBudget.enabled | bool | `true` | Create a PodDisruptionBudget. |

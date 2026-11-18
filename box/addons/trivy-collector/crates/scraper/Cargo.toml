@@ -1,0 +1,39 @@
+[package]
+name = "trivy-collector-scraper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "trivy-collector scraper: Trivy report watchers, Hub cluster registry, and the internal read API"
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "trivy-collector-scraper"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+trivy-collector-core.workspace = true
+trivy-collector-database.workspace = true
+trivy-collector-runtime.workspace = true
+trivy-collector-alerts.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
+clap.workspace = true
+futures.workspace = true
+http-body-util.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+prometheus-client.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

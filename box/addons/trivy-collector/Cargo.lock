@@ -4724,8 +4724,123 @@ dependencies = [
 ]
 
 [[package]]
-name = "trivy-collector"
-version = "1.8.2"
+name = "trivy-collector-alertrule-crd"
+version = "1.8.3"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "k8s-openapi",
+ "kube",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "utoipa",
+]
+
+[[package]]
+name = "trivy-collector-alerts"
+version = "1.8.3"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "k8s-openapi",
+ "kube",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "trivy-collector-alertrule-crd",
+ "trivy-collector-core",
+ "trivy-collector-database",
+ "trivy-collector-runtime",
+ "utoipa",
+]
+
+[[package]]
+name = "trivy-collector-core"
+version = "1.8.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "hex",
+ "k8s-openapi",
+ "kube",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "utoipa",
+]
+
+[[package]]
+name = "trivy-collector-database"
+version = "1.8.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "trivy-collector-core",
+]
+
+[[package]]
+name = "trivy-collector-runtime"
+version = "1.8.3"
+dependencies = [
+ "anyhow",
+ "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "k8s-openapi",
+ "kube",
+ "prometheus-client",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "vergen-gix",
+]
+
+[[package]]
+name = "trivy-collector-scraper"
+version = "1.8.3"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "clap",
+ "futures",
+ "http-body-util",
+ "k8s-openapi",
+ "kube",
+ "prometheus-client",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "trivy-collector-alerts",
+ "trivy-collector-core",
+ "trivy-collector-database",
+ "trivy-collector-runtime",
+]
+
+[[package]]
+name = "trivy-collector-server"
+version = "1.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4739,8 +4854,6 @@ dependencies = [
  "hex",
  "hostname",
  "http-body-util",
- "hyper",
- "hyper-util",
  "jsonwebtoken",
  "k8s-openapi",
  "kube",
@@ -4754,19 +4867,21 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2",
- "sqlx",
  "thiserror",
  "tokio",
  "tokio-util",
  "tower",
  "tower-http 0.7.0",
  "tracing",
- "tracing-subscriber",
+ "trivy-collector-alertrule-crd",
+ "trivy-collector-alerts",
+ "trivy-collector-core",
+ "trivy-collector-database",
+ "trivy-collector-runtime",
+ "trivy-collector-scraper",
  "urlencoding",
  "utoipa",
- "vergen-gix",
 ]
 
 [[package]]

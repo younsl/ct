@@ -1,0 +1,61 @@
+[package]
+name = "trivy-collector-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "trivy-collector server: web UI, REST API, MCP server, and authentication"
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "trivy-collector-server"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+trivy-collector-core.workspace = true
+trivy-collector-runtime.workspace = true
+trivy-collector-alertrule-crd.workspace = true
+trivy-collector-alerts.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+axum-extra.workspace = true
+axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+clap.workspace = true
+cookie.workspace = true
+futures.workspace = true
+hex.workspace = true
+hostname.workspace = true
+http-body-util.workspace = true
+jsonwebtoken.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+mime_guess.workspace = true
+prometheus-client.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+rmcp.workspace = true
+rust-embed.workspace = true
+rustls.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tower.workspace = true
+tracing.workspace = true
+urlencoding.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+trivy-collector-database.workspace = true
+trivy-collector-scraper.workspace = true
+
+[lints]
+workspace = true

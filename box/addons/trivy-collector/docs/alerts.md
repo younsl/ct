@@ -128,7 +128,7 @@ The API server enforces the severity enum, the score range, and at most 20 terms
 
 A manifest for each case lives in [`examples/`](../examples), and `cargo test` checks that every one parses, compiles, and matches what its `description` says.
 
-Adding a matcher is a field on the term types and a clause in `src/alerts/matchers.rs`. The evaluator, preview, test delivery, the fleet count, and readiness all go through that one predicate.
+Adding a matcher is a field on the term types and a clause in `crates/alerts/src/matchers.rs`. The evaluator, preview, test delivery, the fleet count, and readiness all go through that one predicate.
 
 ### Receivers
 
@@ -183,7 +183,7 @@ status:
 
 `Ready=False` is the one worth alerting on yourself. An unparseable `versionExpr` otherwise makes a rule silently inert: listed, apparently enabled, never firing. The API path rejects these before they are stored, so `Ready=False` mostly marks a rule applied from Git.
 
-`Ready` is answered by a watch on the rules themselves, so a new or edited rule is reported on within a watch event rather than waiting for a report. `Delivered` is absent until the rule has actually fired.
+`Ready` is answered by a `kube::runtime` controller over the rules themselves, so a new or edited rule is reported on within a watch event rather than waiting for a report. A failed status write is requeued and retried after 30 seconds. `Delivered` is absent until the rule has actually fired.
 
 Readiness deliberately does not ride the report ingest path. Evaluation is suppressed until hydration completes, and after that a report only arrives when Trivy Operator rescans, which on a quiet fleet is hours. Tying readiness to that would leave a freshly created rule blank exactly when its author is looking at it.
 
@@ -200,7 +200,7 @@ Readiness deliberately does not ride the report ingest path. Evaluation is suppr
 
 The scraper deliberately does not write status on every ingested report. That would be one API call per rule per report, with the API server on the ingest path. It also means a single scraper replica is what makes the `firedCount` read-modify-write safe, which the chart already guarantees.
 
-The readiness watch answers its own writes, since a status patch produces another watch event. That terminates because a status write does not bump `metadata.generation`, so the second pass finds its own verdict already recorded and writes nothing. A steady state costs no API calls.
+The readiness controller sees its own writes, since a status patch produces another watch event. That terminates because a status write does not bump `metadata.generation`, so the second pass finds its own verdict already recorded and writes nothing. A steady state costs no API calls.
 
 ## Evaluation
 
@@ -226,7 +226,7 @@ A create or edit is two calls: a server-side apply of the spec, then a merge pat
 
 Writes use server-side apply with the field manager `trivy-collector` and `force`, so the UI can edit a rule that `kubectl apply` or a GitOps controller still claims fields on. If that is unwelcome, do not grant the UI's RBAC role `alerts:update`. See [RBAC](rbac.md).
 
-The HTTP API is snake_case, as the rest of this API is, while the stored object is camelCase, as Kubernetes objects are. The conversion happens in one place, `src/alerts/crd.rs`.
+The HTTP API is snake_case, as the rest of this API is, while the stored object is camelCase, as Kubernetes objects are. The conversion happens in one place, `crates/alertrule-crd/src/crd.rs`.
 
 ## Preview and test
 

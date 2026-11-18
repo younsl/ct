@@ -39,13 +39,9 @@ spec:
         - name: server
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: {{ include "trivy-collector.image" . | quote }}
+          image: {{ include "trivy-collector.image" (dict "root" . "image" .Values.server.image) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args:
-            - --mode=server
           env:
-            - name: MODE
-              value: "server"
             {{- include "trivy-collector.commonEnv" . | nindent 12 }}
             - name: SERVER_PORT
               value: {{ .Values.server.port | quote }}

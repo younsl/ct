@@ -2,14 +2,15 @@
 
 ## Command-line Options
 
-| Argument | Environment Variable | Default | Mode | Description |
+The scraper and the server are separate binaries, `trivy-collector-scraper` and `trivy-collector-server`. Each parses only its own options, so a flag listed for one is rejected by the other.
+
+| Argument | Environment Variable | Default | Binary | Description |
 |----------|---------------------|---------|------|-------------|
-| `--mode` | `MODE` | `server` | Both | Deployment mode: `server` or `scraper` |
 | `--log-format` | `LOG_FORMAT` | `json` | Both | Log format: `json` or `pretty` |
 | `--log-level` | `LOG_LEVEL` | `info` | Both | Log level: trace, debug, info, warn, error |
 | `--health-port` | `HEALTH_PORT` | `8080` | Both | Health check server port |
 
-## Watch Options (scraper mode)
+## Watch Options (scraper)
 
 | Argument | Environment Variable | Default | Description |
 |----------|---------------------|---------|-------------|
@@ -21,7 +22,7 @@
 
 Disabling a report kind stops the watch for it on every cluster and marks it as nothing-to-wait-for in hydration accounting, so `/readyz` still clears.
 
-## Server Mode Options
+## Server Options
 
 | Argument | Environment Variable | Default | Description |
 |----------|---------------------|---------|-------------|
@@ -34,14 +35,14 @@ Disabling a report kind stops the watch for it on every cluster and marks it as 
 | `--mcp-stateless` | `MCP_STATELESS` | `false` | Serve `/mcp` without sessions. Required with more than one server replica |
 | `--mcp-max-concurrency` | `MCP_MAX_CONCURRENCY` | `8` | Concurrent MCP tool executions across all sessions. `0` = unlimited |
 
-## Scraper Mode Options
+## Scraper Options
 
 | Argument | Environment Variable | Default | Description |
 |----------|---------------------|---------|-------------|
 | `--storage-path` | `STORAGE_PATH` | `/data` | Directory holding the SQLite database, on the scraper's `emptyDir`. Contents are rebuilt from the watched clusters on every start |
 | `--internal-port` | `INTERNAL_PORT` | `8081` | Port the internal read API listens on |
 
-## Shared Options
+## Options Both Binaries Take
 
 | Argument | Environment Variable | Default | Description |
 |----------|---------------------|---------|-------------|
@@ -53,14 +54,14 @@ Authentication and RBAC options (`AUTH_MODE`, `OIDC_*`, `RBAC_*`) are listed in 
 
 ## Subcommands
 
-| Command | Description |
-|---------|-------------|
-| `version` | Print version, commit, and build date |
-| `export-state --db-path <path> [--namespace <ns>] [--dry-run]` | One-shot migration off a PersistentVolume: read API tokens and report notes out of a legacy database and write them to the Secret and the ConfigMap. Reports need no export, since the next scraper start relists them |
+| Command | Binary | Description |
+|---------|--------|-------------|
+| `version` | Both | Print version, commit, and build date |
+| `export-state --db-path <path> [--namespace <ns>] [--dry-run]` | Scraper | One-shot migration off a PersistentVolume: read API tokens and report notes out of a legacy database and write them to the Secret and the ConfigMap. Reports need no export, since the next scraper start relists them |
 
 ## API Documentation
 
-Server mode exposes auto-generated OpenAPI 3.1 spec via [utoipa](https://github.com/juhaku/utoipa) at `/api-docs/openapi.json`.
+The server exposes an auto-generated OpenAPI 3.1 spec via [utoipa](https://github.com/juhaku/utoipa) at `/api-docs/openapi.json`.
 
 ```bash
 curl -s http://localhost:3000/api-docs/openapi.json | jq .
@@ -80,4 +81,4 @@ These are served on `--health-port`. The server API port also answers `/healthz`
 
 ## Conclusion
 
-Every flag has an environment variable fallback, and `--mode` decides whether the binary runs as the `server` or the `scraper`. Both pods must share the same `INTERNAL_TOKEN`, and the server needs a reachable `SCRAPER_URL` because it holds no database. Health, readiness, and metrics are served on `--health-port`, and the OpenAPI spec is available at `/api-docs/openapi.json`.
+Every flag has an environment variable fallback, and each binary takes only its own role's options. Both pods must share the same `INTERNAL_TOKEN`, and the server needs a reachable `SCRAPER_URL` because it holds no database. Health, readiness, and metrics are served on `--health-port`, and the OpenAPI spec is available at `/api-docs/openapi.json`.

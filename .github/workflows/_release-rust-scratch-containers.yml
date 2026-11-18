@@ -7,7 +7,8 @@ on:
     paths:
       - 'box/addons/aurora-database-insights-exporter/Dockerfile'
       - 'box/addons/aws-health-event-notifier/Dockerfile'
-      - 'box/addons/trivy-collector/Dockerfile'
+      - 'box/addons/trivy-collector/crates/scraper/Dockerfile'
+      - 'box/addons/trivy-collector/crates/server/Dockerfile'
       - 'box/addons/kubernetes-upgrade-operator/Dockerfile'
       - 'box/addons/kagent-gateway/Dockerfile'
       - 'box/addons/argocd-canary-gate/Dockerfile'
@@ -26,7 +27,8 @@ on:
         options:
           - aurora-database-insights-exporter
           - aws-health-event-notifier
-          - trivy-collector
+          - trivy-collector-scraper
+          - trivy-collector-server
           - kubernetes-upgrade-operator
           - kagent-gateway
           - argocd-canary-gate
@@ -87,6 +89,7 @@ jobs:
       matrix: ${{ fromJson(needs.detect.outputs.test_matrix) }}
     env:
       PROJECT_BASE_DIR: ${{ matrix.base_dir }}
+      PROJECT_TEST_DIR: ${{ matrix.test_dir }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -121,15 +124,15 @@ jobs:
         run: mkdir -p "${EMBED_DIR}"
 
       - name: Check formatting
-        working-directory: ${{ env.PROJECT_BASE_DIR }}
+        working-directory: ${{ env.PROJECT_TEST_DIR }}
         run: cargo fmt --check
 
       - name: Run clippy
-        working-directory: ${{ env.PROJECT_BASE_DIR }}
+        working-directory: ${{ env.PROJECT_TEST_DIR }}
         run: cargo clippy -- -D warnings
 
       - name: Run tests
-        working-directory: ${{ env.PROJECT_BASE_DIR }}
+        working-directory: ${{ env.PROJECT_TEST_DIR }}
         run: cargo test --verbose
 
       - name: Install cargo-llvm-cov
@@ -138,7 +141,7 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Check test coverage (minimum 70%)
-        working-directory: ${{ env.PROJECT_BASE_DIR }}
+        working-directory: ${{ env.PROJECT_TEST_DIR }}
         run: cargo llvm-cov --fail-under-lines 70
 
   # ---------------------------------------------------------------------------

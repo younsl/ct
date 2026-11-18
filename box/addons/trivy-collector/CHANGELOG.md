@@ -6,6 +6,27 @@ The app and the chart version independently, and each releases when its own vers
 
 Migration steps live in [docs/upgrading.md](docs/upgrading.md), not here. This file says what changed. That one says what you have to do about it.
 
+## app 1.8.3 / chart 0.16.0
+
+The single image splits into a scraper image and a server image, and alert rules learn to match vulnerabilities.
+
+### Added
+
+- `AlertRule` terms can match vulnerabilities: a `vulnerability` block with `ids`, `severities`, `minScore` (CVSS, inclusive), and `fixAvailable`.
+- `matcherTerms` holds terms ORed like `nodeSelectorTerms`. Fields inside a term are ANDed. A CEL rule requires exactly one of `matchers` and `matcherTerms`.
+- `excludeNamespaces`, `excludePackages`, and `vulnerability.excludeIds` veto what the rest of a term matches.
+- `examples/` holds an `AlertRule` manifest per case, checked by `cargo test`.
+
+### Changed
+
+- Two images replace `ghcr.io/younsl/trivy-collector`: `trivy-collector-scraper` and `trivy-collector-server`, each built from its own binary. The server links no SQLite, and the scraper links no UI, REST API, MCP server, or authentication.
+- The codebase is a Cargo workspace of seven crates under `crates/`. See [docs/development.md](docs/development.md).
+- Chart values `image.repository` and `image.digest` move to `scraper.image` and `server.image`.
+- `--mode` and `MODE` are removed, since each binary knows its role. Each binary rejects the other's flags.
+- `AlertRule` readiness runs on a `kube::runtime` controller, so a failed status write is retried instead of waiting for the next edit.
+- `export-state` runs from the scraper image.
+- `GET /api/v1/config` on the server lists only the server's own settings.
+
 ## app 1.8.2 / chart 0.15.1
 
 ### Security

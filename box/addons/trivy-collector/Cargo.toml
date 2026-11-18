@@ -1,24 +1,31 @@
-[package]
-name = "trivy-collector"
-version = "1.8.2"
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/database",
+    "crates/runtime",
+    "crates/alertrule-crd",
+    "crates/alerts",
+    "crates/scraper",
+    "crates/server",
+]
+
+[workspace.package]
+version = "1.8.3"
 edition = "2024"
 rust-version = "1.100.0"
 authors = ["younsl <cysl@kakao.com>"]
-description = "Multi-cluster Trivy report collector and viewer"
 license = "Apache-2.0"
 repository = "https://github.com/younsl/ct"
-default-run = "trivy-collector"
 
-[[bin]]
-name = "trivy-collector"
-path = "src/main.rs"
+[workspace.dependencies]
+trivy-collector-core = { path = "crates/core" }
+trivy-collector-database = { path = "crates/database" }
+trivy-collector-runtime = { path = "crates/runtime" }
+trivy-collector-alertrule-crd = { path = "crates/alertrule-crd" }
+trivy-collector-alerts = { path = "crates/alerts" }
+trivy-collector-scraper = { path = "crates/scraper" }
 
-[[bin]]
-name = "crdgen"
-path = "src/bin/crdgen.rs"
-doc = false
-
-[dependencies]
 # Async runtime
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
 
@@ -98,17 +105,16 @@ mime_guess = "2.0.5"
 schemars = "1.2.2"
 hostname = "0.4.2"
 
-[build-dependencies]
 vergen-gix = { version = "10", features = ["build", "cargo", "rustc"] }
 
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "forbid"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
-# Internal binary crate, rustdoc is never published.
+# Internal crates, rustdoc is never published.
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 # Casts convert counts, sizes, and durations that stay far below the lossy range.
@@ -130,3 +136,4 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+

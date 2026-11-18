@@ -102,14 +102,15 @@ app.kubernetes.io/component: scraper
 {{- end }}
 
 {{- define "trivy-collector.image" -}}
-{{- $registry := .Values.image.registry | trimSuffix "/" -}}
-{{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
+{{- $root := .root -}}
+{{- $registry := $root.Values.image.registry | trimSuffix "/" -}}
+{{- $tag := $root.Values.image.tag | default $root.Chart.AppVersion -}}
 {{- if $registry -}}
-{{- printf "%s/%s:%s" $registry .Values.image.repository $tag -}}
+{{- printf "%s/%s:%s" $registry .image.repository $tag -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- printf "%s:%s" .image.repository $tag -}}
 {{- end -}}
-{{- with .Values.image.digest -}}
+{{- with .image.digest -}}
 @{{ . }}
 {{- end -}}
 {{- end -}}
