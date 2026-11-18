@@ -46,3 +46,5 @@ auditConfig:
     - GHSA-hp3w-g68c-fv3c
     # deepmerge has no release past 4.3.1 yet, reached only through dev tooling (jest-config, shadcn).
     - GHSA-gcqx-w48m-w2h4
+    # picomatch has no release past 4.0.7 yet, reached only through dev tooling (vite, storybook).
+    - GHSA-fc5q-39xc-vjpf
