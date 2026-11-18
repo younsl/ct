@@ -1,0 +1,3 @@
+[advisories]
+# rsa has no patched release. Reached only through openidconnect, which verifies with public keys.
+ignore = ["RUSTSEC-2023-0071"]

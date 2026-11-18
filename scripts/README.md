@@ -53,6 +53,29 @@ It is wired into `.pre-commit-config.yaml`: fmt and clippy run on `pre-commit`, 
 
 The script `cd`s into each crate instead of passing `--manifest-path`, because rustup picks `rust-toolchain.toml` from the working directory.
 
+## audit-lockfiles.sh
+
+Fails when an addon dependency lockfile holds a known vulnerability. It runs `cargo audit` on every `Cargo.lock`, `npm audit` on every `package-lock.json`, and `pnpm audit` on every `pnpm-lock.yaml` under `box/addons`. Given file arguments, it audits only the lockfiles that own those files.
+
+```bash
+./scripts/audit-lockfiles.sh                                  # every addon
+./scripts/audit-lockfiles.sh box/addons/forklift/Cargo.toml   # one component
+```
+
+For Rust, a vulnerability always fails, and so does an unsound advisory that a patched release fixes. Unmaintained and yanked notices do not fail, because no update resolves them.
+
+It runs in three places: the `audit-lockfiles` pre-commit hook when a manifest or lockfile changes, the CI Audit workflow on every such push and once a day (new advisories land without any change here), and the test job of the Rust container release workflow.
+
+An advisory with no patched release is ignored per component, each entry with a one-line reason.
+
+| Lockfile | Ignore list |
+| --- | --- |
+| `Cargo.lock` | `.cargo/audit.toml` next to it |
+| `package-lock.json` | `.npm-audit-ignore` next to it, one GHSA ID per line |
+| `pnpm-lock.yaml` | `auditConfig.ignoreGhsas` in `pnpm-workspace.yaml` |
+
+Requires `cargo-audit`, `jq`, `npm`, and `pnpm` for the lockfile kinds it meets.
+
 ## AI Disclosure
 
 The entire codebase of this project was developed with the assistance of [Claude Opus 5.5](https://www.anthropic.com/claude/opus) (High effort).

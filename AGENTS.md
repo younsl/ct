@@ -68,6 +68,7 @@ There is no repository-wide workspace. A component is one standalone crate, or o
 
 - `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` pass after every change. The pre-commit hook runs them for changed crates. Run `cargo fmt` after the last edit, tests included.
 - Unit tests in a `#[cfg(test)]` module in the same file. Integration tests in `tests/`.
+- Every addon lockfile passes `scripts/audit-lockfiles.sh` (cargo audit, npm audit, pnpm audit). An advisory with a patched release is fixed by updating the dependency, never ignored. One without a patch is ignored in the component's own file (`.cargo/audit.toml`, `.npm-audit-ignore`, `auditConfig` in `pnpm-workspace.yaml`) with a one-line reason, and the entry is removed once a patch ships.
 - Every Rust application under `box/` holds at least 70% line coverage, measured with `cargo llvm-cov`. The release workflows gate on it, so check before any release, force re-releases included.
 
 ### CodeQL

@@ -1,0 +1,2 @@
+# picomatch has no release past 4.0.7 yet, reached only through build tooling (vite, unplugin).
+GHSA-fc5q-39xc-vjpf

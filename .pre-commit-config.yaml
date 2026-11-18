@@ -49,3 +49,9 @@ repos:
         files: '\.rs$|Cargo\.(toml|lock)$'
         stages: [pre-push]
         require_serial: true
+      - id: audit-lockfiles
+        name: audit lockfiles
+        entry: scripts/audit-lockfiles.sh
+        language: script
+        files: '^box/addons/.*(Cargo\.(toml|lock)|\.cargo/audit\.toml|package(-lock)?\.json|pnpm-(lock|workspace)\.yaml|\.npm-audit-ignore)$'
+        require_serial: true
