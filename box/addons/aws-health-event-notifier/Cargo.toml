@@ -1,6 +1,6 @@
 [package]
 name = "aws-health-event-notifier"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 rust-version = "1.100.0"
 authors = ["younsl <cysl@kakao.com>"]
@@ -15,7 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.41", features = ["macros", "rt-multi-thread", "signal", "net", "time", "sync"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "signal", "net", "time", "sync"] }
 
 # Admin HTTP server (healthz / readyz / metrics)
 axum = { version = "0.8", features = ["tokio", "json"] }
@@ -27,9 +27,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 # AWS SDK
 aws-config = { version = "1.8", features = ["behavior-version-latest"] }
-aws-sdk-health = "1.97"
-aws-sdk-iam = "1.97"
-aws-sdk-sts = "1.97"
+aws-sdk-health = { version = "1.97", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-iam = { version = "1.97", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-sts = { version = "1.97", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-smithy-types = "1.2"
 
 # Kubernetes client (emit a K8s Event alongside each published notification)
@@ -39,7 +39,7 @@ k8s-openapi = { version = "0.27", features = ["latest"] }
 # Pin the process-wide rustls crypto provider. Both `ring` (reqwest/kube) and
 # `aws-lc-rs` (AWS SDK) get linked, so rustls 0.23 cannot auto-pick a default
 # and panics; we install one explicitly in `main`.
-rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
+rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -53,7 +53,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 dialoguer = "0.11"
 
 # Error handling
-anyhow = "1.0"
+anyhow = "1.0.103"
 thiserror = "2.0"
 
 # Logging
@@ -73,7 +73,7 @@ vergen-gix = { version = "9.1", features = ["build", "rustc"] }
 # HTTP mocking for the Slack webhook client.
 wiremock = "0.6"
 # Replay HTTP transport for mocking the AWS Health SDK without real calls.
-aws-smithy-runtime = { version = "1", features = ["test-util", "client"] }
+aws-smithy-http-client = { version = "1.1", features = ["test-util"] }
 aws-smithy-types = { version = "1.2", features = ["test-util"] }
 http = "1"
 

@@ -376,7 +376,7 @@ fn fmt_rfc3339(dt: DateTime<Utc>) -> String {
 pub mod test_support {
     use aws_sdk_health::Client;
     use aws_sdk_health::config::{BehaviorVersion, Credentials, Region};
-    use aws_smithy_runtime::client::http::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
 
     /// Build a Health SDK `Client` that replays the given JSON response bodies

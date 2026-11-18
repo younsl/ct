@@ -4,7 +4,7 @@ description: Receives AWS Health events and posts them to Slack
 type: application
 deprecated: false
 version: 0.7.0
-appVersion: "0.4.0"
+appVersion: "0.4.1"
 home: https://github.com/younsl/ct
 sources:
   - https://github.com/younsl/ct/tree/main/box/addons/aws-health-event-notifier
@@ -23,4 +23,6 @@ annotations:
   artifacthub.io/changes: |
     - kind: added
       description: "dnsPolicy and dnsConfig values for the pod, both omitted by default so the Kubernetes default (ClusterFirst) applies"
+    - kind: security
+      description: "appVersion 0.4.1, which updates dependencies for RUSTSEC advisories in rustls, rustls-webpki, webpki-roots, h2, quinn, and the AWS SDK signing crates"
   artifacthub.io/license: Apache-2.0
