@@ -26,6 +26,8 @@ The single image splits into a scraper image and a server image, and alert rules
 - `AlertRule` readiness runs on a `kube::runtime` controller, so a failed status write is retried instead of waiting for the next edit.
 - `export-state` runs from the scraper image.
 - `GET /api/v1/config` on the server lists only the server's own settings.
+- Chart `scraper.resizePolicy` and `server.resizePolicy` default to resizing CPU in place and restarting the container for memory.
+- Chart value descriptions are one line each.
 
 ## app 1.8.2 / chart 0.15.1
 
