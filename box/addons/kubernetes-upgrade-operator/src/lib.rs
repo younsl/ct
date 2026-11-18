@@ -6,11 +6,11 @@
 
 mod annotate;
 mod app;
-mod aws;
+pub mod aws;
 mod cli;
 mod controller;
 pub mod crd;
-mod eks;
+pub mod eks;
 mod error;
 mod k8s;
 mod mcp;

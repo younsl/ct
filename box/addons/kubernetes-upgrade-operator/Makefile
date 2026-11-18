@@ -1,4 +1,4 @@
-.PHONY: build release run dev test fmt lint clean install install-local help deps docker-build helm-lint helm-template crd
+.PHONY: build release run dev test test-emulator fmt lint clean install install-local help deps docker-build helm-lint helm-template crd
 
 # Binary name
 BINARY_NAME := kuo
@@ -35,6 +35,10 @@ dev:
 test:
 	@echo "Running tests..."
 	@PATH="$(TOOLCHAIN_PATH):$$PATH" cargo test --verbose
+
+## Run the EKS and STS integration tests against a local AWS Emulator container
+test-emulator:
+	@PATH="$(TOOLCHAIN_PATH):$$PATH" ./scripts/test-emulator.sh
 
 ## Format code
 fmt:

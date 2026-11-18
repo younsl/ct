@@ -86,9 +86,13 @@ const_format = "0.2"
 unsafe_code = "forbid"
 
 [lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Internal library shared by the operator, crdgen, and integration tests, not a published API
+missing_errors_doc = "allow"
+must_use_candidate = "allow"
+implicit_hasher = "allow"
 
 [profile.release]
 opt-level = 3
