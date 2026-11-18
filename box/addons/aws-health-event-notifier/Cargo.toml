@@ -9,6 +9,10 @@ description = "Receives AWS Health events and posts them to a notification chann
 readme = "README.md"
 repository = "https://github.com/younsl/ct"
 
+[lib]
+name = "aws_health_event_notifier"
+path = "src/lib.rs"
+
 [[bin]]
 name = "aws-health-event-notifier"
 path = "src/main.rs"
@@ -81,9 +85,13 @@ http = "1"
 unsafe_code = "forbid"
 
 [lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Internal library shared by the binary and integration tests, not a published API
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
 
 [profile.release]
 opt-level = "z"    # optimize for binary size; this is an I/O-bound service

@@ -1,23 +1,9 @@
-mod aws;
-mod config;
-mod error;
-mod filter;
-mod health;
-mod interactive;
-mod k8s;
-mod leader;
-mod ledger;
-mod notify;
-mod observability;
-mod poller;
-mod server;
-mod slack;
-
 use anyhow::Context;
 use clap::Parser;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-use crate::config::{Cli, Command, RunArgs};
+use aws_health_event_notifier::config::{Cli, Command, RunArgs};
+use aws_health_event_notifier::{interactive, server};
 
 #[derive(clap::Parser)]
 struct DefaultRunArgs {

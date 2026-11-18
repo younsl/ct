@@ -149,6 +149,7 @@ pub struct RunArgs {
     pub reminder_offsets_hours: Vec<u32>,
 }
 
+#[allow(clippy::too_long_first_doc_paragraph)]
 /// Kubernetes Event emission. Always on when running in-cluster: it activates
 /// automatically once the pod identity is present (injected via the Downward
 /// API). Outside a pod (e.g. the `send` subcommand) it is simply skipped.

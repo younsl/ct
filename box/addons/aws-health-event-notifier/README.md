@@ -27,7 +27,7 @@ Polls the [AWS Health API](https://docs.aws.amazon.com/health/latest/ug/health-a
 - [Configuration](docs/configuration.md): environment variables and defaults
 - [IAM permissions](docs/iam.md): AWS policy and support plan requirement
 - [Metrics](docs/metrics.md): Prometheus metrics, labels, example queries
-- [Development](docs/development.md): make targets
+- [Development](docs/development.md): make targets and AWS Emulator tests
 - [Leader election design](docs/designs/leader-election.md): lease, ledger fencing, delivery retry policy
 - [Region filtering design](docs/designs/region-filtering.md): why region is a filter dimension, and its semantics
 

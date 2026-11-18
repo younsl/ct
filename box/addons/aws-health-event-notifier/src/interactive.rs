@@ -172,3 +172,94 @@ fn format_row(s: &EventSummary) -> String {
         code = s.event_type_code.as_deref().unwrap_or(&s.arn),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aws::health::test_support::{
+        SUBSCRIPTION_REQUIRED, replay_client, replay_responses,
+    };
+
+    fn args(arn: &[&str]) -> SendArgs {
+        SendArgs {
+            lookback_hours: 24,
+            event_locale: "en".into(),
+            arn: arn.iter().map(ToString::to_string).collect(),
+            service: vec!["EC2".into()],
+            category: Vec::new(),
+            yes: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn arn_mode_builds_summaries_without_calling_aws() {
+        let (client, http) = replay_client(Vec::new());
+        let aws = HealthClient::from_client(client, "en");
+        let out = fetch_summaries(&aws, &args(&["arn:1", "arn:2"]))
+            .await
+            .unwrap();
+        assert_eq!(
+            out.iter().map(|s| s.arn.as_str()).collect::<Vec<_>>(),
+            ["arn:1", "arn:2"]
+        );
+        assert!(out.iter().all(|s| s.service.is_none()));
+        assert!(http.actual_requests().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn list_mode_fetches_recent_events() {
+        let body = r#"{"events":[{"arn":"arn:1","service":"EC2","eventTypeCode":"AWS_EC2_X","eventTypeCategory":"issue","region":"us-east-1","lastUpdatedTime":1.72e9,"statusCode":"open"}]}"#;
+        let (client, http) = replay_client(vec![body.into()]);
+        let aws = HealthClient::from_client(client, "en");
+        let out = fetch_summaries(&aws, &args(&[])).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].event_type_code.as_deref(), Some("AWS_EC2_X"));
+        assert_eq!(http.actual_requests().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_mode_reports_the_service_error_code() {
+        let (client, _http) = replay_responses(vec![(400, SUBSCRIPTION_REQUIRED.into())]);
+        let aws = HealthClient::from_client(client, "en");
+        let err = fetch_summaries(&aws, &args(&[])).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.starts_with("list events"), "{msg}");
+        assert!(msg.contains("SubscriptionRequiredException"), "{msg}");
+    }
+
+    #[test]
+    fn row_shows_every_known_field() {
+        let row = format_row(&EventSummary {
+            arn: "arn:1".into(),
+            service: Some("EC2".into()),
+            event_type_code: Some("AWS_EC2_X".into()),
+            event_type_category: Some("issue".into()),
+            region: Some("us-east-1".into()),
+            start_time: None,
+            end_time: None,
+            last_updated_time: chrono::DateTime::from_timestamp(1_720_000_000, 0),
+            status_code: None,
+        });
+        assert!(row.starts_with("2024-07-03T09:46:40+00:00"), "{row}");
+        for part in ["EC2", "issue", "us-east-1", "AWS_EC2_X"] {
+            assert!(row.contains(part), "{row}");
+        }
+    }
+
+    #[test]
+    fn row_falls_back_to_the_arn_and_question_marks() {
+        let row = format_row(&EventSummary {
+            arn: "arn:only".into(),
+            service: None,
+            event_type_code: None,
+            event_type_category: None,
+            region: None,
+            start_time: None,
+            end_time: None,
+            last_updated_time: None,
+            status_code: None,
+        });
+        assert!(row.starts_with('?'), "{row}");
+        assert!(row.ends_with("arn:only"), "{row}");
+    }
+}

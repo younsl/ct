@@ -4,7 +4,7 @@ Notable changes to the aws-health-event-notifier app (the container image), newe
 
 ## 0.4.1 (2026-11-19)
 
-Dependency update for RUSTSEC advisories. No behavior change.
+Dependency update for RUSTSEC advisories, with one error reporting fix.
 
 ### Security
 
@@ -18,6 +18,12 @@ cargo audit reported 25 vulnerabilities and now reports 0.
 - Unsound warnings: tokio 1.54.1 (RUSTSEC-2026-0386), anyhow 1.0.104 (RUSTSEC-2026-0190), event-listener 5.4.2 (RUSTSEC-2026-0221), memmap2 0.9.12 (RUSTSEC-2026-0186), and rustix 1.1.6 (RUSTSEC-2026-0486).
 - The unmaintained warnings for chrono, pin-utils (through the AWS SDK), and unsafe-libyaml (through serde_yaml) remain, as does the unsound warning for faster-hex 0.10.0 (RUSTSEC-2026-0306), a build-time dependency of vergen-gix that is not linked into the binary. None has a replacement release in the current dependency set.
 
+### Fixed
+
+- A failed AWS Health, STS, or IAM call reported only `service error`. The message now carries the service error code, so startup and poll logs name the cause, for example `SubscriptionRequiredException` on an account without a Business or Enterprise Support plan.
+
 ### Tests
 
+- `make test-emulator` runs the STS, IAM, and AWS Health client code against a local AWS Emulator. See [development](docs/development.md).
+- Unit tests now cover startup filter validation against the AWS Health catalog, the leader election preflight, account identity resolution, the `send` subcommand's event lookup, and the error path of every AWS Health call.
 - The AWS Health replay client comes from aws-smithy-http-client instead of aws-smithy-runtime, whose test-util feature pulled in hyper 0.14.

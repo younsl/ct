@@ -1,4 +1,4 @@
-.PHONY: build release run dev test fmt lint check clean deps \
+.PHONY: build release run dev test test-emulator fmt lint check clean deps \
         zigbuild-amd64 zigbuild-arm64 zigbuild \
         docker-build docker-buildx \
         helm-lint helm-template \
@@ -45,6 +45,10 @@ dev:
 ## Run tests
 test:
 	@PATH="$(TOOLCHAIN_PATH):$$PATH" cargo test --verbose
+
+## Run the STS, IAM, and AWS Health tests against a local AWS Emulator container
+test-emulator:
+	@PATH="$(TOOLCHAIN_PATH):$$PATH" ./scripts/test-emulator.sh
 
 ## Format code
 fmt:

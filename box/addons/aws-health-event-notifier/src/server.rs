@@ -510,3 +510,238 @@ async fn wait_for_signal() {
     }
     tracing::info!("shutdown signal received");
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::aws::health::test_support::{
+        SUBSCRIPTION_REQUIRED, replay_client, replay_responses,
+    };
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        run: RunArgs,
+    }
+
+    fn run_args(extra: &[&str]) -> RunArgs {
+        TestCli::parse_from(std::iter::once("test").chain(extra.iter().copied())).run
+    }
+
+    fn event_types(pairs: &[(&str, &str)]) -> String {
+        let items: Vec<String> = pairs
+            .iter()
+            .map(|(service, code)| {
+                format!(r#"{{"service":"{service}","code":"{code}","category":"issue"}}"#)
+            })
+            .collect();
+        format!(r#"{{"eventTypes":[{}]}}"#, items.join(","))
+    }
+
+    #[tokio::test]
+    async fn catalog_validation_skips_aws_when_nothing_is_configured() {
+        let (client, http) = replay_client(Vec::new());
+        let aws = HealthClient::from_client(client, "en");
+        validate_against_catalog(&aws, &run_args(&[]))
+            .await
+            .unwrap();
+        assert!(http.actual_requests().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn catalog_validation_accepts_known_services_and_event_codes() {
+        let (client, http) = replay_client(vec![
+            event_types(&[("EC2", "AWS_EC2_X"), ("RDS", "AWS_RDS_X")]),
+            event_types(&[("VPN", "AWS_VPN_REDUNDANCY_LOSS")]),
+        ]);
+        let aws = HealthClient::from_client(client, "en");
+        let cfg = run_args(&[
+            "--allow-services",
+            "EC2, EC2",
+            "--deny-services",
+            "RDS",
+            "--deny-event-codes",
+            "VPN/AWS_VPN_REDUNDANCY_LOSS",
+            "--allow-regions",
+            "ap-northeast-2",
+        ]);
+        validate_against_catalog(&aws, &cfg).await.unwrap();
+        assert_eq!(http.actual_requests().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn catalog_validation_rejects_an_unknown_service() {
+        let (client, _http) = replay_client(vec![event_types(&[("EC2", "AWS_EC2_X")])]);
+        let aws = HealthClient::from_client(client, "en");
+        let cfg = run_args(&["--allow-services", "EC2,NOPE"]);
+        let err = validate_against_catalog(&aws, &cfg).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("1 invalid value(s)"), "{msg}");
+        assert!(msg.contains("NOPE"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn catalog_validation_rejects_an_event_code_under_the_wrong_service() {
+        let (client, _http) = replay_client(vec![event_types(&[("VPN", "AWS_VPN_X")])]);
+        let aws = HealthClient::from_client(client, "en");
+        let cfg = run_args(&["--deny-event-codes", "EC2/AWS_VPN_X"]);
+        let err = validate_against_catalog(&aws, &cfg).await.unwrap_err();
+        assert!(format!("{err:#}").contains("EC2/AWS_VPN_X"));
+    }
+
+    #[tokio::test]
+    async fn catalog_validation_reports_why_the_lookup_failed() {
+        let (client, _http) = replay_responses(vec![(400, SUBSCRIPTION_REQUIRED.into())]);
+        let aws = HealthClient::from_client(client, "en");
+        let cfg = run_args(&["--allow-services", "EC2"]);
+        let err = validate_against_catalog(&aws, &cfg).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("failed to look up AWS Health service codes"),
+            "{msg}"
+        );
+        assert!(msg.contains("SubscriptionRequiredException"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn event_code_lookup_failure_is_reported_separately() {
+        let (client, _http) = replay_responses(vec![(400, SUBSCRIPTION_REQUIRED.into())]);
+        let aws = HealthClient::from_client(client, "en");
+        let cfg = run_args(&["--allow-event-codes", "EC2/AWS_EC2_X"]);
+        let err = validate_against_catalog(&aws, &cfg).await.unwrap_err();
+        assert!(format!("{err:#}").contains("failed to look up AWS Health event type codes"));
+    }
+
+    #[test]
+    fn poller_cfg_follows_run_args() {
+        let mut run_cfg = run_args(&[
+            "--poll-interval-secs",
+            "30",
+            "--initial-lookback-secs",
+            "600",
+            "--allow-services",
+            "EC2,RDS",
+            "--allow-categories",
+            "issue",
+            "--reminder-offsets-hours",
+            "24,1",
+        ]);
+        run_cfg.cold_start_suppress = false;
+        let cfg = poller_cfg(&run_cfg);
+        assert_eq!(cfg.interval, Duration::from_secs(30));
+        assert_eq!(cfg.initial_lookback, Duration::from_secs(600));
+        assert!(!cfg.cold_start_suppress);
+        assert_eq!(cfg.services, ["EC2", "RDS"]);
+        assert_eq!(cfg.categories, ["issue"]);
+        assert_eq!(cfg.reminder_offsets_hours, [24, 1]);
+        assert_eq!(cfg.retry_backoff, SEND_RETRY_BACKOFF);
+    }
+
+    #[test]
+    fn filter_lists_borrow_every_configured_list() {
+        let cfg = run_args(&[
+            "--allow-categories",
+            "issue",
+            "--deny-categories",
+            "accountNotification",
+            "--allow-services",
+            "EC2",
+            "--deny-services",
+            "HEALTH",
+            "--allow-regions",
+            "ap-northeast-2",
+            "--deny-regions",
+            "global",
+            "--allow-event-codes",
+            "EC2/A",
+            "--deny-event-codes",
+            "EC2/B",
+        ]);
+        let lists = filter_lists(&cfg);
+        assert_eq!(lists.allow_categories, ["issue"]);
+        assert_eq!(lists.deny_categories, ["accountNotification"]);
+        assert_eq!(lists.allow_services, ["EC2"]);
+        assert_eq!(lists.deny_services, ["HEALTH"]);
+        assert_eq!(lists.allow_regions, ["ap-northeast-2"]);
+        assert_eq!(lists.deny_regions, ["global"]);
+        assert_eq!(lists.allow_event_codes, ["EC2/A"]);
+        assert_eq!(lists.deny_event_codes, ["EC2/B"]);
+    }
+
+    #[test]
+    fn ha_permissions_scope_get_and_update_to_the_named_objects() {
+        let perms = ha_permissions("my-lease", "my-ledger");
+        let named: Vec<(&str, &str, Option<&str>)> =
+            perms.iter().map(|a| (a.resource, a.verb, a.name)).collect();
+        assert_eq!(
+            named,
+            [
+                ("leases", "create", None),
+                ("leases", "get", Some("my-lease")),
+                ("leases", "update", Some("my-lease")),
+                ("configmaps", "create", None),
+                ("configmaps", "get", Some("my-ledger")),
+                ("configmaps", "update", Some("my-ledger")),
+                ("events", "create", None),
+            ]
+        );
+        assert_eq!(perms[0].group, "coordination.k8s.io");
+        assert_eq!(perms[3].group, "");
+        assert_eq!(perms[6].group, "events.k8s.io");
+    }
+
+    #[tokio::test]
+    async fn ha_setup_is_skipped_when_leader_election_is_off() {
+        assert!(
+            HaSetup::from_config(&run_args(&[]))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn ha_setup_rejects_unordered_timing_before_touching_kubernetes() {
+        let cfg = run_args(&[
+            "--leader-election",
+            "--lease-duration-secs",
+            "5",
+            "--renew-deadline-secs",
+            "10",
+        ]);
+        assert!(HaSetup::from_config(&cfg).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn ha_setup_requires_the_pod_identity() {
+        let mut cfg = run_args(&["--leader-election"]);
+        cfg.k8s.pod_name = None;
+        cfg.k8s.pod_namespace = None;
+        let Err(err) = HaSetup::from_config(&cfg).await else {
+            panic!("expected an error");
+        };
+        assert!(format!("{err:#}").contains("POD_NAME and POD_NAMESPACE"));
+    }
+
+    #[tokio::test]
+    async fn k8s_events_are_disabled_without_the_pod_identity() {
+        let mut cfg = run_args(&[]);
+        cfg.k8s.pod_name = None;
+        cfg.k8s.pod_namespace = None;
+        assert!(build_k8s_client(&cfg).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn metrics_handler_serves_the_prometheus_text_format() {
+        let metrics = Metrics::new();
+        metrics.set_leader(true);
+        let response = metrics_handler(State(metrics)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; version=0.0.4"
+        );
+    }
+}

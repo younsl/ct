@@ -130,6 +130,7 @@ pub struct Catalogs {
     pub event_codes: HashSet<String>,
 }
 
+#[allow(clippy::too_long_first_doc_paragraph)]
 /// A `SERVICE/EVENT_TYPE_CODE` filter entry, e.g. `VPN/AWS_VPN_REDUNDANCY_LOSS`.
 /// Scoping the code to its service keeps an entry from accidentally matching
 /// an identically named code published under another service.

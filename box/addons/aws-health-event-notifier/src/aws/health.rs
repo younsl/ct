@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 use anyhow::Context;
 use aws_sdk_health::Client;
+use aws_sdk_health::error::DisplayErrorContext;
 use aws_sdk_health::types::{
     DateTimeRange, EventFilter as SdkEventFilter, EventStatusCode, EventTypeCategory,
     EventTypeFilter,
@@ -99,7 +100,7 @@ impl HealthClient {
 
         let mut out = Vec::new();
         while let Some(item) = stream.next().await {
-            let event = item.context("describe_events page failed")?;
+            let event = item.map_err(|e| sdk_error("describe_events page failed", &e))?;
             out.push(EventSummary {
                 arn: event.arn.unwrap_or_default(),
                 service: event.service,
@@ -153,7 +154,8 @@ impl HealthClient {
 
         let mut out = Vec::new();
         while let Some(item) = stream.next().await {
-            let event = item.context("describe_events (upcoming) page failed")?;
+            let event =
+                item.map_err(|e| sdk_error("describe_events (upcoming) page failed", &e))?;
             out.push(EventSummary {
                 arn: event.arn.unwrap_or_default(),
                 service: event.service,
@@ -181,7 +183,7 @@ impl HealthClient {
             .locale(self.locale.clone())
             .send()
             .await
-            .context("describe_event_details")?;
+            .map_err(|e| sdk_error("describe_event_details", &e))?;
 
         let successful = details.successful_set.unwrap_or_default();
         let api_event = successful.first().and_then(|d| d.event.clone());
@@ -285,7 +287,7 @@ impl HealthClient {
 
         let mut out = HashSet::new();
         while let Some(item) = stream.next().await {
-            let et = item.context("describe_event_types page failed")?;
+            let et = item.map_err(|e| sdk_error("describe_event_types page failed", &e))?;
             if let Some(service) = et.service {
                 out.insert(service);
             }
@@ -323,7 +325,7 @@ impl HealthClient {
 
         let mut out = HashSet::new();
         while let Some(item) = stream.next().await {
-            let et = item.context("describe_event_types page failed")?;
+            let et = item.map_err(|e| sdk_error("describe_event_types page failed", &e))?;
             if let (Some(service), Some(code)) = (et.service, et.code) {
                 out.insert(format!("{service}/{code}"));
             }
@@ -350,7 +352,7 @@ impl HealthClient {
             .send();
         let mut out = Vec::new();
         while let Some(item) = stream.next().await {
-            let e = item.context("describe_affected_entities page failed")?;
+            let e = item.map_err(|e| sdk_error("describe_affected_entities page failed", &e))?;
             out.push(AffectedEntity {
                 entity_value: e.entity_value,
                 status: e.status_code.map(|s| s.as_str().to_string()),
@@ -358,6 +360,12 @@ impl HealthClient {
         }
         Ok(out)
     }
+}
+
+/// Keeps the service error code (e.g. `SubscriptionRequiredException`) in the
+/// message. The SDK error alone displays as `service error`.
+fn sdk_error<E: std::error::Error>(what: &str, err: &E) -> anyhow::Error {
+    anyhow::anyhow!("{what}: {}", DisplayErrorContext(err))
 }
 
 fn to_smithy(dt: DateTime<Utc>) -> SmithyDateTime {
@@ -383,16 +391,21 @@ pub mod test_support {
     /// in order, one per HTTP request the SDK makes. Each body is returned with
     /// HTTP 200 and the awsJson1.1 content type.
     pub fn replay_client(bodies: Vec<String>) -> (Client, StaticReplayClient) {
-        let events = bodies
+        replay_responses(bodies.into_iter().map(|body| (200, body)).collect())
+    }
+
+    /// Same as `replay_client`, with an HTTP status per response.
+    pub fn replay_responses(responses: Vec<(u16, String)>) -> (Client, StaticReplayClient) {
+        let events = responses
             .into_iter()
-            .map(|body| {
+            .map(|(status, body)| {
                 ReplayEvent::new(
                     http::Request::builder()
                         .uri("https://health.us-east-1.amazonaws.com/")
                         .body(SdkBody::empty())
                         .unwrap(),
                     http::Response::builder()
-                        .status(200)
+                        .status(status)
                         .header("content-type", "application/x-amz-json-1.1")
                         .body(SdkBody::from(body))
                         .unwrap(),
@@ -408,12 +421,93 @@ pub mod test_support {
             .build();
         (Client::from_conf(conf), http_client)
     }
+
+    /// The error AWS Health returns to an account without a Business or Enterprise Support plan.
+    pub const SUBSCRIPTION_REQUIRED: &str =
+        r#"{"__type":"SubscriptionRequiredException","message":"support plan required"}"#;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::replay_client;
+    use super::test_support::{SUBSCRIPTION_REQUIRED, replay_client, replay_responses};
     use super::*;
+
+    fn denied() -> HealthClient {
+        let (client, _h) = replay_responses(vec![(400, SUBSCRIPTION_REQUIRED.into())]);
+        HealthClient::from_client(client, "en")
+    }
+
+    fn arn_only(arn: &str) -> EventSummary {
+        EventSummary {
+            arn: arn.into(),
+            service: None,
+            event_type_code: None,
+            event_type_category: None,
+            region: None,
+            start_time: None,
+            end_time: None,
+            last_updated_time: None,
+            status_code: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_events_error_keeps_the_service_error_code() {
+        let err = denied()
+            .list_events(Utc::now() - ChronoDuration::hours(1), Utc::now(), &[], &[])
+            .await
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("describe_events page failed"), "{msg}");
+        assert!(msg.contains("SubscriptionRequiredException"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn list_upcoming_error_keeps_the_service_error_code() {
+        let err = denied()
+            .list_upcoming(ChronoDuration::hours(24), &[], &[])
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("SubscriptionRequiredException"));
+    }
+
+    #[tokio::test]
+    async fn catalog_lookup_errors_keep_the_service_error_code() {
+        let err = denied()
+            .lookup_service_codes(&["EC2".into()])
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("SubscriptionRequiredException"));
+        let err = denied()
+            .lookup_event_type_codes(&["AWS_EC2_X".into()])
+            .await
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("SubscriptionRequiredException"));
+    }
+
+    #[tokio::test]
+    async fn hydrate_error_keeps_the_service_error_code() {
+        let err = denied().hydrate(arn_only("arn:1")).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("describe_event_details"), "{msg}");
+        assert!(msg.contains("SubscriptionRequiredException"), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn hydrate_survives_an_affected_entities_failure() {
+        let details = r#"{"successfulSet":[{"event":{"arn":"arn:1","service":"EC2","statusCode":"open"},"eventDescription":{"latestDescription":"hello"}}],"failedSet":[]}"#;
+        let (client, _h) = replay_responses(vec![
+            (200, details.into()),
+            (400, SUBSCRIPTION_REQUIRED.into()),
+        ]);
+        let event = HealthClient::from_client(client, "en")
+            .hydrate(arn_only("arn:1"))
+            .await
+            .unwrap();
+        assert_eq!(event.detail.service.as_deref(), Some("EC2"));
+        assert_eq!(event.detail.event_description.len(), 1);
+        assert!(event.detail.affected_entities.is_empty());
+    }
 
     #[tokio::test]
     async fn list_events_maps_summaries() {
