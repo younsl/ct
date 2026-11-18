@@ -223,6 +223,38 @@ pub struct SbomComponentMatch {
     pub updated_at: String,
 }
 
+/// One vulnerability row joined with its parent workload, used by the alerts
+/// subsystem the same way as `SbomComponentMatch`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VulnerabilityMatch {
+    pub cluster: String,
+    pub namespace: String,
+    pub workload_name: String,
+    pub vulnerability_id: String,
+    pub severity: String,
+    pub score: Option<f64>,
+    /// The vulnerable package (Trivy's `resource`).
+    pub package_name: String,
+    pub installed_version: String,
+    pub fixed_version: String,
+    pub title: String,
+    pub updated_at: String,
+}
+
+/// Row filters pushed into SQL for `VulnerabilityMatch` queries. Empty and
+/// absent fields do not filter. The alerts subsystem re-checks every row in
+/// Rust, so this only narrows what crosses the wire.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct VulnerabilityMatchFilter {
+    pub clusters: Vec<String>,
+    pub namespace: Option<String>,
+    pub package_name: Option<String>,
+    pub ids: Vec<String>,
+    pub severities: Vec<String>,
+    pub min_score: Option<f64>,
+    pub fix_available: Option<bool>,
+}
+
 /// Vulnerability search result (one row per matching vulnerability)
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct VulnSearchResult {

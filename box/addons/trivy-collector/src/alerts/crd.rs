@@ -13,13 +13,13 @@
 use std::collections::BTreeMap;
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use kube::CustomResource;
+use kube::{CustomResource, KubeSchema};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::types::{
-    AlertRule as ApiAlertRule, Matchers as ApiMatchers, Receiver as ApiReceiver,
-    SlackReceiver as ApiSlackReceiver,
+    AlertRule as ApiAlertRule, Matchers as ApiMatchers, Receiver as ApiReceiver, Severity,
+    SlackReceiver as ApiSlackReceiver, VulnerabilityMatchers as ApiVulnerabilityMatchers,
 };
 
 pub const API_GROUP: &str = "trivy-collector.security.io";
@@ -34,9 +34,9 @@ pub const UNKNOWN_AUTHOR: &str = "unknown";
 /// Field manager used for the server-side apply that backs every write.
 pub const FIELD_MANAGER: &str = "trivy-collector";
 
-/// An alert rule: which SBOM component to watch for, and where to send the
-/// notification when one lands in a workload's SBOM.
-#[derive(CustomResource, Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+/// An alert rule: which SBOM component or vulnerability to watch for, and
+/// where to send the notification when one lands in a workload's report.
+#[derive(CustomResource, KubeSchema, Clone, Debug, Default, Deserialize, Serialize)]
 #[kube(
     group = "trivy-collector.security.io",
     version = "v1alpha1",
@@ -47,7 +47,7 @@ pub const FIELD_MANAGER: &str = "trivy-collector";
     category = "trivy-collector",
     namespaced,
     status = "AlertRuleStatus",
-    doc = "An alert rule matching SBOM components across collected clusters, and the receivers a match is delivered to.",
+    doc = "An alert rule matching SBOM components or vulnerabilities across collected clusters, and the receivers a match is delivered to.",
     printcolumn = r#"{"name":"Package","type":"string","jsonPath":".spec.matchers.packageName"}"#,
     printcolumn = r#"{"name":"Version","type":"string","jsonPath":".spec.matchers.versionExpr"}"#,
     printcolumn = r#"{"name":"Enabled","type":"boolean","jsonPath":".spec.enabled"}"#,
@@ -55,6 +55,9 @@ pub const FIELD_MANAGER: &str = "trivy-collector";
     printcolumn = r#"{"name":"Fired","type":"integer","jsonPath":".status.firedCount"}"#,
     printcolumn = r#"{"name":"Last-Fired","type":"date","jsonPath":".status.lastFiredAt"}"#,
     printcolumn = r#"{"name":"Age","type":"date","jsonPath":".metadata.creationTimestamp"}"#
+)]
+#[x_kube(
+    validation = Rule::new("has(self.matchers) != has(self.matcherTerms)").message("set exactly one of matchers or matcherTerms")
 )]
 #[serde(rename_all = "camelCase")]
 pub struct AlertRuleSpec {
@@ -64,8 +67,15 @@ pub struct AlertRuleSpec {
     /// A disabled rule is stored and listed but never evaluated.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// What has to be true of an SBOM component for the rule to fire.
-    pub matchers: MatchersSpec,
+    /// What has to be true of a finding for the rule to fire. A single term,
+    /// set instead of `matcherTerms`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matchers: Option<MatchersSpec>,
+    /// Terms ORed together, like `nodeSelectorTerms`: the rule fires on a
+    /// finding any one term matches. Set instead of `matchers`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(min = 1, max = 20))]
+    pub matcher_terms: Vec<MatchersSpec>,
     /// Alertmanager-style labels attached to the outbound notification. These
     /// are the rule author's labels, not the object's `metadata.labels`.
     #[serde(default)]
@@ -265,13 +275,15 @@ impl AlertRuleStatus {
     }
 }
 
-/// Scope: SBOM component detection only. CVE and severity matching is out of
-/// scope for this subsystem, handled by registry scanning elsewhere.
+/// One term. Every set field must hold for a finding to match. Without
+/// `vulnerability` the term watches SBOM components, with it the term watches
+/// vulnerabilities.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchersSpec {
-    /// Component name to match, case-insensitively. Absent matches every
-    /// component, which is rarely what an author means.
+    /// Package to match, case-insensitively: the SBOM component, or the
+    /// vulnerable package for a vulnerability rule. Absent matches every
+    /// package.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub package_name: Option<String>,
     /// Version constraint, e.g. `<2.17.0` or `>=1.0.0,<2.0.0`.
@@ -283,6 +295,41 @@ pub struct MatchersSpec {
     /// Workload namespace to restrict the rule to. Absent matches any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
+    /// Workload namespaces never matched, even when `namespace` is absent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_namespaces: Vec<String>,
+    /// Packages never matched, compared case-insensitively.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_packages: Vec<String>,
+    /// Watch vulnerability reports instead of SBOM reports. An empty block
+    /// matches every vulnerability the other matchers allow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vulnerability: Option<VulnerabilityMatchersSpec>,
+}
+
+/// Conditions on a vulnerability finding, ANDed together.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VulnerabilityMatchersSpec {
+    /// Vulnerability IDs such as `CVE-2021-44228` or `GHSA-jfh8-c2jp-5v3q`,
+    /// compared case-insensitively. Empty matches any ID.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
+    /// Vulnerability IDs never matched, such as an accepted risk.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_ids: Vec<String>,
+    /// Severities to match. Empty matches any severity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub severities: Vec<Severity>,
+    /// Lowest CVSS score that matches, inclusive. A finding without a score
+    /// does not match.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 0.0, max = 10.0))]
+    pub min_score: Option<f64>,
+    /// `true` matches only findings with a fixed version, `false` only those
+    /// without one. Absent matches both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_available: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -309,6 +356,49 @@ const fn default_true() -> bool {
     true
 }
 
+impl MatchersSpec {
+    #[must_use]
+    pub fn to_api(&self) -> ApiMatchers {
+        ApiMatchers {
+            package_name: self.package_name.clone(),
+            version_expr: self.version_expr.clone(),
+            clusters: self.clusters.clone(),
+            namespace: self.namespace.clone(),
+            exclude_namespaces: self.exclude_namespaces.clone(),
+            exclude_packages: self.exclude_packages.clone(),
+            vulnerability: self
+                .vulnerability
+                .as_ref()
+                .map(|v| ApiVulnerabilityMatchers {
+                    ids: v.ids.clone(),
+                    exclude_ids: v.exclude_ids.clone(),
+                    severities: v.severities.clone(),
+                    min_score: v.min_score,
+                    fix_available: v.fix_available,
+                }),
+        }
+    }
+
+    #[must_use]
+    pub fn from_api(m: &ApiMatchers) -> Self {
+        Self {
+            package_name: m.package_name.clone(),
+            version_expr: m.version_expr.clone(),
+            clusters: m.clusters.clone(),
+            namespace: m.namespace.clone(),
+            exclude_namespaces: m.exclude_namespaces.clone(),
+            exclude_packages: m.exclude_packages.clone(),
+            vulnerability: m.vulnerability.as_ref().map(|v| VulnerabilityMatchersSpec {
+                ids: v.ids.clone(),
+                exclude_ids: v.exclude_ids.clone(),
+                severities: v.severities.clone(),
+                min_score: v.min_score,
+                fix_available: v.fix_available,
+            }),
+        }
+    }
+}
+
 impl AlertRule {
     /// Render the custom resource in the HTTP API's rule shape.
     ///
@@ -322,12 +412,13 @@ impl AlertRule {
             name: self.metadata.name.clone().unwrap_or_default(),
             description: self.spec.description.clone(),
             enabled: self.spec.enabled,
-            matchers: ApiMatchers {
-                package_name: self.spec.matchers.package_name.clone(),
-                version_expr: self.spec.matchers.version_expr.clone(),
-                clusters: self.spec.matchers.clusters.clone(),
-                namespace: self.spec.matchers.namespace.clone(),
-            },
+            matchers: self.spec.matchers.as_ref().map(MatchersSpec::to_api),
+            matcher_terms: self
+                .spec
+                .matcher_terms
+                .iter()
+                .map(MatchersSpec::to_api)
+                .collect(),
             labels: self.spec.labels.clone(),
             annotations: self.spec.annotations.clone(),
             receivers: self
@@ -379,12 +470,12 @@ impl AlertRule {
             spec: AlertRuleSpec {
                 description: rule.description.clone(),
                 enabled: rule.enabled,
-                matchers: MatchersSpec {
-                    package_name: rule.matchers.package_name.clone(),
-                    version_expr: rule.matchers.version_expr.clone(),
-                    clusters: rule.matchers.clusters.clone(),
-                    namespace: rule.matchers.namespace.clone(),
-                },
+                matchers: rule.matchers.as_ref().map(MatchersSpec::from_api),
+                matcher_terms: rule
+                    .matcher_terms
+                    .iter()
+                    .map(MatchersSpec::from_api)
+                    .collect(),
                 labels: rule.labels.clone(),
                 annotations: rule.annotations.clone(),
                 receivers: rule
@@ -420,12 +511,14 @@ mod tests {
             name: "log4j-critical".to_string(),
             description: "Log4Shell".to_string(),
             enabled: true,
-            matchers: ApiMatchers {
+            matchers: Some(ApiMatchers {
                 package_name: Some("log4j-core".to_string()),
                 version_expr: Some("<2.17.0".to_string()),
                 clusters: vec!["prod".to_string()],
                 namespace: Some("payments".to_string()),
-            },
+                ..Default::default()
+            }),
+            matcher_terms: vec![],
             labels: BTreeMap::from([("severity".to_string(), "critical".to_string())]),
             annotations: BTreeMap::from([("runbook".to_string(), "https://wiki".to_string())]),
             receivers: vec![ApiReceiver {
@@ -475,14 +568,10 @@ mod tests {
         assert!(props["matchers"]["properties"]["packageName"].is_object());
         assert!(props["receivers"]["items"]["properties"]["slack"].is_object());
         assert_eq!(props["cooldownSeconds"]["format"], "uint64");
-        let required: Vec<&str> = spec_schema["required"]
+        let required = spec_schema["required"]
             .as_array()
-            .expect("spec has required fields")
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert!(required.contains(&"matchers"));
-        assert!(required.contains(&"receivers"));
+            .expect("spec has required fields");
+        assert!(required.iter().any(|v| v == "receivers"));
     }
 
     /// The API group is the contract the chart's CRD and every operator's
@@ -520,10 +609,8 @@ mod tests {
         assert_eq!(back.name, original.name);
         assert_eq!(back.description, original.description);
         assert_eq!(back.enabled, original.enabled);
-        assert_eq!(back.matchers.package_name, original.matchers.package_name);
-        assert_eq!(back.matchers.version_expr, original.matchers.version_expr);
-        assert_eq!(back.matchers.clusters, original.matchers.clusters);
-        assert_eq!(back.matchers.namespace, original.matchers.namespace);
+        assert_eq!(back.matchers, original.matchers);
+        assert_eq!(back.matcher_terms, Vec::new());
         assert_eq!(back.labels, original.labels);
         assert_eq!(back.annotations, original.annotations);
         assert_eq!(back.receivers.len(), 1);
@@ -596,9 +683,9 @@ mod tests {
     #[test]
     fn optional_matcher_fields_are_omitted_rather_than_written_as_null() {
         let mut rule = api_rule();
-        rule.matchers.version_expr = None;
-        rule.matchers.clusters.clear();
-        rule.matchers.namespace = None;
+        rule.matchers.as_mut().unwrap().version_expr = None;
+        rule.matchers.as_mut().unwrap().clusters.clear();
+        rule.matchers.as_mut().unwrap().namespace = None;
         rule.cooldown_secs = None;
         rule.updated_at = None;
         rule.updated_by = None;
@@ -619,6 +706,114 @@ mod tests {
             "an apply carries no audit annotations"
         );
         assert!(json.get("status").is_none(), "status is never applied");
+    }
+
+    #[test]
+    fn vulnerability_matchers_round_trip_in_camel_case() {
+        let mut rule = api_rule();
+        rule.matchers.as_mut().unwrap().vulnerability = Some(ApiVulnerabilityMatchers {
+            ids: vec!["CVE-2021-44228".to_string()],
+            severities: vec![Severity::Critical, Severity::High],
+            min_score: Some(9.0),
+            fix_available: Some(true),
+            ..Default::default()
+        });
+        let cr = AlertRule::from_api(&rule, "trivy-system");
+        let json = serde_json::to_value(&cr).unwrap();
+        let v = &json["spec"]["matchers"]["vulnerability"];
+        assert_eq!(v["ids"][0], "CVE-2021-44228");
+        assert_eq!(v["severities"], serde_json::json!(["CRITICAL", "HIGH"]));
+        assert_eq!(v["minScore"], 9.0);
+        assert_eq!(v["fixAvailable"], true);
+
+        let back = cr.to_api().matchers.unwrap().vulnerability.unwrap();
+        assert_eq!(back.ids, vec!["CVE-2021-44228".to_string()]);
+        assert_eq!(back.severities, vec![Severity::Critical, Severity::High]);
+        assert_eq!(back.min_score, Some(9.0));
+        assert_eq!(back.fix_available, Some(true));
+    }
+
+    /// A rule written before vulnerability matching existed has no block, and
+    /// an empty block is a deliberate "any vulnerability", so the two must
+    /// stay distinct on the wire.
+    #[test]
+    fn an_empty_vulnerability_block_survives_and_an_absent_one_stays_absent() {
+        let absent = AlertRule::from_api(&api_rule(), "trivy-system");
+        let json = serde_json::to_value(&absent).unwrap();
+        assert!(json["spec"]["matchers"].get("vulnerability").is_none());
+
+        let mut rule = api_rule();
+        rule.matchers.as_mut().unwrap().vulnerability = Some(ApiVulnerabilityMatchers::default());
+        let json = serde_json::to_value(AlertRule::from_api(&rule, "trivy-system")).unwrap();
+        assert_eq!(
+            json["spec"]["matchers"]["vulnerability"],
+            serde_json::json!({})
+        );
+        let parsed: AlertRule = serde_json::from_value(json).unwrap();
+        assert!(parsed.to_api().matchers.unwrap().vulnerability.is_some());
+    }
+
+    #[test]
+    fn the_schema_bounds_the_score_and_enumerates_severities() {
+        use kube::CustomResourceExt;
+        let json = serde_json::to_value(AlertRule::crd()).unwrap();
+        let v = &json["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]["properties"]
+            ["matchers"]["properties"]["vulnerability"]["properties"];
+        assert_eq!(v["minScore"]["minimum"], 0.0);
+        assert_eq!(v["minScore"]["maximum"], 10.0);
+        assert_eq!(
+            v["severities"]["items"]["enum"],
+            serde_json::json!(["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"])
+        );
+    }
+
+    #[test]
+    fn matcher_terms_round_trip_and_leave_matchers_unset() {
+        let mut rule = api_rule();
+        let single = rule.matchers.take().unwrap();
+        rule.matcher_terms = vec![
+            single,
+            ApiMatchers {
+                exclude_namespaces: vec!["kube-system".to_string()],
+                exclude_packages: vec!["openssl".to_string()],
+                vulnerability: Some(ApiVulnerabilityMatchers {
+                    min_score: Some(9.0),
+                    exclude_ids: vec!["CVE-2023-0001".to_string()],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ];
+        let cr = AlertRule::from_api(&rule, "trivy-system");
+        let json = serde_json::to_value(&cr).unwrap();
+        assert!(json["spec"].get("matchers").is_none());
+        let term = &json["spec"]["matcherTerms"][1];
+        assert_eq!(term["excludeNamespaces"][0], "kube-system");
+        assert_eq!(term["excludePackages"][0], "openssl");
+        assert_eq!(term["vulnerability"]["excludeIds"][0], "CVE-2023-0001");
+
+        let back = cr.to_api();
+        assert!(back.matchers.is_none());
+        assert_eq!(back.matcher_terms, rule.matcher_terms);
+    }
+
+    /// The API server, not the collector, is what keeps a hand-written
+    /// manifest from setting both shapes or neither.
+    #[test]
+    fn the_schema_requires_exactly_one_matcher_shape() {
+        use kube::CustomResourceExt;
+        let json = serde_json::to_value(AlertRule::crd()).unwrap();
+        let spec = &json["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"];
+        let rules = spec["x-kubernetes-validations"].as_array().unwrap();
+        assert!(
+            rules
+                .iter()
+                .any(|r| r["rule"] == "has(self.matchers) != has(self.matcherTerms)")
+        );
+        assert_eq!(spec["properties"]["matcherTerms"]["minItems"], 1);
+        assert_eq!(spec["properties"]["matcherTerms"]["maxItems"], 20);
+        let required = spec["required"].as_array().unwrap();
+        assert!(!required.iter().any(|v| v == "matchers"));
     }
 
     /// A create claims `createdBy`; an edit records only the editor, so it

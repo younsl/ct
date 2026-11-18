@@ -40,7 +40,7 @@ pub use dashboard::{TrendDataPoint, TrendMeta, TrendResponse};
 pub use database::Database;
 pub use models::{
     ClusterInfo, ComponentSearchResult, FullReport, QueryParams, ReportMeta, SbomComponentMatch,
-    Stats, TokenInfo, VulnSearchResult, VulnSummary,
+    Stats, TokenInfo, VulnSearchResult, VulnSummary, VulnerabilityMatch, VulnerabilityMatchFilter,
 };
 pub use notes::{NotesError, NotesStore};
 pub use remote::RemoteStore;

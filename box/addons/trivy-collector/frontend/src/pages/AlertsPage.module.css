@@ -266,6 +266,29 @@
 .severityMEDIUM { color: #eab308; border-color: rgba(234, 179, 8, 0.4); }
 .severityLOW { color: #3b82f6; border-color: rgba(59, 130, 246, 0.4); }
 .severityINFO { color: var(--text-secondary); }
+.severityUNKNOWN { color: var(--text-secondary); }
+
+.severityToggleRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.severityToggle {
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.severityToggleOff {
+    opacity: 0.4;
+}
+
+.matchSummary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
 
 .typePill {
     display: inline-block;
@@ -798,4 +821,49 @@
     text-align: center;
     color: var(--text-secondary);
     font-size: 13px;
+}
+
+.termCard {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    background-color: var(--bg-primary);
+}
+
+.termHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.termTitle {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.termDivider {
+    text-align: center;
+    margin: 8px 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+}
+
+.termActions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 10px 0 16px;
+    flex-wrap: wrap;
+}
+
+.termOr {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
 }

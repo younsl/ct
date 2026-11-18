@@ -309,10 +309,8 @@ fn validate(rule: &AlertRule) -> Result<(), AlertStoreError> {
             )));
         }
     }
-    if let Some(expr) = &rule.matchers.version_expr {
-        super::expr::VersionExpr::parse(expr)
-            .map_err(|e| AlertStoreError::Invalid(format!("version_expr: {e}")))?;
-    }
+    super::matchers::CompiledRule::for_rule(rule)
+        .map_err(|e| AlertStoreError::Invalid(e.to_string()))?;
     Ok(())
 }
 
@@ -337,12 +335,14 @@ mod tests {
             name: name.to_string(),
             description: String::new(),
             enabled: true,
-            matchers: Matchers {
+            matchers: Some(Matchers {
                 package_name: Some("log4j-core".to_string()),
                 version_expr: None,
                 clusters: vec![],
                 namespace: None,
-            },
+                ..Default::default()
+            }),
+            matcher_terms: vec![],
             labels: BTreeMap::default(),
             annotations: BTreeMap::default(),
             receivers: vec![Receiver {
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn an_unparseable_version_expression_is_rejected() {
         let mut r = rule("log4j");
-        r.matchers.version_expr = Some(">=".to_string());
+        r.matchers.as_mut().unwrap().version_expr = Some(">=".to_string());
         let err = validate(&r).expect_err("must reject");
         assert!(err.to_string().contains("version_expr"));
     }

@@ -14,7 +14,7 @@ use super::extractors::{
 };
 use super::models::{
     ClusterInfo, ComponentSearchResult, FullReport, QueryParams, ReportMeta, SbomComponentMatch,
-    Stats, VulnSearchResult, VulnSummary,
+    Stats, VulnSearchResult, VulnSummary, VulnerabilityMatch, VulnerabilityMatchFilter,
 };
 
 /// Page size used when a caller sets no limit.
@@ -76,6 +76,19 @@ fn push_report_filters(
 /// SQL predicate matching reports that contain at least one finding of the
 /// given severity. Unknown names are ignored rather than rejected, so a new
 /// severity in a query string cannot empty the result set.
+/// Append `AND <expr> IN (...)` with bound values, or nothing when empty.
+fn push_in(builder: &mut QueryBuilder<Sqlite>, expr: &str, values: &[String]) {
+    if values.is_empty() {
+        return;
+    }
+    builder.push(format!(" AND {expr} IN ("));
+    let mut sep = builder.separated(", ");
+    for v in values {
+        sep.push_bind(v.clone());
+    }
+    sep.push_unseparated(")");
+}
+
 fn severity_condition(severity: &str) -> Option<&'static str> {
     match severity.to_lowercase().as_str() {
         "critical" => Some("critical_count > 0"),
@@ -515,6 +528,87 @@ impl Database {
                 version: r.get::<String, _>(4),
                 component_type: r.get::<String, _>(5),
                 updated_at: r.get::<String, _>(6),
+            })
+            .collect())
+    }
+
+    pub async fn list_vulnerability_matches(
+        &self,
+        filter: &VulnerabilityMatchFilter,
+    ) -> Result<Vec<VulnerabilityMatch>> {
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            r"
+            SELECT
+                r.cluster,
+                r.namespace,
+                r.name,
+                COALESCE(json_extract(j.value, '$.vulnerabilityID'), '') AS vuln_id,
+                COALESCE(json_extract(j.value, '$.severity'), '') AS severity,
+                json_extract(j.value, '$.score') AS score,
+                COALESCE(json_extract(j.value, '$.resource'), '') AS resource,
+                COALESCE(json_extract(j.value, '$.installedVersion'), '') AS installed_version,
+                COALESCE(json_extract(j.value, '$.fixedVersion'), '') AS fixed_version,
+                COALESCE(json_extract(j.value, '$.title'), '') AS title,
+                r.updated_at
+            FROM reports r,
+                 json_each(json_extract(r.data, '$.report.vulnerabilities')) j
+            WHERE r.report_type = 'vulnerabilityreport'
+            ",
+        );
+        push_in(&mut qb, "r.cluster", &filter.clusters);
+        if let Some(ns) = &filter.namespace {
+            qb.push(" AND r.namespace = ").push_bind(ns.clone());
+        }
+        if let Some(pkg) = &filter.package_name {
+            qb.push(" AND LOWER(json_extract(j.value, '$.resource')) = ")
+                .push_bind(pkg.to_ascii_lowercase());
+        }
+        let ids: Vec<String> = filter.ids.iter().map(|i| i.to_ascii_uppercase()).collect();
+        push_in(
+            &mut qb,
+            "UPPER(json_extract(j.value, '$.vulnerabilityID'))",
+            &ids,
+        );
+        let severities: Vec<String> = filter
+            .severities
+            .iter()
+            .map(|s| s.to_ascii_uppercase())
+            .collect();
+        push_in(
+            &mut qb,
+            "UPPER(json_extract(j.value, '$.severity'))",
+            &severities,
+        );
+        if let Some(min) = filter.min_score {
+            qb.push(" AND json_extract(j.value, '$.score') >= ")
+                .push_bind(min);
+        }
+        match filter.fix_available {
+            Some(true) => {
+                qb.push(" AND COALESCE(json_extract(j.value, '$.fixedVersion'), '') <> ''");
+            }
+            Some(false) => {
+                qb.push(" AND COALESCE(json_extract(j.value, '$.fixedVersion'), '') = ''");
+            }
+            None => {}
+        }
+        qb.push(" ORDER BY r.updated_at DESC");
+
+        let rows = qb.build().fetch_all(&self.pool).await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| VulnerabilityMatch {
+                cluster: r.get::<String, _>(0),
+                namespace: r.get::<String, _>(1),
+                workload_name: r.get::<String, _>(2),
+                vulnerability_id: r.get::<String, _>(3),
+                severity: r.get::<String, _>(4),
+                score: r.get::<Option<f64>, _>(5),
+                package_name: r.get::<String, _>(6),
+                installed_version: r.get::<String, _>(7),
+                fixed_version: r.get::<String, _>(8),
+                title: r.get::<String, _>(9),
+                updated_at: r.get::<String, _>(10),
             })
             .collect())
     }

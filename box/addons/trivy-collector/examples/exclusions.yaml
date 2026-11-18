@@ -1,0 +1,17 @@
+apiVersion: trivy-collector.security.io/v1alpha1
+kind: AlertRule
+metadata:
+  name: high-critical-with-exclusions
+  namespace: trivy-system
+spec:
+  description: "HIGH or CRITICAL, minus system namespaces, a package owned elsewhere, and an accepted risk."
+  matchers:
+    excludeNamespaces: [kube-system, monitoring]
+    excludePackages: [linux-libc-dev]
+    vulnerability:
+      severities: [CRITICAL, HIGH]
+      excludeIds: [CVE-2023-44487]
+  receivers:
+    - name: security-team
+      slack:
+        webhookUrl: https://hooks.slack.com/services/T0/B0/XXXX

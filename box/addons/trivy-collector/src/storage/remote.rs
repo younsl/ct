@@ -22,7 +22,7 @@ use crate::collector::types::{ReportEvent, ReportEventType, ReportPayload};
 use super::dashboard::TrendResponse;
 use super::models::{
     ClusterInfo, ComponentSearchResult, FullReport, QueryParams, ReportMeta, SbomComponentMatch,
-    Stats, VulnSearchResult,
+    Stats, VulnSearchResult, VulnerabilityMatch, VulnerabilityMatchFilter,
 };
 use super::store::{DataRangeResponse, HydrationStatus, PagedResponse, ReportStore};
 
@@ -276,6 +276,37 @@ impl ReportStore for RemoteStore {
         }
         let resp: PagedResponse<SbomComponentMatch> =
             self.get("/sbom/component-matches", &query).await?;
+        Ok(resp.items)
+    }
+
+    async fn list_vulnerability_matches(
+        &self,
+        filter: &VulnerabilityMatchFilter,
+    ) -> Result<Vec<VulnerabilityMatch>> {
+        let mut query: Vec<(&str, String)> = Vec::new();
+        for (key, values) in [
+            ("clusters", &filter.clusters),
+            ("ids", &filter.ids),
+            ("severities", &filter.severities),
+        ] {
+            if !values.is_empty() {
+                query.push((key, values.join(",")));
+            }
+        }
+        if let Some(ns) = &filter.namespace {
+            query.push(("namespace", ns.clone()));
+        }
+        if let Some(pkg) = &filter.package_name {
+            query.push(("package_name", pkg.clone()));
+        }
+        if let Some(min) = filter.min_score {
+            query.push(("min_score", min.to_string()));
+        }
+        if let Some(fix) = filter.fix_available {
+            query.push(("fix_available", fix.to_string()));
+        }
+        let resp: PagedResponse<VulnerabilityMatch> =
+            self.get("/vulnerabilities/matches", &query).await?;
         Ok(resp.items)
     }
 
@@ -786,6 +817,72 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    /// Every filter is pushed into SQL on the far side, so a field dropped on
+    /// the wire would widen the result rather than fail.
+    #[tokio::test]
+    async fn vulnerability_matches_carry_every_filter() {
+        let h = Harness::start().await;
+        h.seed().await;
+
+        let all = h
+            .store
+            .list_vulnerability_matches(&VulnerabilityMatchFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 4, "two vulnerabilities in each of two reports");
+
+        let critical = h
+            .store
+            .list_vulnerability_matches(&VulnerabilityMatchFilter {
+                clusters: vec!["prod".to_string()],
+                severities: vec!["critical".to_string()],
+                min_score: Some(9.0),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(critical.len(), 1);
+        assert_eq!(critical[0].vulnerability_id, "CVE-2024-0001");
+        assert_eq!(critical[0].score, Some(9.8));
+        assert_eq!(critical[0].package_name, "openssl");
+        assert_eq!(critical[0].fixed_version, "1.1.2");
+        assert_eq!(critical[0].workload_name, "nginx-vuln");
+
+        let above_threshold = h
+            .store
+            .list_vulnerability_matches(&VulnerabilityMatchFilter {
+                min_score: Some(9.9),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(above_threshold.is_empty());
+
+        let unfixed = h
+            .store
+            .list_vulnerability_matches(&VulnerabilityMatchFilter {
+                fix_available: Some(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(unfixed.len(), 2);
+        assert!(unfixed.iter().all(|m| m.package_name == "zlib"));
+
+        let by_id = h
+            .store
+            .list_vulnerability_matches(&VulnerabilityMatchFilter {
+                ids: vec!["cve-2024-0002".to_string()],
+                package_name: Some("ZLIB".to_string()),
+                namespace: Some("default".to_string()),
+                fix_available: Some(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(by_id.len(), 2);
     }
 
     #[tokio::test]

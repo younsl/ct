@@ -684,11 +684,11 @@ Filter by package substring, enabled state, or Ready condition. Slack webhook UR
                 .filter(|r| !p.not_ready_only.unwrap_or(false) || !rule_is_ready(r))
                 .filter(|r| match &package {
                     None => true,
-                    Some(needle) => r
-                        .matchers
-                        .package_name
-                        .as_deref()
-                        .is_some_and(|n| n.to_ascii_lowercase().contains(needle)),
+                    Some(needle) => r.terms().any(|t| {
+                        t.package_name
+                            .as_deref()
+                            .is_some_and(|n| n.to_ascii_lowercase().contains(needle))
+                    }),
                 })
                 .collect();
 
@@ -818,10 +818,7 @@ fn alert_rule_summary(rule: &crate::alerts::AlertRule) -> Value {
         "name": rule.name,
         "enabled": rule.enabled,
         "description": rule.description,
-        "package_name": rule.matchers.package_name,
-        "version_expr": rule.matchers.version_expr,
-        "clusters": rule.matchers.clusters,
-        "namespace": rule.matchers.namespace,
+        "terms": rule.terms().collect::<Vec<_>>(),
         "receivers": rule.receivers.len(),
         "ready": rule_is_ready(rule),
         "last_fired_at": status.and_then(|s| s.last_fired_at.clone()),
@@ -851,6 +848,7 @@ fn alert_rule_detail(rule: &crate::alerts::AlertRule) -> Value {
         "description": rule.description,
         "enabled": rule.enabled,
         "matchers": rule.matchers,
+        "matcher_terms": rule.matcher_terms,
         "labels": rule.labels,
         "annotations": rule.annotations,
         "receivers": receivers,
@@ -1036,12 +1034,14 @@ mod tests {
             name: name.to_string(),
             description: "watch it".to_string(),
             enabled: true,
-            matchers: crate::alerts::Matchers {
+            matchers: Some(crate::alerts::Matchers {
                 package_name: Some(package.to_string()),
                 version_expr: Some("<2.17.0".to_string()),
                 clusters: vec!["prod".to_string()],
                 namespace: None,
-            },
+                ..Default::default()
+            }),
+            matcher_terms: vec![],
             labels: BTreeMap::default(),
             annotations: BTreeMap::default(),
             receivers: vec![crate::alerts::Receiver {
@@ -1093,8 +1093,8 @@ mod tests {
         });
         let v = alert_rule_summary(&rule);
         assert_eq!(v["name"], "log4shell");
-        assert_eq!(v["package_name"], "log4j-core");
-        assert_eq!(v["version_expr"], "<2.17.0");
+        assert_eq!(v["terms"][0]["package_name"], "log4j-core");
+        assert_eq!(v["terms"][0]["version_expr"], "<2.17.0");
         assert_eq!(v["receivers"], 1, "a count, not the receivers themselves");
         assert_eq!(v["fired_count"], 4);
         assert_eq!(v["last_fired_at"], "2026-09-02T09:00:00Z");
@@ -1663,6 +1663,12 @@ mod tests {
                 self.0
                     .list_sbom_component_matches(clusters, namespace, package_name)
                     .await
+            }
+            async fn list_vulnerability_matches(
+                &self,
+                filter: &crate::storage::VulnerabilityMatchFilter,
+            ) -> anyhow::Result<Vec<crate::storage::VulnerabilityMatch>> {
+                self.0.list_vulnerability_matches(filter).await
             }
             async fn get_live_trends(
                 &self,

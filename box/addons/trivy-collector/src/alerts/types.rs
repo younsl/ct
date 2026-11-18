@@ -1,17 +1,21 @@
-//! Alert rule schema. Scope: SBOM component detection only — fires when a
-//! matching package/version lands in a workload's SBOM. CVE/severity-based
-//! matching is intentionally out of scope (handled by image-registry
-//! scanning and runtime detection elsewhere).
+//! Alert rule schema in the HTTP API's snake_case shape.
+//!
+//! A rule is one `matchers` term or a `matcher_terms` list, ORed like
+//! `nodeSelectorTerms`. Fields inside a term are ANDed. A term without a
+//! `vulnerability` block fires when a matching component lands in a
+//! workload's SBOM. With one, it fires when a matching vulnerability lands in
+//! a workload's vulnerability report.
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, ToSchema)]
 pub struct Matchers {
-    /// Required for the rule to be useful. Empty value (None) matches every
-    /// component, which is rarely intended — the UI should require a value.
+    /// SBOM component name, or the vulnerable package for a vulnerability
+    /// rule. Absent matches every package.
     pub package_name: Option<String>,
     /// Optional version constraint (e.g. `<2.17.0`, `>=1.0.0,<2.0.0`).
     pub version_expr: Option<String>,
@@ -19,6 +23,63 @@ pub struct Matchers {
     #[serde(default)]
     pub clusters: Vec<String>,
     pub namespace: Option<String>,
+    /// Workload namespaces the term never matches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_namespaces: Vec<String>,
+    /// Packages the term never matches, compared case-insensitively.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_packages: Vec<String>,
+    /// Present switches the term from SBOM components to vulnerabilities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vulnerability: Option<VulnerabilityMatchers>,
+}
+
+/// Conditions on a vulnerability finding. Every set field must hold, and an
+/// empty block matches every vulnerability in scope.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, ToSchema)]
+pub struct VulnerabilityMatchers {
+    /// Vulnerability IDs (`CVE-2021-44228`, `GHSA-...`), compared
+    /// case-insensitively. Empty matches any ID.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
+    /// Vulnerability IDs the term never matches, such as an accepted risk.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_ids: Vec<String>,
+    /// Trivy severities to match. Empty matches any severity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub severities: Vec<Severity>,
+    /// Lowest CVSS score that matches, inclusive. A finding without a score
+    /// never matches when this is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_score: Option<f64>,
+    /// `true` matches only findings with a fixed version, `false` only those
+    /// without. Absent matches both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_available: Option<bool>,
+}
+
+/// Trivy's severity scale, spelled the way Trivy reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize, ToSchema, JsonSchema)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Severity {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Unknown,
+}
+
+impl Severity {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Critical => "CRITICAL",
+            Self::High => "HIGH",
+            Self::Medium => "MEDIUM",
+            Self::Low => "LOW",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -41,7 +102,12 @@ pub struct AlertRule {
     pub description: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    pub matchers: Matchers,
+    /// A single term. Exactly one of `matchers` and `matcher_terms` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matchers: Option<Matchers>,
+    /// Terms ORed together: the rule fires on a finding any term matches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matcher_terms: Vec<Matchers>,
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
     #[serde(default)]
@@ -66,6 +132,13 @@ pub struct AlertRule {
 
 const fn default_true() -> bool {
     true
+}
+
+impl AlertRule {
+    /// Every term, whichever field holds them.
+    pub fn terms(&self) -> impl Iterator<Item = &Matchers> {
+        self.matchers.iter().chain(&self.matcher_terms)
+    }
 }
 
 pub fn validate_rule_name(name: &str) -> Result<(), &'static str> {

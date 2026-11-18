@@ -62,10 +62,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: An alert rule matching SBOM components across collected clusters, and the receivers a match is delivered to.
+        description: An alert rule matching SBOM components or vulnerabilities across collected clusters, and the receivers a match is delivered to.
         properties:
           spec:
-            description: 'An alert rule: which SBOM component to watch for, and where to send the notification when one lands in a workload''s SBOM.'
+            description: 'An alert rule: which SBOM component or vulnerability to watch for, and where to send the notification when one lands in a workload''s report.'
             properties:
               annotations:
                 additionalProperties:
@@ -93,11 +93,96 @@ spec:
                 default: {}
                 description: Alertmanager-style labels attached to the outbound notification. These are the rule author's labels, not the object's `metadata.labels`.
                 type: object
+              matcherTerms:
+                description: 'Terms ORed together, like `nodeSelectorTerms`: the rule fires on a finding any one term matches. Set instead of `matchers`.'
+                items:
+                  description: One term. Every set field must hold for a finding to match. Without `vulnerability` the term watches SBOM components, with it the term watches vulnerabilities.
+                  properties:
+                    clusters:
+                      description: Clusters to restrict the rule to. Empty matches any cluster.
+                      items:
+                        type: string
+                      type: array
+                    excludeNamespaces:
+                      description: Workload namespaces never matched, even when `namespace` is absent.
+                      items:
+                        type: string
+                      type: array
+                    excludePackages:
+                      description: Packages never matched, compared case-insensitively.
+                      items:
+                        type: string
+                      type: array
+                    namespace:
+                      description: Workload namespace to restrict the rule to. Absent matches any.
+                      nullable: true
+                      type: string
+                    packageName:
+                      description: 'Package to match, case-insensitively: the SBOM component, or the vulnerable package for a vulnerability rule. Absent matches every package.'
+                      nullable: true
+                      type: string
+                    versionExpr:
+                      description: Version constraint, e.g. `<2.17.0` or `>=1.0.0,<2.0.0`.
+                      nullable: true
+                      type: string
+                    vulnerability:
+                      description: Watch vulnerability reports instead of SBOM reports. An empty block matches every vulnerability the other matchers allow.
+                      nullable: true
+                      properties:
+                        excludeIds:
+                          description: Vulnerability IDs never matched, such as an accepted risk.
+                          items:
+                            type: string
+                          type: array
+                        fixAvailable:
+                          description: '`true` matches only findings with a fixed version, `false` only those without one. Absent matches both.'
+                          nullable: true
+                          type: boolean
+                        ids:
+                          description: Vulnerability IDs such as `CVE-2021-44228` or `GHSA-jfh8-c2jp-5v3q`, compared case-insensitively. Empty matches any ID.
+                          items:
+                            type: string
+                          type: array
+                        minScore:
+                          description: Lowest CVSS score that matches, inclusive. A finding without a score does not match.
+                          format: double
+                          maximum: 10.0
+                          minimum: 0.0
+                          nullable: true
+                          type: number
+                        severities:
+                          description: Severities to match. Empty matches any severity.
+                          items:
+                            description: Trivy's severity scale, spelled the way Trivy reports it.
+                            enum:
+                            - CRITICAL
+                            - HIGH
+                            - MEDIUM
+                            - LOW
+                            - UNKNOWN
+                            type: string
+                          type: array
+                      type: object
+                  type: object
+                maxItems: 20
+                minItems: 1
+                type: array
               matchers:
-                description: What has to be true of an SBOM component for the rule to fire.
+                description: What has to be true of a finding for the rule to fire. A single term, set instead of `matcherTerms`.
+                nullable: true
                 properties:
                   clusters:
                     description: Clusters to restrict the rule to. Empty matches any cluster.
+                    items:
+                      type: string
+                    type: array
+                  excludeNamespaces:
+                    description: Workload namespaces never matched, even when `namespace` is absent.
+                    items:
+                      type: string
+                    type: array
+                  excludePackages:
+                    description: Packages never matched, compared case-insensitively.
                     items:
                       type: string
                     type: array
@@ -106,13 +191,51 @@ spec:
                     nullable: true
                     type: string
                   packageName:
-                    description: Component name to match, case-insensitively. Absent matches every component, which is rarely what an author means.
+                    description: 'Package to match, case-insensitively: the SBOM component, or the vulnerable package for a vulnerability rule. Absent matches every package.'
                     nullable: true
                     type: string
                   versionExpr:
                     description: Version constraint, e.g. `<2.17.0` or `>=1.0.0,<2.0.0`.
                     nullable: true
                     type: string
+                  vulnerability:
+                    description: Watch vulnerability reports instead of SBOM reports. An empty block matches every vulnerability the other matchers allow.
+                    nullable: true
+                    properties:
+                      excludeIds:
+                        description: Vulnerability IDs never matched, such as an accepted risk.
+                        items:
+                          type: string
+                        type: array
+                      fixAvailable:
+                        description: '`true` matches only findings with a fixed version, `false` only those without one. Absent matches both.'
+                        nullable: true
+                        type: boolean
+                      ids:
+                        description: Vulnerability IDs such as `CVE-2021-44228` or `GHSA-jfh8-c2jp-5v3q`, compared case-insensitively. Empty matches any ID.
+                        items:
+                          type: string
+                        type: array
+                      minScore:
+                        description: Lowest CVSS score that matches, inclusive. A finding without a score does not match.
+                        format: double
+                        maximum: 10.0
+                        minimum: 0.0
+                        nullable: true
+                        type: number
+                      severities:
+                        description: Severities to match. Empty matches any severity.
+                        items:
+                          description: Trivy's severity scale, spelled the way Trivy reports it.
+                          enum:
+                          - CRITICAL
+                          - HIGH
+                          - MEDIUM
+                          - LOW
+                          - UNKNOWN
+                          type: string
+                        type: array
+                    type: object
                 type: object
               receivers:
                 description: Where a firing rule delivers to. At least one is required.
@@ -140,9 +263,11 @@ spec:
                   type: object
                 type: array
             required:
-            - matchers
             - receivers
             type: object
+            x-kubernetes-validations:
+            - message: set exactly one of matchers or matcherTerms
+              rule: has(self.matchers) != has(self.matcherTerms)
           status:
             description: 'What the collector has observed about a rule. The scraper writes the evaluation fields, and only when something changed: a firing, or a `Ready` transition. Writing on every ingested report would mean an API call per rule per report. The server writes the audit fields, once per create or edit. Authorship lives here rather than in annotations. An annotation is part of the spec object, so the server recording "bob edited this" reads as drift to whatever GitOps controller owns the manifest and gets reverted on the next sync. A status subresource is exempt from that by design. A rule applied straight from Git has no recorded author, which is the truth: nobody authored it through the API.'
             nullable: true

@@ -1,0 +1,21 @@
+apiVersion: trivy-collector.security.io/v1alpha1
+kind: AlertRule
+metadata:
+  name: log4j-core-below-2-17
+  namespace: trivy-system
+spec:
+  description: "SBOM component: log4j-core below 2.17.0 lands in any workload in prod."
+  matchers:
+    clusters: [prod]
+    packageName: log4j-core
+    versionExpr: "<2.17.0"
+  labels:
+    severity: critical
+  annotations:
+    runbook: https://wiki.example.com/log4shell
+  receivers:
+    - name: security-team
+      slack:
+        webhookUrl: https://hooks.slack.com/services/T0/B0/XXXX
+        channel: "#security-alerts"
+  cooldownSeconds: 3600

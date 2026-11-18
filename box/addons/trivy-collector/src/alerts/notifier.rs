@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, Semaphore};
 use tracing::{error, warn};
 
+use super::findings::{Finding, ReportKind, VulnerabilityFinding};
 use super::types::{AlertRule, SlackReceiver};
 
 /// Maximum number of components rendered inline in one grouped message.
@@ -41,17 +42,80 @@ pub struct TestDeliveryResult {
     pub error: Option<String>,
 }
 
+/// One matched finding and the workload it was found in.
 #[derive(Clone, Debug, Default)]
 pub struct AlertContext {
     pub cluster: String,
     pub namespace: String,
     pub name: String,
-    pub report_type: String,
-    pub package: String,
-    pub version: String,
-    /// Package ecosystem (`debian`, `go-module`, `npm`, ...) when Trivy
-    /// surfaces it on the SBOM component.
-    pub pkg_type: Option<String>,
+    pub finding: Finding,
+}
+
+impl AlertContext {
+    #[must_use]
+    pub fn new(cluster: &str, namespace: &str, name: &str, finding: Finding) -> Self {
+        Self {
+            cluster: cluster.to_string(),
+            namespace: namespace.to_string(),
+            name: name.to_string(),
+            finding,
+        }
+    }
+}
+
+/// Nouns and the UI route for a finding kind.
+const fn kind_words(kind: ReportKind) -> (&'static str, &'static str, &'static str) {
+    match kind {
+        ReportKind::Sbom => ("Component", "Components", "sbom"),
+        ReportKind::Vulnerability => ("Vulnerability", "Vulnerabilities", "vulnerabilities"),
+    }
+}
+
+/// The detail lines identifying a single finding.
+fn finding_lines(finding: &Finding) -> Vec<String> {
+    let Some(v) = &finding.vulnerability else {
+        let mut lines = vec![format!(
+            "*Component:* {} {}",
+            finding.package, finding.version
+        )];
+        if let Some(t) = finding.pkg_type.as_deref()
+            && !t.is_empty()
+        {
+            lines.push(format!("*Type:* {t}"));
+        }
+        return lines;
+    };
+    let rated = rating(v);
+    let mut lines = vec![if rated.is_empty() {
+        format!("*Vulnerability:* {}", v.id)
+    } else {
+        format!("*Vulnerability:* {} ({rated})", v.id)
+    }];
+    if !v.title.is_empty() {
+        lines.push(format!("*Title:* {}", v.title));
+    }
+    lines.push(format!(
+        "*Package:* {} {}",
+        finding.package, finding.version
+    ));
+    lines.push(if v.fixed_version.is_empty() {
+        "*Fixed in:* no fix available".to_string()
+    } else {
+        format!("*Fixed in:* {}", v.fixed_version)
+    });
+    lines
+}
+
+/// `CRITICAL, CVSS 9.8`, leaving out whichever half Trivy did not report.
+fn rating(v: &VulnerabilityFinding) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !v.severity.is_empty() {
+        parts.push(v.severity.clone());
+    }
+    if let Some(score) = v.score {
+        parts.push(format!("CVSS {score:.1}"));
+    }
+    parts.join(", ")
 }
 
 #[derive(Clone)]
@@ -323,14 +387,20 @@ fn build_payload(
 ) -> Value {
     let total = contexts.len();
     let first = &contexts[0];
+    let (singular, plural, route) = kind_words(first.finding.kind());
     // Header is a sentence — easier for a recipient skimming Slack to
     // parse "what happened" than a bare rule name. Operators can still
     // override the whole sentence by setting `slack.title` on the
     // receiver, in which case it's used verbatim.
     let header_sentence = match slack.title.as_deref() {
         Some(t) if !t.is_empty() => t.to_string(),
-        _ if total > 1 => format!("{} components matched by rule \"{}\"", total, rule.name),
-        _ => format!("Component matched by rule \"{}\"", rule.name),
+        _ if total > 1 => format!(
+            "{} {} matched by rule \"{}\"",
+            total,
+            plural.to_ascii_lowercase(),
+            rule.name
+        ),
+        _ => format!("{singular} matched by rule \"{}\"", rule.name),
     };
     // Deep link to the affected workload's report. When configured, the
     // entire `[FIRING] …` title becomes a clickable link to that report.
@@ -338,8 +408,9 @@ fn build_payload(
     // bold marker so the title still appears bold.
     let deep_link = external_url.filter(|s| !s.is_empty()).map(|base| {
         format!(
-            "{}/sbom/{}/{}/{}",
+            "{}/{}/{}/{}/{}",
             base,
+            route,
             urlencode(&first.cluster),
             urlencode(&first.namespace),
             urlencode(&first.name),
@@ -357,12 +428,7 @@ fn build_payload(
     })];
 
     if total == 1 {
-        let mut detail_lines = vec![format!("*Component:* {} {}", first.package, first.version)];
-        if let Some(t) = first.pkg_type.as_deref()
-            && !t.is_empty()
-        {
-            detail_lines.push(format!("*Type:* {t}"));
-        }
+        let mut detail_lines = finding_lines(&first.finding);
         // The rule's top-level description (filled by the operator in the
         // form) is the primary human-readable explanation; annotations are
         // optional alertmanager-style metadata layered on top.
@@ -385,7 +451,7 @@ fn build_payload(
             "text": { "type": "mrkdwn", "text": detail_lines.join("\n") },
         }));
     } else {
-        blocks.push(components_block(contexts));
+        blocks.push(findings_block(plural, contexts));
         // For grouped alerts, surface the rule description (and optional
         // annotation summary) just below the components list.
         let mut meta_lines: Vec<String> = Vec::new();
@@ -505,16 +571,21 @@ fn urlencode(s: &str) -> String {
     out
 }
 
-/// Build a Slack `rich_text` block: a bold "Components" header followed by
-/// a native bullet list. `rich_text` is the only Slack block type that
-/// renders actual indented bullets — `mrkdwn` does not support markdown
+/// Build a Slack `rich_text` block: a bold header such as "Components"
+/// followed by a native bullet list. `rich_text` is the only Slack block type
+/// that renders actual indented bullets — `mrkdwn` does not support markdown
 /// list syntax, only inline emphasis.
-fn components_block(contexts: &[AlertContext]) -> Value {
+fn findings_block(header: &str, contexts: &[AlertContext]) -> Value {
     let mut items: Vec<Value> = Vec::new();
     for c in contexts.iter().take(MAX_FINDINGS_PER_MESSAGE) {
-        let mut elements: Vec<Value> =
-            vec![json!({ "type": "text", "text": format!("{} {}", c.package, c.version) })];
-        if let Some(t) = c.pkg_type.as_deref()
+        let f = &c.finding;
+        let package = format!("{} {}", f.package, f.version);
+        let (text, detail) = match &f.vulnerability {
+            Some(v) => (format!("{} in {package}", v.id), Some(rating(v))),
+            None => (package, f.pkg_type.clone()),
+        };
+        let mut elements: Vec<Value> = vec![json!({ "type": "text", "text": text })];
+        if let Some(t) = detail.as_deref()
             && !t.is_empty()
         {
             elements.push(json!({ "type": "text", "text": " · " }));
@@ -547,7 +618,7 @@ fn components_block(contexts: &[AlertContext]) -> Value {
                 "type": "rich_text_section",
                 "elements": [{
                     "type": "text",
-                    "text": "Components",
+                    "text": header,
                     "style": { "bold": true },
                 }],
             },
@@ -605,7 +676,8 @@ mod tests {
             name: "deprecated-crypto".into(),
             description: String::new(),
             enabled: true,
-            matchers: Matchers::default(),
+            matchers: Some(Matchers::default()),
+            matcher_terms: vec![],
             labels: BTreeMap::new(),
             annotations: BTreeMap::new(),
             receivers: vec![Receiver {
@@ -627,15 +699,93 @@ mod tests {
     }
 
     fn sbom_ctx(pkg: &str, version: &str) -> AlertContext {
-        AlertContext {
-            cluster: "prod".into(),
-            namespace: "ns".into(),
-            name: "app".into(),
-            report_type: "sbomreport".into(),
-            package: pkg.into(),
-            version: version.into(),
-            pkg_type: Some("go-module".into()),
-        }
+        AlertContext::new(
+            "prod",
+            "ns",
+            "app",
+            Finding {
+                package: pkg.into(),
+                version: version.into(),
+                pkg_type: Some("go-module".into()),
+                vulnerability: None,
+            },
+        )
+    }
+
+    fn vuln_ctx(id: &str, fixed: &str) -> AlertContext {
+        AlertContext::new(
+            "prod",
+            "ns",
+            "app",
+            Finding {
+                package: "log4j-core".into(),
+                version: "2.14.1".into(),
+                pkg_type: None,
+                vulnerability: Some(VulnerabilityFinding {
+                    id: id.into(),
+                    severity: "CRITICAL".into(),
+                    score: Some(10.0),
+                    fixed_version: fixed.into(),
+                    title: "Log4Shell".into(),
+                }),
+            },
+        )
+    }
+
+    fn render(rule: &AlertRule, contexts: &[AlertContext], external_url: Option<&str>) -> Value {
+        build_payload(
+            rule,
+            &rule.receivers[0].name,
+            rule.receivers[0].slack.as_ref().unwrap(),
+            contexts,
+            external_url,
+            0,
+        )
+    }
+
+    #[test]
+    fn a_single_vulnerability_renders_its_rating_package_and_fix() {
+        let rule = sample_rule();
+        let payload = render(
+            &rule,
+            &[vuln_ctx("CVE-2021-44228", "2.15.0")],
+            Some("https://trivy.example.com"),
+        );
+        let blocks = serde_json::to_string(&payload["blocks"]).unwrap();
+        assert!(blocks.contains("*Vulnerability:* CVE-2021-44228 (CRITICAL, CVSS 10.0)"));
+        assert!(blocks.contains("*Title:* Log4Shell"));
+        assert!(blocks.contains("*Package:* log4j-core 2.14.1"));
+        assert!(blocks.contains("*Fixed in:* 2.15.0"));
+        assert!(blocks.contains("https://trivy.example.com/vulnerabilities/prod/ns/app"));
+        assert_eq!(
+            payload["text"],
+            "[FIRING] Vulnerability matched by rule \"deprecated-crypto\""
+        );
+
+        let unfixed = render(&rule, &[vuln_ctx("CVE-2021-44228", "")], None);
+        let blocks = serde_json::to_string(&unfixed["blocks"]).unwrap();
+        assert!(blocks.contains("*Fixed in:* no fix available"));
+    }
+
+    #[test]
+    fn grouped_vulnerabilities_list_id_package_and_rating() {
+        let rule = sample_rule();
+        let payload = render(
+            &rule,
+            &[
+                vuln_ctx("CVE-2021-44228", ""),
+                vuln_ctx("CVE-2021-45046", ""),
+            ],
+            None,
+        );
+        let blocks = serde_json::to_string(&payload["blocks"]).unwrap();
+        assert!(blocks.contains("\"Vulnerabilities\""));
+        assert!(blocks.contains("CVE-2021-45046 in log4j-core 2.14.1"));
+        assert!(blocks.contains("CRITICAL, CVSS 10.0"));
+        assert_eq!(
+            payload["text"],
+            "[FIRING] 2 vulnerabilities matched by rule \"deprecated-crypto\""
+        );
     }
 
     #[test]
@@ -909,10 +1059,8 @@ mod tests {
     #[test]
     fn payload_omits_pkg_type_when_unset() {
         let rule = sample_rule();
-        let ctx = AlertContext {
-            pkg_type: None,
-            ..sbom_ctx("openssl", "3.0.7")
-        };
+        let mut ctx = sbom_ctx("openssl", "3.0.7");
+        ctx.finding.pkg_type = None;
         let payload = build_payload(
             &rule,
             &rule.receivers[0].name,

@@ -1,15 +1,14 @@
-//! Run a rule's matchers against already-stored SBOM reports without firing
+//! Run a rule's matchers against already-stored reports without firing
 //! receivers. Used by the rule editor to show what current data would match.
 //!
-//! Matching is delegated to SQL (`ReportStore::list_sbom_component_matches`),
-//! so every stored SBOM contributes — earlier revisions of this code only
-//! scanned the 200 most-recently-updated reports, which silently hid
-//! components in older SBOMs from rule authors.
+//! Rows come from `findings::fetch`, so every stored report contributes and
+//! preview applies exactly the predicate the evaluator does.
 
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use super::expr::VersionExpr;
+use super::findings;
+use super::matchers::CompiledRule;
 use super::types::Matchers;
 use crate::storage::ReportStore;
 
@@ -22,6 +21,16 @@ pub struct PreviewMatch {
     pub name: String,
     pub package: String,
     pub version: String,
+    /// Set for a vulnerability rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vulnerability_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    /// Empty when no fix is published. Absent for a component rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -30,58 +39,51 @@ pub struct PreviewResult {
     pub total: usize,
     pub truncated: bool,
     /// Number of distinct workloads (cluster+namespace+name) contributing
-    /// at least one matching component. Field name kept as `scanned_reports`
-    /// for frontend compatibility — the prior implementation populated this
-    /// with the size of a 200-row sample window, which no longer exists.
+    /// at least one match. Field name kept as `scanned_reports` for frontend
+    /// compatibility — the prior implementation populated this with the size
+    /// of a 200-row sample window, which no longer exists.
     #[serde(rename = "scanned_reports")]
     pub matched_workloads: usize,
 }
 
-pub async fn run(db: &dyn ReportStore, matchers: &Matchers) -> Result<PreviewResult, String> {
-    let expr = match matchers.version_expr.as_deref() {
-        Some(s) => Some(VersionExpr::parse(s).map_err(|e| format!("version_expr: {e}"))?),
-        None => None,
-    };
-
-    let rows = db
-        .list_sbom_component_matches(
-            &matchers.clusters,
-            matchers.namespace.as_deref(),
-            matchers.package_name.as_deref(),
-        )
+pub async fn run(
+    db: &dyn ReportStore,
+    matchers: Option<&Matchers>,
+    terms: &[Matchers],
+) -> Result<PreviewResult, String> {
+    let compiled = CompiledRule::compile(matchers, terms).map_err(|e| e.to_string())?;
+    let rows = findings::fetch(db, &compiled)
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut items = Vec::new();
-    let mut total = 0usize;
-    let mut workloads = std::collections::HashSet::new();
-
-    for row in rows {
-        if let Some(ref e) = expr
-            && !e.matches(&row.version)
-        {
-            continue;
-        }
-        total += 1;
-        workloads.insert((
-            row.cluster.clone(),
-            row.namespace.clone(),
-            row.workload_name.clone(),
-        ));
-        if items.len() < MAX_MATCHES {
-            items.push(PreviewMatch {
+    let total = rows.len();
+    let matched_workloads = rows
+        .iter()
+        .map(findings::WorkloadFinding::workload_key)
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    let items: Vec<PreviewMatch> = rows
+        .into_iter()
+        .take(MAX_MATCHES)
+        .map(|row| {
+            let v = row.finding.vulnerability;
+            PreviewMatch {
                 cluster: row.cluster,
                 namespace: row.namespace,
-                name: row.workload_name,
-                package: row.package_name,
-                version: row.version,
-            });
-        }
-    }
+                name: row.workload,
+                package: row.finding.package,
+                version: row.finding.version,
+                vulnerability_id: v.as_ref().map(|v| v.id.clone()),
+                severity: v.as_ref().map(|v| v.severity.clone()),
+                score: v.as_ref().and_then(|v| v.score),
+                fixed_version: v.map(|v| v.fixed_version),
+            }
+        })
+        .collect();
 
     Ok(PreviewResult {
         truncated: total > items.len(),
-        matched_workloads: workloads.len(),
+        matched_workloads,
         items,
         total,
     })
@@ -165,8 +167,9 @@ mod tests {
             version_expr: None,
             clusters: vec![],
             namespace: None,
+            ..Default::default()
         };
-        let result = run(&db, &matchers).await.unwrap();
+        let result = run(&db, Some(&matchers), &[]).await.unwrap();
         // 2 versions in node-app + 1 in other-app
         assert_eq!(result.total, 3);
         assert_eq!(result.items.len(), 3);
@@ -183,8 +186,9 @@ mod tests {
             version_expr: Some(">=1.0.0".to_string()),
             clusters: vec![],
             namespace: None,
+            ..Default::default()
         };
-        let result = run(&db, &matchers).await.unwrap();
+        let result = run(&db, Some(&matchers), &[]).await.unwrap();
         // Only the 1.6.0 entries survive; 0.27.2 is filtered.
         assert_eq!(result.total, 2);
         assert!(result.items.iter().all(|m| m.version == "1.6.0"));
@@ -198,8 +202,9 @@ mod tests {
             version_expr: None,
             clusters: vec![],
             namespace: Some("team-a".to_string()),
+            ..Default::default()
         };
-        let result = run(&db, &matchers).await.unwrap();
+        let result = run(&db, Some(&matchers), &[]).await.unwrap();
         assert_eq!(result.total, 1);
         assert_eq!(result.items[0].namespace, "team-a");
     }
@@ -212,9 +217,10 @@ mod tests {
             version_expr: Some(">=".to_string()),
             clusters: vec![],
             namespace: None,
+            ..Default::default()
         };
-        let err = run(&db, &matchers).await.unwrap_err();
-        assert!(err.starts_with("version_expr:"));
+        let err = run(&db, Some(&matchers), &[]).await.unwrap_err();
+        assert!(err.starts_with("matchers.version_expr:"));
     }
 
     #[tokio::test]
@@ -239,11 +245,49 @@ mod tests {
             version_expr: None,
             clusters: vec![],
             namespace: None,
+            ..Default::default()
         };
-        let result = run(&db, &matchers).await.unwrap();
+        let result = run(&db, Some(&matchers), &[]).await.unwrap();
         assert_eq!(result.total, MAX_MATCHES + 5);
         assert_eq!(result.items.len(), MAX_MATCHES);
         assert!(result.truncated);
         assert_eq!(result.matched_workloads, 1);
+    }
+
+    #[tokio::test]
+    async fn preview_lists_vulnerabilities_above_a_score() {
+        let db = Database::new(":memory:").await.unwrap();
+        db.upsert_report(&ReportPayload {
+            cluster: "prod".to_string(),
+            namespace: "payments".to_string(),
+            name: "api".to_string(),
+            report_type: "vulnerabilityreport".to_string(),
+            data_json: json!({"report": {"vulnerabilities": [
+                {"vulnerabilityID": "CVE-2021-44228", "resource": "log4j-core",
+                 "installedVersion": "2.14.1", "fixedVersion": "2.15.0",
+                 "severity": "CRITICAL", "score": 10.0},
+                {"vulnerabilityID": "CVE-2022-0001", "resource": "zlib",
+                 "installedVersion": "1.2.11", "severity": "MEDIUM", "score": 5.3},
+            ]}})
+            .to_string(),
+            received_at: chrono::Utc::now(),
+        })
+        .await
+        .unwrap();
+        let matchers = Matchers {
+            vulnerability: Some(crate::alerts::VulnerabilityMatchers {
+                min_score: Some(9.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = run(&db, Some(&matchers), &[]).await.unwrap();
+        assert_eq!(result.total, 1);
+        let m = &result.items[0];
+        assert_eq!(m.vulnerability_id.as_deref(), Some("CVE-2021-44228"));
+        assert_eq!(m.severity.as_deref(), Some("CRITICAL"));
+        assert_eq!(m.score, Some(10.0));
+        assert_eq!(m.fixed_version.as_deref(), Some("2.15.0"));
+        assert_eq!(m.package, "log4j-core");
     }
 }

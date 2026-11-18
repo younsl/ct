@@ -33,7 +33,7 @@ use crate::collector::types::{ReportEvent, ReportEventType};
 use crate::storage::remote::{INTERNAL_API_PREFIX, INTERNAL_TOKEN_HEADER};
 use crate::storage::store::{DataRangeResponse, PagedResponse};
 use crate::storage::token_store::constant_time_eq;
-use crate::storage::{Database, QueryParams};
+use crate::storage::{Database, QueryParams, VulnerabilityMatchFilter};
 
 /// Request body limit, sized for the largest Trivy report that can be pushed
 /// through the ingest route.
@@ -92,6 +92,7 @@ pub fn router(state: InternalApi) -> Router {
         .route("/search/vulnerabilities", get(search_vulnerabilities))
         .route("/search/components", get(search_components))
         .route("/sbom/component-matches", get(list_component_matches))
+        .route("/vulnerabilities/matches", get(list_vulnerability_matches))
         .route("/suggest/vulnerability-ids", get(suggest_vulnerability_ids))
         .route("/suggest/component-names", get(suggest_component_names))
         .route("/dashboard/trends", get(get_trends))
@@ -431,6 +432,46 @@ async fn list_component_matches(
     }
 }
 
+/// Comma-separated lists, like `ComponentMatchQuery`.
+#[derive(Debug, Default, Deserialize)]
+pub struct VulnerabilityMatchQuery {
+    pub clusters: Option<String>,
+    pub namespace: Option<String>,
+    pub package_name: Option<String>,
+    pub ids: Option<String>,
+    pub severities: Option<String>,
+    pub min_score: Option<f64>,
+    pub fix_available: Option<bool>,
+}
+
+impl VulnerabilityMatchQuery {
+    fn into_filter(self) -> VulnerabilityMatchFilter {
+        VulnerabilityMatchFilter {
+            clusters: self.clusters.as_deref().map_or_default(split_csv),
+            namespace: self.namespace,
+            package_name: self.package_name,
+            ids: self.ids.as_deref().map_or_default(split_csv),
+            severities: self.severities.as_deref().map_or_default(split_csv),
+            min_score: self.min_score,
+            fix_available: self.fix_available,
+        }
+    }
+}
+
+async fn list_vulnerability_matches(
+    State(state): State<InternalApi>,
+    Query(query): Query<VulnerabilityMatchQuery>,
+) -> Response {
+    match state
+        .db
+        .list_vulnerability_matches(&query.into_filter())
+        .await
+    {
+        Ok(items) => paged_all(items),
+        Err(e) => storage_error("list_vulnerability_matches", &e),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TrendsQuery {
     pub start_date: String,
@@ -606,6 +647,7 @@ mod tests {
             "/internal/v1/suggest/vulnerability-ids?q=CVE",
             "/internal/v1/suggest/component-names?q=log4j",
             "/internal/v1/sbom/component-matches",
+            "/internal/v1/vulnerabilities/matches?severities=CRITICAL&min_score=9.0",
         ] {
             let app = router(api().await);
             let resp = app.oneshot(authed(uri)).await.unwrap();

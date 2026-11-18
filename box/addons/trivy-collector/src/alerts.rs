@@ -6,6 +6,8 @@ pub mod chart;
 pub mod crd;
 pub mod evaluator;
 pub mod expr;
+pub mod findings;
+pub mod matchers;
 pub mod migration;
 pub mod notifier;
 pub mod preview;
@@ -15,7 +17,7 @@ pub mod types;
 
 pub use evaluator::AlertEvaluator;
 pub use store::{AlertStore, AlertStoreError};
-pub use types::{AlertRule, Matchers, Receiver, SlackReceiver};
+pub use types::{AlertRule, Matchers, Receiver, Severity, SlackReceiver, VulnerabilityMatchers};
 
 use anyhow::Result;
 use tracing::{info, warn};

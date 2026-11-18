@@ -20,7 +20,7 @@ use super::dashboard::TrendResponse;
 use super::database::Database;
 use super::models::{
     ClusterInfo, ComponentSearchResult, FullReport, QueryParams, ReportMeta, SbomComponentMatch,
-    Stats, VulnSearchResult,
+    Stats, VulnSearchResult, VulnerabilityMatch, VulnerabilityMatchFilter,
 };
 
 /// Initial-sync state of one watched cluster.
@@ -139,6 +139,11 @@ pub trait ReportStore: Send + Sync {
         package_name: Option<&str>,
     ) -> Result<Vec<SbomComponentMatch>>;
 
+    async fn list_vulnerability_matches(
+        &self,
+        filter: &VulnerabilityMatchFilter,
+    ) -> Result<Vec<VulnerabilityMatch>>;
+
     async fn get_live_trends(
         &self,
         start_date: &str,
@@ -244,6 +249,13 @@ impl ReportStore for Database {
         package_name: Option<&str>,
     ) -> Result<Vec<SbomComponentMatch>> {
         Self::list_sbom_component_matches(self, clusters, namespace, package_name).await
+    }
+
+    async fn list_vulnerability_matches(
+        &self,
+        filter: &VulnerabilityMatchFilter,
+    ) -> Result<Vec<VulnerabilityMatch>> {
+        Self::list_vulnerability_matches(self, filter).await
     }
 
     async fn get_live_trends(

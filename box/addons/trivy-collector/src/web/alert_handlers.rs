@@ -31,7 +31,12 @@ pub struct AlertRuleInput {
     pub description: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
-    pub matchers: Matchers,
+    /// A single term. Exactly one of `matchers` and `matcher_terms` is set.
+    #[serde(default)]
+    pub matchers: Option<Matchers>,
+    /// Terms ORed together.
+    #[serde(default)]
+    pub matcher_terms: Vec<Matchers>,
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
     #[serde(default)]
@@ -171,6 +176,7 @@ pub async fn create_alert(
         description: input.description,
         enabled: input.enabled,
         matchers: input.matchers,
+        matcher_terms: input.matcher_terms,
         labels: input.labels,
         annotations: input.annotations,
         receivers: input.receivers,
@@ -245,6 +251,7 @@ pub async fn update_alert(
         description: input.description,
         enabled: input.enabled,
         matchers: input.matchers,
+        matcher_terms: input.matcher_terms,
         labels: input.labels,
         annotations: input.annotations,
         receivers: input.receivers,
@@ -301,7 +308,12 @@ pub async fn delete_alert(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct PreviewRequest {
-    pub matchers: Matchers,
+    /// A single term. Exactly one of `matchers` and `matcher_terms` is set.
+    #[serde(default)]
+    pub matchers: Option<Matchers>,
+    /// Terms ORed together.
+    #[serde(default)]
+    pub matcher_terms: Vec<Matchers>,
 }
 
 #[utoipa::path(
@@ -318,7 +330,13 @@ pub async fn preview_alert(
     State(state): State<AppState>,
     Json(req): Json<PreviewRequest>,
 ) -> impl IntoResponse {
-    match preview::run(state.store.as_ref(), &req.matchers).await {
+    match preview::run(
+        state.store.as_ref(),
+        req.matchers.as_ref(),
+        &req.matcher_terms,
+    )
+    .await
+    {
         Ok(result) => Json(result).into_response(),
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -341,7 +359,7 @@ pub async fn preview_alert(
         ),
         (
             status = 400,
-            description = "No Slack receiver, or an invalid webhook host or version expression",
+            description = "No Slack receiver, or an invalid webhook host or matcher",
             body = ErrorResponse
         ),
         (
@@ -386,6 +404,7 @@ pub async fn test_alert_draft(
         description: input.description,
         enabled: input.enabled,
         matchers: input.matchers,
+        matcher_terms: input.matcher_terms,
         labels: input.labels,
         annotations: input.annotations,
         receivers: input.receivers,
@@ -425,9 +444,9 @@ pub async fn test_alert_draft(
             })),
         )
             .into_response(),
-        Err(TestRunError::InvalidExpr(msg)) => (
+        Err(TestRunError::InvalidMatchers(e)) => (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": format!("invalid version expression: {msg}")})),
+            Json(serde_json::json!({"error": format!("invalid matcher {e}")})),
         )
             .into_response(),
         Err(TestRunError::Storage(msg)) => (

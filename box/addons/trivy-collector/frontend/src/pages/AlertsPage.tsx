@@ -12,53 +12,111 @@ import {
   type RegisteredCluster,
 } from '../api'
 import type {
+  AlertMatcherFields,
   AlertMatchers,
   AlertPreviewResult,
   AlertRule,
   AlertRuleInput,
+  AlertSeverity,
 } from '../types'
 import AdminSubNav from '../components/AdminSubNav'
 import { formatDate } from '../utils'
 import styles from './AlertsPage.module.css'
 
-interface FormState {
-  name: string
-  description: string
-  enabled: boolean
+type Trigger = 'component' | 'vulnerability'
+type FixFilter = '' | 'true' | 'false'
+
+const SEVERITIES: AlertSeverity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']
+
+// Mirrors MAX_TERMS in src/alerts/matchers.rs and the CRD's maxItems.
+const MAX_TERMS = 20
+
+interface TermForm {
+  trigger: Trigger
   packageName: string
   versionExpr: string
   clusters: string[]
   namespace: string
+  excludeNamespaces: string
+  excludePackages: string
+  vulnIds: string
+  excludeIds: string
+  severities: AlertSeverity[]
+  minScore: string
+  fixAvailable: FixFilter
+}
+
+interface FormState {
+  name: string
+  description: string
+  enabled: boolean
+  terms: TermForm[]
   receiverName: string
   webhookUrl: string
   channel: string
   cooldownSecs: string
 }
 
-const emptyForm = (): FormState => ({
-  name: '',
-  description: '',
-  enabled: true,
+const emptyTerm = (): TermForm => ({
+  trigger: 'component',
   packageName: '',
   versionExpr: '',
   clusters: [],
   namespace: '',
+  excludeNamespaces: '',
+  excludePackages: '',
+  vulnIds: '',
+  excludeIds: '',
+  severities: [],
+  minScore: '',
+  fixAvailable: '',
+})
+
+const emptyForm = (): FormState => ({
+  name: '',
+  description: '',
+  enabled: true,
+  terms: [emptyTerm()],
   receiverName: 'slack-default',
   webhookUrl: '',
   channel: '',
   cooldownSecs: '3600',
 })
 
+const ruleTerms = (rule: AlertRule): AlertMatchers[] =>
+  rule.matcher_terms && rule.matcher_terms.length > 0
+    ? rule.matcher_terms
+    : rule.matchers
+      ? [rule.matchers]
+      : []
+
+const termFromMatchers = (m: AlertMatchers): TermForm => {
+  const vuln = m.vulnerability
+  return {
+    trigger: vuln ? 'vulnerability' : 'component',
+    packageName: m.package_name ?? '',
+    versionExpr: m.version_expr ?? '',
+    clusters: m.clusters ?? [],
+    namespace: m.namespace ?? '',
+    excludeNamespaces: (m.exclude_namespaces ?? []).join(', '),
+    excludePackages: (m.exclude_packages ?? []).join(', '),
+    vulnIds: (vuln?.ids ?? []).join(', '),
+    excludeIds: (vuln?.exclude_ids ?? []).join(', '),
+    severities: vuln?.severities ?? [],
+    minScore: vuln?.min_score?.toString() ?? '',
+    fixAvailable:
+      vuln?.fix_available === true ? 'true' : vuln?.fix_available === false ? 'false' : '',
+  }
+}
+
 const fromRule = (rule: AlertRule): FormState => {
   const slack = rule.receivers[0]?.slack
+  const terms = ruleTerms(rule).map(termFromMatchers)
   return {
     name: rule.name,
     description: rule.description ?? '',
     enabled: rule.enabled,
-    packageName: rule.matchers.package_name ?? '',
-    versionExpr: rule.matchers.version_expr ?? '',
-    clusters: rule.matchers.clusters ?? [],
-    namespace: rule.matchers.namespace ?? '',
+    terms: terms.length > 0 ? terms : [emptyTerm()],
     receiverName: rule.receivers[0]?.name ?? 'slack-default',
     webhookUrl: slack?.webhook_url ?? '',
     channel: slack?.channel ?? '',
@@ -68,18 +126,96 @@ const fromRule = (rule: AlertRule): FormState => {
 
 const trimmed = (s: string) => (s.trim() === '' ? null : s.trim())
 
-const toMatchers = (form: FormState): AlertMatchers => ({
-  package_name: trimmed(form.packageName),
-  version_expr: trimmed(form.versionExpr),
-  clusters: form.clusters,
-  namespace: trimmed(form.namespace),
+const splitList = (s: string) =>
+  s
+    .split(/[\s,]+/)
+    .map((v) => v.trim())
+    .filter((v) => v !== '')
+
+const parseScore = (s: string): number | null => (s.trim() === '' ? null : Number(s))
+
+const toMatchers = (t: TermForm): AlertMatchers => ({
+  package_name: trimmed(t.packageName),
+  version_expr: trimmed(t.versionExpr),
+  clusters: t.clusters,
+  namespace: trimmed(t.namespace),
+  exclude_namespaces: splitList(t.excludeNamespaces),
+  exclude_packages: splitList(t.excludePackages),
+  vulnerability:
+    t.trigger === 'vulnerability'
+      ? {
+          ids: splitList(t.vulnIds),
+          exclude_ids: splitList(t.excludeIds),
+          severities: t.severities,
+          min_score: parseScore(t.minScore),
+          fix_available: t.fixAvailable === '' ? null : t.fixAvailable === 'true',
+        }
+      : null,
 })
+
+// One term is sent as `matchers` so the stored object keeps the shape that
+// kubectl's PACKAGE and VERSION columns read.
+const toMatcherFields = (form: FormState): AlertMatcherFields =>
+  form.terms.length === 1
+    ? { matchers: toMatchers(form.terms[0]) }
+    : { matcher_terms: form.terms.map(toMatchers) }
+
+// A vulnerability term with no condition fires on every finding in scope,
+// which is almost never meant, so the form asks for at least one.
+const hasVulnerabilityCondition = (t: TermForm) =>
+  t.packageName.trim() !== '' ||
+  splitList(t.vulnIds).length > 0 ||
+  t.severities.length > 0 ||
+  t.minScore.trim() !== ''
+
+const hasNarrowingMatcher = (t: TermForm) =>
+  t.trigger === 'vulnerability'
+    ? hasVulnerabilityCondition(t)
+    : t.packageName.trim() !== '' || t.versionExpr.trim() !== ''
+
+const scoreError = (t: TermForm): string | null => {
+  const score = parseScore(t.minScore)
+  if (t.trigger !== 'vulnerability' || score === null) return null
+  return Number.isFinite(score) && score >= 0 && score <= 10
+    ? null
+    : 'minimum CVSS score must be a number from 0 to 10'
+}
+
+const termProblem = (t: TermForm): string | null => {
+  if (t.trigger === 'component' && !t.packageName.trim()) return 'package name is required'
+  if (t.trigger === 'vulnerability' && !hasVulnerabilityCondition(t))
+    return 'set a vulnerability ID, severity, minimum CVSS score, or package name'
+  const badScore = scoreError(t)
+  if (badScore) return badScore
+  if (t.clusters.length === 0) return 'select at least one cluster'
+  return null
+}
+
+const termLabel = (form: FormState, i: number) =>
+  form.terms.length > 1 ? `Term ${i + 1}: ` : ''
+
+const termSummary = (m: AlertMatchers): string => {
+  const parts: string[] = []
+  const v = m.vulnerability
+  if (v) {
+    if (v.ids?.length) parts.push(v.ids.join(', '))
+    if (v.severities?.length) parts.push(v.severities.join('|'))
+    if (v.min_score != null) parts.push(`CVSS >= ${v.min_score}`)
+    if (v.fix_available != null) parts.push(v.fix_available ? 'fixable' : 'no fix')
+    if (v.exclude_ids?.length) parts.push(`not ${v.exclude_ids.join(', ')}`)
+  }
+  if (m.package_name) parts.push(m.package_name)
+  if (m.version_expr) parts.push(m.version_expr)
+  if (m.exclude_packages?.length) parts.push(`not ${m.exclude_packages.join(', ')}`)
+  if (m.exclude_namespaces?.length) parts.push(`not ns ${m.exclude_namespaces.join(', ')}`)
+  return parts.length > 0 ? parts.join(' / ') : 'any'
+}
 
 const toInput = (form: FormState): AlertRuleInput => ({
   name: form.name.trim(),
   description: form.description,
   enabled: form.enabled,
-  matchers: toMatchers(form),
+  ...toMatcherFields(form),
   receivers: [
     {
       name: form.receiverName.trim() || 'slack-default',
@@ -157,10 +293,10 @@ export default function AlertsPage() {
     setError(null)
     const input = toInput(form)
     if (!input.name) return setError('Name is required')
-    if (!input.matchers.package_name)
-      return setError('Package name is required')
-    if (input.matchers.clusters.length === 0)
-      return setError('At least one cluster must be selected')
+    for (const [i, t] of form.terms.entries()) {
+      const problem = termProblem(t)
+      if (problem) return setError(`${termLabel(form, i)}${problem}`)
+    }
     const webhookUrl = input.receivers[0]?.slack?.webhook_url ?? ''
     if (!webhookUrl) return setError('Slack webhook URL is required')
     if (!webhookUrl.startsWith('https://hooks.slack.com/'))
@@ -241,8 +377,8 @@ export default function AlertsPage() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Package</th>
-                <th>Version</th>
+                <th>Trigger</th>
+                <th>Match</th>
                 <th>Receivers</th>
                 <th>Updated</th>
                 <th>Status</th>
@@ -256,9 +392,23 @@ export default function AlertsPage() {
                     <div className={styles.ruleName}>{r.name}</div>
                     {r.description && <div className={styles.ruleDescription}>{r.description}</div>}
                   </td>
-                  <td>{r.matchers.package_name ?? '—'}</td>
+                  <td>
+                    <div className={styles.matchSummary}>
+                      {ruleTerms(r).some((m) => !m.vulnerability) && (
+                        <span className={styles.typePillSbom}>Component</span>
+                      )}
+                      {ruleTerms(r).some((m) => m.vulnerability) && (
+                        <span className={styles.typePillCve}>Vulnerability</span>
+                      )}
+                    </div>
+                  </td>
                   <td className={styles.codeCell}>
-                    {r.matchers.version_expr ? <code>{r.matchers.version_expr}</code> : '—'}
+                    {ruleTerms(r).map((m, i) => (
+                      <div key={i}>
+                        {i > 0 && <span className={styles.termOr}>OR </span>}
+                        <code>{termSummary(m)}</code>
+                      </div>
+                    ))}
                   </td>
                   <td>
                     {r.receivers.map((rc) => (
@@ -314,6 +464,11 @@ function RuleForm({
 }: RuleFormProps) {
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm({ ...form, [k]: v })
+  const setTerm = (i: number, t: TermForm) =>
+    setForm({ ...form, terms: form.terms.map((old, j) => (j === i ? t : old)) })
+  const addTerm = () => setForm({ ...form, terms: [...form.terms, emptyTerm()] })
+  const removeTerm = (i: number) =>
+    setForm({ ...form, terms: form.terms.filter((_, j) => j !== i) })
 
   const [testing, setTesting] = useState(false)
   const [testStatus, setTestStatus] = useState<
@@ -325,8 +480,10 @@ function RuleForm({
   // dispatch a half-filled draft. Reasons surfaced via tooltip.
   const missingRequired: string[] = []
   if (!form.name.trim()) missingRequired.push('Name')
-  if (!form.packageName.trim()) missingRequired.push('Package name')
-  if (form.clusters.length === 0) missingRequired.push('Clusters')
+  form.terms.forEach((t, i) => {
+    const problem = termProblem(t)
+    if (problem) missingRequired.push(`${termLabel(form, i)}${problem}`)
+  })
   if (!form.webhookUrl.trim()) missingRequired.push('Webhook URL')
   const canTest = canManage && !testing && missingRequired.length === 0
   const testDisabledReason =
@@ -374,7 +531,7 @@ function RuleForm({
   return (
     <form className={styles.form} onSubmit={onSubmit}>
       <div className={styles.formBadgeSbom}>
-        SBOM component rule — fires when a matching package/version lands in a workload's SBOM
+        Fires when any term matches a finding in a workload's SBOM or vulnerability report
       </div>
 
       <div className={styles.formSectionTitle}>Identity</div>
@@ -416,44 +573,34 @@ function RuleForm({
       </div>
 
       <div className={styles.formSectionTitle}>Matchers</div>
-      <div className={styles.grid}>
-        <Field label="Package name" required>
-          <input
-            className={styles.input}
-            value={form.packageName}
-            onChange={(e) => set('packageName', e.target.value)}
-            placeholder="log4j-core"
-            required
+      {form.terms.map((t, i) => (
+        <div key={i}>
+          {i > 0 && <div className={styles.termDivider}>OR</div>}
+          <TermEditor
+            index={i}
+            term={t}
+            onChange={(next) => setTerm(i, next)}
+            onRemove={form.terms.length > 1 ? () => removeTerm(i) : undefined}
+            clusterOptions={clusterOptions}
+            showHeader={form.terms.length > 1}
           />
-        </Field>
-        <Field label="Version expression" hint="<2.17.0  or  >=1.0.0,<2.0.0">
-          <input
-            className={styles.input}
-            value={form.versionExpr}
-            onChange={(e) => set('versionExpr', e.target.value)}
-            placeholder="<1.0.0"
-          />
-        </Field>
-        <Field
-          label="Clusters"
-          hint="Click to toggle. At least one cluster must be selected."
-          required
-          wide
+        </div>
+      ))}
+      <div className={styles.termActions}>
+        <button
+          type="button"
+          className="btn-secondary btn-sm"
+          onClick={addTerm}
+          disabled={form.terms.length >= MAX_TERMS}
         >
-          <ClusterMultiSelect
-            value={form.clusters}
-            options={clusterOptions}
-            onChange={(next) => setForm({ ...form, clusters: next })}
-          />
-        </Field>
-        <Field label="Namespace (optional)">
-          <input
-            className={styles.input}
-            value={form.namespace}
-            onChange={(e) => set('namespace', e.target.value)}
-            placeholder="default"
-          />
-        </Field>
+          Add OR term
+        </button>
+        <span className={styles.fieldHint}>
+          Terms are ORed. Fields inside a term are ANDed, and exclusions veto a match.
+        </span>
+      </div>
+
+      <div className={styles.grid}>
         <Field label="Cooldown (seconds)" hint="Per-target re-fire interval">
           <input
             className={styles.input}
@@ -542,8 +689,166 @@ function RuleForm({
   )
 }
 
-function hasNarrowingMatcher(form: FormState): boolean {
-  return form.packageName.trim() !== '' || form.versionExpr.trim() !== ''
+interface TermEditorProps {
+  index: number
+  term: TermForm
+  onChange: (t: TermForm) => void
+  onRemove?: () => void
+  clusterOptions: RegisteredCluster[]
+  showHeader: boolean
+}
+
+function TermEditor({ index, term, onChange, onRemove, clusterOptions, showHeader }: TermEditorProps) {
+  const set = <K extends keyof TermForm>(k: K, v: TermForm[K]) => onChange({ ...term, [k]: v })
+  const isVuln = term.trigger === 'vulnerability'
+
+  return (
+    <div className={styles.termCard}>
+      {showHeader && (
+        <div className={styles.termHeader}>
+          <span className={styles.termTitle}>Term {index + 1}</span>
+          {onRemove && (
+            <button type="button" className="btn-secondary btn-sm" onClick={onRemove}>
+              Remove
+            </button>
+          )}
+        </div>
+      )}
+      <div className={styles.grid}>
+        <Field label="Trigger" hint="Which report this term watches">
+          <select
+            className={styles.select}
+            value={term.trigger}
+            onChange={(e) => set('trigger', e.target.value as Trigger)}
+          >
+            <option value="component">SBOM component present</option>
+            <option value="vulnerability">Vulnerability found</option>
+          </select>
+        </Field>
+        {isVuln && (
+          <>
+            <Field
+              label="Vulnerability IDs"
+              hint="Comma or space separated. Leave blank to match any ID."
+            >
+              <input
+                className={styles.input}
+                value={term.vulnIds}
+                onChange={(e) => set('vulnIds', e.target.value)}
+                placeholder="CVE-2021-44228, GHSA-jfh8-c2jp-5v3q"
+              />
+            </Field>
+            <Field label="Minimum CVSS score" hint="Inclusive, 0 to 10. Unscored findings never match.">
+              <input
+                className={styles.input}
+                inputMode="decimal"
+                value={term.minScore}
+                onChange={(e) => set('minScore', e.target.value.replace(/[^0-9.]/g, ''))}
+                placeholder="9.0"
+              />
+            </Field>
+            <Field label="Severities" hint="Click to toggle. None selected matches any severity.">
+              <div className={styles.severityToggleRow}>
+                {SEVERITIES.map((sev) => {
+                  const on = term.severities.includes(sev)
+                  return (
+                    <button
+                      key={sev}
+                      type="button"
+                      aria-pressed={on}
+                      className={`${styles.severityPill} ${styles[`severity${sev}`]} ${styles.severityToggle} ${on ? '' : styles.severityToggleOff}`}
+                      onClick={() =>
+                        set(
+                          'severities',
+                          on ? term.severities.filter((s) => s !== sev) : [...term.severities, sev],
+                        )
+                      }
+                    >
+                      {sev}
+                    </button>
+                  )
+                })}
+              </div>
+            </Field>
+            <Field label="Fix available">
+              <select
+                className={styles.select}
+                value={term.fixAvailable}
+                onChange={(e) => set('fixAvailable', e.target.value as FixFilter)}
+              >
+                <option value="">Any</option>
+                <option value="true">Only with a fixed version</option>
+                <option value="false">Only without a fix</option>
+              </select>
+            </Field>
+            <Field label="Exclude vulnerability IDs" hint="Accepted risks. Comma or space separated.">
+              <input
+                className={styles.input}
+                value={term.excludeIds}
+                onChange={(e) => set('excludeIds', e.target.value)}
+                placeholder="CVE-2023-44487"
+              />
+            </Field>
+          </>
+        )}
+        <Field
+          label={isVuln ? 'Package name (optional)' : 'Package name'}
+          required={!isVuln}
+        >
+          <input
+            className={styles.input}
+            value={term.packageName}
+            onChange={(e) => set('packageName', e.target.value)}
+            placeholder="log4j-core"
+          />
+        </Field>
+        <Field label="Version expression" hint="<2.17.0  or  >=1.0.0,<2.0.0">
+          <input
+            className={styles.input}
+            value={term.versionExpr}
+            onChange={(e) => set('versionExpr', e.target.value)}
+            placeholder="<1.0.0"
+          />
+        </Field>
+        <Field label="Exclude packages" hint="Comma or space separated, case-insensitive.">
+          <input
+            className={styles.input}
+            value={term.excludePackages}
+            onChange={(e) => set('excludePackages', e.target.value)}
+            placeholder="linux-libc-dev"
+          />
+        </Field>
+        <Field
+          label="Clusters"
+          hint="Click to toggle. At least one cluster must be selected."
+          required
+          wide
+        >
+          <ClusterMultiSelect
+            value={term.clusters}
+            options={clusterOptions}
+            onChange={(next) => set('clusters', next)}
+          />
+        </Field>
+        <Field label="Namespace (optional)">
+          <input
+            className={styles.input}
+            value={term.namespace}
+            onChange={(e) => set('namespace', e.target.value)}
+            placeholder="default"
+          />
+        </Field>
+        <Field label="Exclude namespaces" hint="Comma or space separated.">
+          <input
+            className={styles.input}
+            value={term.excludeNamespaces}
+            onChange={(e) => set('excludeNamespaces', e.target.value)}
+            placeholder="kube-system, monitoring"
+          />
+        </Field>
+      </div>
+    </div>
+  )
 }
 
 function PreviewSection({ form }: { form: FormState }) {
@@ -551,9 +856,10 @@ function PreviewSection({ form }: { form: FormState }) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const ready = hasNarrowingMatcher(form)
-  const matchers = toMatchers(form)
-  const matchersKey = JSON.stringify(matchers)
+  const ready = form.terms.every((t) => hasNarrowingMatcher(t) && scoreError(t) === null)
+  const isVuln = form.terms.some((t) => t.trigger === 'vulnerability')
+  const body = toMatcherFields(form)
+  const matchersKey = JSON.stringify(body)
 
   useEffect(() => {
     if (!ready) {
@@ -567,7 +873,7 @@ function PreviewSection({ form }: { form: FormState }) {
       setLoading(true)
       setError(null)
       try {
-        const r = await previewAlert(matchers)
+        const r = await previewAlert(body)
         if (!cancelled) setResult(r)
       } catch (e) {
         if (!cancelled) {
@@ -602,7 +908,8 @@ function PreviewSection({ form }: { form: FormState }) {
 
       {!ready && (
         <div className={styles.previewEmpty}>
-          Enter a package name or version expression to see which workloads would fire.
+          Give every term a package name, version expression, or vulnerability condition to see
+          which workloads would fire.
         </div>
       )}
 
@@ -610,7 +917,7 @@ function PreviewSection({ form }: { form: FormState }) {
 
       {ready && !error && result && result.items.length === 0 && (
         <div className={styles.previewEmpty}>
-          No current SBOM reports match these matchers. The rule will start firing once a matching
+          No current reports match these matchers. The rule will start firing once a matching
           report is received.
         </div>
       )}
@@ -624,21 +931,42 @@ function PreviewSection({ form }: { form: FormState }) {
                 <th>Cluster</th>
                 <th>Namespace</th>
                 <th>Workload</th>
+                {isVuln && <th>Vulnerability</th>}
+                {isVuln && <th>Severity</th>}
                 <th>Package</th>
                 <th>Version</th>
+                {isVuln && <th>Fixed in</th>}
               </tr>
             </thead>
             <tbody>
               {result.items.map((m, i) => (
-                <tr key={`${m.cluster}|${m.namespace}|${m.name}|${m.package}|${m.version}|${i}`}>
+                <tr
+                  key={`${m.cluster}|${m.namespace}|${m.name}|${m.vulnerability_id ?? ''}|${m.package}|${m.version}|${i}`}
+                >
                   <td>
                     <span className={styles.firingBadge}>FIRING</span>
                   </td>
                   <td>{m.cluster}</td>
                   <td>{m.namespace}</td>
                   <td>{m.name}</td>
+                  {isVuln && <td>{m.vulnerability_id ?? '—'}</td>}
+                  {isVuln && (
+                    <td>
+                      {m.vulnerability_id ? (
+                        <span
+                          className={`${styles.severityPill} ${styles[`severity${m.severity ?? ''}`] ?? ''}`}
+                        >
+                          {m.severity || 'UNKNOWN'}
+                          {m.score != null ? ` ${m.score.toFixed(1)}` : ''}
+                        </span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  )}
                   <td>{m.package}</td>
                   <td>{m.version}</td>
+                  {isVuln && <td>{m.vulnerability_id ? m.fixed_version || 'no fix' : '—'}</td>}
                 </tr>
               ))}
             </tbody>

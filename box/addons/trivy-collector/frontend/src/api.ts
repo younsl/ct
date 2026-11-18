@@ -202,7 +202,7 @@ export function getHydration(): Promise<HydrationStatus> {
 
 // ── Alerts ──
 
-import type { AlertMatchers, AlertPreviewResult, AlertRule, AlertRuleInput } from './types'
+import type { AlertMatcherFields, AlertPreviewResult, AlertRule, AlertRuleInput } from './types'
 
 export interface AlertListResponse {
   items: AlertRule[]
@@ -258,11 +258,11 @@ export async function updateAlert(name: string, rule: AlertRuleInput): Promise<A
   return res.json()
 }
 
-export async function previewAlert(matchers: AlertMatchers): Promise<AlertPreviewResult> {
+export async function previewAlert(body: AlertMatcherFields): Promise<AlertPreviewResult> {
   const res = await fetch('/api/v1/alert-drafts/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ matchers }),
+    body: JSON.stringify(body),
   })
   if (res.status === 401) {
     const returnTo = encodeURIComponent(window.location.pathname)

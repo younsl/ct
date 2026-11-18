@@ -2,7 +2,7 @@
 //!
 //! Readiness is a property of the rule, not of any report: whether the
 //! evaluator will act on a rule depends only on the rule being enabled and its
-//! version expression parsing. It therefore has no business on the ingest path.
+//! matchers compiling. It therefore has no business on the ingest path.
 //!
 //! It was there at first, and the consequence was that readiness inherited the
 //! ingest path's cadence. Evaluation is suppressed until hydration completes,
@@ -25,7 +25,7 @@ use kube::runtime::watcher::{Config as WatcherConfig, Event, watcher};
 use tracing::{debug, error, info, warn};
 
 use super::crd::{self};
-use super::expr::VersionExpr;
+use super::matchers::CompiledRule;
 use super::store::AlertStore;
 use super::types::AlertRule;
 
@@ -52,23 +52,16 @@ pub fn readiness_for(rule: &AlertRule) -> Readiness {
             message: String::new(),
         };
     }
-    match rule.matchers.version_expr.as_deref() {
-        Some(expr) => match VersionExpr::parse(expr) {
-            Ok(_) => Readiness {
-                ready: true,
-                reason: "Validated",
-                message: String::new(),
-            },
-            Err(message) => Readiness {
-                ready: false,
-                reason: "InvalidVersionExpr",
-                message,
-            },
-        },
-        None => Readiness {
+    match CompiledRule::for_rule(rule) {
+        Ok(_) => Readiness {
             ready: true,
             reason: "Validated",
             message: String::new(),
+        },
+        Err(e) => Readiness {
+            ready: false,
+            reason: e.reason,
+            message: e.to_string(),
         },
     }
 }
@@ -181,12 +174,14 @@ mod tests {
             name: "axios-rule".to_string(),
             description: String::new(),
             enabled: true,
-            matchers: Matchers {
+            matchers: Some(Matchers {
                 package_name: Some("axios".to_string()),
                 version_expr: version_expr.map(str::to_string),
                 clusters: vec![],
                 namespace: None,
-            },
+                ..Default::default()
+            }),
+            matcher_terms: vec![],
             labels: BTreeMap::default(),
             annotations: BTreeMap::default(),
             receivers: vec![Receiver {
@@ -246,6 +241,23 @@ mod tests {
         assert!(
             !readiness.message.is_empty(),
             "the parse error is the useful half"
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_score_is_not_ready_and_names_the_field() {
+        let mut r = rule(None);
+        r.matchers.as_mut().unwrap().vulnerability = Some(crate::alerts::VulnerabilityMatchers {
+            min_score: Some(11.0),
+            ..Default::default()
+        });
+        let readiness = readiness_for(&r);
+        assert!(!readiness.ready);
+        assert_eq!(readiness.reason, "InvalidMatchers");
+        assert!(
+            readiness
+                .message
+                .starts_with("matchers.vulnerability.min_score:")
         );
     }
 
@@ -327,7 +339,7 @@ mod tests {
         let bad = readiness_for(&broken);
         let mut r = with_recorded(broken, &bad, Some(1));
 
-        r.matchers.version_expr = Some("<2.17.0".to_string());
+        r.matchers.as_mut().unwrap().version_expr = Some("<2.17.0".to_string());
         let good = readiness_for(&r);
         assert!(good.ready);
         assert!(

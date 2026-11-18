@@ -36,7 +36,7 @@ trivy-collector bridges the gap between Platform Engineers and Security Engineer
 - **Stateless UI tier**: the server holds no database and scales past one replica
 - **VulnerabilityReports + SbomReports** collection from any registered cluster
 - **Keycloak OIDC authentication**: `none` or `keycloak` auth modes, with self-issued API tokens for programmatic access. See [Authentication](authentication.md)
-- **Alert rules as custom resources**: SBOM component detection rules are `AlertRule` objects in the `trivy-collector.security.io` API group, authored in the UI or applied from Git, delivered to Slack. See [Alerts](alerts.md)
+- **Alert rules as custom resources**: SBOM component and vulnerability detection rules (CVE ID, severity, CVSS score) are `AlertRule` objects in the `trivy-collector.security.io` API group, authored in the UI or applied from Git, delivered to Slack. See [Alerts](alerts.md)
 - **Embedded MCP server**: opt-in `/mcp` endpoint (Streamable HTTP) so LLM agents such as [kagent](https://kagent.dev/) can query reports with the same auth and RBAC as the API. See [MCP](mcp.md)
 - **Structured logging**: JSON/pretty format with configurable levels
 - **OpenAPI documentation**: auto-generated spec at `/api-docs/openapi.json`, rendered by an embedded [Scalar](https://scalar.com/) reference at `/api-docs`. The bundle ships inside the image, so the page needs no CDN and no egress

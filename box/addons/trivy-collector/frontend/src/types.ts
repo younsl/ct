@@ -176,11 +176,30 @@ export interface AuthPermissions {
   can_view_clusters: boolean
 }
 
+export type AlertSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
+
+export interface AlertVulnerabilityMatchers {
+  ids?: string[]
+  exclude_ids?: string[]
+  severities?: AlertSeverity[]
+  min_score?: number | null
+  fix_available?: boolean | null
+}
+
 export interface AlertMatchers {
   package_name?: string | null
   version_expr?: string | null
   clusters: string[]
   namespace?: string | null
+  exclude_namespaces?: string[]
+  exclude_packages?: string[]
+  vulnerability?: AlertVulnerabilityMatchers | null
+}
+
+/** Exactly one of the two is set: a single term, or terms ORed together. */
+export interface AlertMatcherFields {
+  matchers?: AlertMatchers | null
+  matcher_terms?: AlertMatchers[]
 }
 
 export interface AlertSlackReceiver {
@@ -194,11 +213,10 @@ export interface AlertReceiver {
   slack?: AlertSlackReceiver | null
 }
 
-export interface AlertRule {
+export interface AlertRule extends AlertMatcherFields {
   name: string
   description: string
   enabled: boolean
-  matchers: AlertMatchers
   labels: Record<string, string>
   annotations: Record<string, string>
   receivers: AlertReceiver[]
@@ -215,6 +233,10 @@ export interface AlertPreviewMatch {
   name: string
   package: string
   version: string
+  vulnerability_id?: string
+  severity?: string
+  score?: number
+  fixed_version?: string
 }
 
 export interface AlertPreviewResult {
@@ -238,11 +260,10 @@ export interface AlertTestResponse {
   results: AlertTestDeliveryResult[]
 }
 
-export interface AlertRuleInput {
+export interface AlertRuleInput extends AlertMatcherFields {
   name: string
   description?: string
   enabled?: boolean
-  matchers: AlertMatchers
   labels?: Record<string, string>
   annotations?: Record<string, string>
   receivers: AlertReceiver[]

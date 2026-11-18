@@ -227,6 +227,9 @@ mod tests {
         };
         assert_eq!(renamed.name, "addressed-by-this-key");
         assert_eq!(renamed.created_by, "alice");
-        assert_eq!(renamed.matchers.package_name.as_deref(), Some("axios"));
+        assert_eq!(
+            renamed.matchers.as_ref().unwrap().package_name.as_deref(),
+            Some("axios")
+        );
     }
 }
