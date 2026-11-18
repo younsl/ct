@@ -127,6 +127,13 @@ config:
     # exceeds this duration, it is aborted and marked as failed (up=0).
     instanceTimeoutSeconds: 30
 
+# -- (list) Extra environment variables for the container, e.g. proxy settings or `AWS_STS_REGIONAL_ENDPOINTS`
+extraEnv: []
+  # - name: HTTPS_PROXY
+  #   value: http://proxy.example.com:3128
+  # - name: NO_PROXY
+  #   value: 169.254.169.254,10.0.0.0/16
+
 # -- (list) Container resize policy for in-place resource updates (requires InPlacePodVerticalScaling feature gate)
 # @default -- See `values.yaml`
 resizePolicy:

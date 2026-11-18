@@ -125,6 +125,12 @@
     "config": {
       "$ref": "#/definitions/config"
     },
+    "extraEnv": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object"
+      }
+    },
     "resizePolicy": {
       "type": "array"
     },

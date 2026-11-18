@@ -112,6 +112,7 @@ The following table lists the configurable parameters and their default values.
 | config.collection.topHostLimit | int | `20` | Top host limit per instance |
 | config.collection.maxConcurrentInstances | int | `10` | Maximum number of instances collected in parallel. Controls concurrency via semaphore. |
 | config.collection.instanceTimeoutSeconds | int | `30` | Per-instance collection timeout in seconds. If a single instance's PI API metrics collection (including retries) exceeds this duration, it is aborted and marked as failed (up=0). |
+| extraEnv | list | `[]` | Extra environment variables for the container, e.g. proxy settings or `AWS_STS_REGIONAL_ENDPOINTS` |
 | resizePolicy | list | See `values.yaml` | Container resize policy for in-place resource updates (requires InPlacePodVerticalScaling feature gate) |
 | resources.requests.cpu | string | `"30m"` | CPU request |
 | resources.requests.memory | string | `"64Mi"` | Memory request |
