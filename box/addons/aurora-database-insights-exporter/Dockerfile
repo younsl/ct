@@ -6,7 +6,7 @@ FROM scratch AS runtime
 
 LABEL org.opencontainers.image.title="aurora-database-insights-exporter" \
       org.opencontainers.image.description="Prometheus exporter for AWS Aurora MySQL Database Insights (Performance Insights) metrics" \
-      org.opencontainers.image.version="0.1.2" \
+      org.opencontainers.image.version="0.1.3" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="scratch" \
       org.opencontainers.image.deprecated="false"

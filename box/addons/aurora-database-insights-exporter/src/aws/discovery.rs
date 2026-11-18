@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use aws_sdk_rds::Client as RdsClient;
+use aws_sdk_rds::error::DisplayErrorContext;
 use regex::Regex;
 use tokio::sync::watch;
 
@@ -28,11 +29,22 @@ pub struct RdsInstanceInfo {
 /// Real AWS RDS discoverer using the SDK.
 pub struct AwsRdsDiscoverer {
     client: RdsClient,
+    page_size: Option<i32>,
 }
 
 impl AwsRdsDiscoverer {
     pub const fn new(client: RdsClient) -> Self {
-        Self { client }
+        Self {
+            client,
+            page_size: None,
+        }
+    }
+
+    /// Sets `MaxRecords` per `DescribeDBInstances` page (20 to 100). RDS defaults to 100.
+    #[must_use]
+    pub const fn with_page_size(mut self, max_records: i32) -> Self {
+        self.page_size = Some(max_records);
+        self
     }
 }
 
@@ -42,12 +54,18 @@ impl RdsDiscoverer for AwsRdsDiscoverer {
         let mut marker = None;
 
         loop {
-            let mut req = self.client.describe_db_instances();
+            let mut req = self
+                .client
+                .describe_db_instances()
+                .set_max_records(self.page_size);
             if let Some(ref m) = marker {
                 req = req.marker(m);
             }
 
-            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| DisplayErrorContext(&e).to_string())?;
 
             for db in resp.db_instances() {
                 let engine = db.engine.as_deref().unwrap_or_default();
@@ -198,6 +216,7 @@ pub struct DiscoveryCycleResult {
 /// Shared discovery output. Publishing through a watch channel makes "the list changed" and
 /// "the list is non-empty" a single observable state, so a waiting collector cannot miss a
 /// wakeup the way a separate notification would.
+#[allow(clippy::too_long_first_doc_paragraph)]
 pub type InstanceChannel = watch::Sender<Arc<Vec<AuroraInstance>>>;
 
 /// Run one discovery cycle: fetch instances from RDS and publish the new list.

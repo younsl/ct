@@ -1,23 +1,17 @@
-mod aws;
-mod config;
-mod error;
-mod k8s;
-mod observability;
-mod types;
-
 use std::sync::Arc;
 
 use clap::Parser;
 use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
 
-use crate::aws::collector::AwsPiCollector;
-use crate::aws::discovery::{AwsRdsDiscoverer, InstanceChannel};
-use crate::config::{Args, Config};
-use crate::k8s::leader::{LeaderChannel, LeaderElector};
-use crate::observability::metrics::Metrics;
-use crate::observability::server::{AppState, create_router};
-use crate::types::AuroraInstance;
+use adie::aws::collector::AwsPiCollector;
+use adie::aws::discovery::{AwsRdsDiscoverer, InstanceChannel};
+use adie::config::{Args, Config};
+use adie::k8s::leader::{LeaderChannel, LeaderElector};
+use adie::observability::metrics::Metrics;
+use adie::observability::server::{AppState, create_router};
+use adie::types::AuroraInstance;
+use adie::{aws, config, types};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const COMMIT: &str = env!("BUILD_COMMIT");

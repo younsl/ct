@@ -1,4 +1,4 @@
-.PHONY: help build release run test fmt lint check clean docker-build docker-push build-all coverage
+.PHONY: help build release run test test-emulator fmt lint check clean docker-build docker-push build-all coverage
 
 BINARY_NAME := adie
 IMAGE_NAME := aurora-database-insights-exporter
@@ -20,6 +20,9 @@ run: build ## Build and run with default config
 
 test: ## Run tests
 	cargo test --verbose
+
+test-emulator: ## Run the RDS and Performance Insights tests against a local AWS Emulator container
+	./scripts/test-emulator.sh
 
 fmt: ## Format code
 	cargo fmt

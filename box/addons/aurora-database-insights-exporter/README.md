@@ -29,15 +29,17 @@ Focused on **DB Load analysis**: which wait events cause bottlenecks, which SQL 
 - [Metrics](docs/metrics.md): Metric list, label structure, cardinality estimate
 - [Helm](docs/helm.md): Chart installation and OCI registry usage
 - [Comparison](docs/comparison.md): Differences from mysqld_exporter
+- [Development](docs/development.md): Build targets and AWS Emulator tests
 
 ## Development
 
 ```bash
-make build     # Debug build
-make test      # Run tests
-make lint      # Clippy
-make coverage  # llvm-cov report
-make release   # Release build
+make build          # Debug build
+make test           # Run tests
+make test-emulator  # RDS and Performance Insights tests against a local AWS Emulator
+make lint           # Clippy
+make coverage       # llvm-cov report
+make release        # Release build
 ```
 
 ## Related

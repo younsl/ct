@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1248 540">
+  <style>
+    .t{font-family:Geist,Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+    .m{font-family:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .h{fill:#ededed;font-size:20px;font-weight:600;letter-spacing:-0.4px}
+    .s{fill:#a1a1a1;font-size:13px}
+    .n{fill:#ededed;font-size:13px;font-weight:500}
+    .d{fill:#8f8f8f;font-size:11px}
+    .l{fill:#666;font-size:11px}
+    .card{fill:#0a0a0a;stroke:#2e2e2e}
+    .hi{fill:#0a0a0a;stroke:#3291ff}
+    .edge{stroke:#525252;stroke-width:1.25;fill:none}
+    .sep{stroke:#1f1f1f;stroke-width:1}
+    .bound{fill:none;stroke:#2e2e2e;stroke-dasharray:4 4}
+  </style>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.9" fill="#161616"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8f8f8f"/>
+    </marker>
+  </defs>
+
+  <rect width="1248" height="540" fill="#000"/>
+  <rect width="1248" height="540" fill="url(#grid)"/>
+
+  <text x="40" y="52" class="t h">The RDS and Performance Insights client code runs against a local emulator, not an AWS account</text>
+  <text x="40" y="76" class="t s">What make test-emulator starts and tests on one machine</text>
+
+  <rect x="1140" y="34" width="68" height="24" rx="12" class="card"/>
+  <text x="1174" y="50" text-anchor="middle" class="m l">Testing</text>
+
+  <rect x="40" y="108" width="856" height="364" rx="10" class="bound"/>
+  <text x="56" y="130" class="t l">Developer machine</text>
+
+  <rect x="944" y="108" width="264" height="364" rx="10" class="bound"/>
+  <text x="960" y="130" class="t l">Podman or Docker container</text>
+
+  <rect x="64" y="262" width="212" height="92" rx="6" class="card"/>
+  <text x="170" y="296" text-anchor="middle" class="m n">test-emulator.sh</text>
+  <text x="170" y="316" text-anchor="middle" class="t d">make test-emulator</text>
+  <text x="170" y="332" text-anchor="middle" class="t d">waits for /__admin/health</text>
+
+  <rect x="356" y="190" width="228" height="76" rx="6" class="card"/>
+  <text x="470" y="222" text-anchor="middle" class="m n">tests/aws_emulator.rs</text>
+  <text x="470" y="242" text-anchor="middle" class="t d">7 tests, cargo test --ignored</text>
+
+  <rect x="640" y="370" width="232" height="76" rx="6" class="hi"/>
+  <text x="756" y="396" text-anchor="middle" class="m n">adie::aws</text>
+  <text x="756" y="414" text-anchor="middle" class="t d">AwsRdsDiscoverer, AwsPiCollector</text>
+  <text x="756" y="430" text-anchor="middle" class="t d">discovery and collection cycles</text>
+
+  <rect x="968" y="190" width="216" height="256" rx="6" class="card"/>
+  <text x="1076" y="222" text-anchor="middle" class="t n">RDS fixtures</text>
+  <text x="1076" y="242" text-anchor="middle" class="t d">Aurora clusters, instances, tags</text>
+  <path d="M984 266 H1168" class="sep"/>
+  <text x="1076" y="306" text-anchor="middle" class="t n">AWS Emulator</text>
+  <text x="1076" y="326" text-anchor="middle" class="m d">https://127.0.0.1:9298</text>
+  <text x="1076" y="342" text-anchor="middle" class="t d">telemetry off</text>
+  <path d="M984 370 H1168" class="sep"/>
+  <text x="1076" y="402" text-anchor="middle" class="t n">RDS, Performance Insights</text>
+  <text x="1076" y="422" text-anchor="middle" class="t d">instances, dimension keys, metrics</text>
+
+  <g class="edge" marker-end="url(#arrow)">
+    <path d="M170 262 V160 H1076 V184"/>
+    <path d="M276 308 H316 V228 H350"/>
+    <path d="M584 228 H962"/>
+    <path d="M470 266 V408 H634"/>
+    <path d="M872 408 H962"/>
+  </g>
+
+  <g class="t l">
+    <text x="623" y="152" text-anchor="middle">1 build image and run, 3 remove on exit</text>
+    <text x="308" y="250" text-anchor="end">2 test</text>
+    <text x="764" y="220" text-anchor="middle">create one Aurora cluster per test</text>
+    <text x="552" y="400" text-anchor="middle">calls</text>
+    <text x="920" y="400" text-anchor="middle">HTTPS</text>
+  </g>
+
+  <rect x="40" y="496" width="24" height="14" rx="3" class="hi"/>
+  <text x="74" y="507" class="t l">Client code under test. AWS_ENDPOINT_URL and SSL_CERT_FILE point the SDK at the emulator.</text>
+</svg>

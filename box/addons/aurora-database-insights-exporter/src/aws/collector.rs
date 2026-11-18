@@ -3,6 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use aws_sdk_pi::Client as PiClient;
+use aws_sdk_pi::error::DisplayErrorContext;
 use aws_sdk_pi::types::{DimensionGroup, MetricQuery};
 use chrono::Utc;
 use tokio::sync::RwLock;
@@ -107,7 +108,7 @@ impl PiCollector for AwsPiCollector {
             .period_in_seconds(period)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| DisplayErrorContext(&e).to_string())?;
 
         let mut results = Vec::new();
         for metric in resp.metric_list() {
