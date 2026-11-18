@@ -6,6 +6,19 @@ The app and the chart version independently, and each releases when its own vers
 
 Migration steps live in [docs/upgrading.md](docs/upgrading.md), not here. This file says what changed. That one says what you have to do about it.
 
+## app 1.8.2 / chart 0.15.1
+
+### Security
+
+Only the crates with an advisory move, so the lockfile stays close to 1.8.1.
+
+- rustls 0.23.46 (RUSTSEC-2026-0285, 0346, 0348, 0349), rustls-webpki 0.103.17 (RUSTSEC-2026-0382), webpki-root-certs 1.0.12 (RUSTSEC-2026-0383).
+- sqlx 0.9.1 with libsqlite3-sys 0.39.1, which bundles SQLite 3.54.1 (RUSTSEC-2026-0459).
+- rmcp 3.11.0 for the MCP server (RUSTSEC-2026-0457, 0461, 0462).
+- quinn-proto 0.11.19 (RUSTSEC-2026-0338, 0340, 0343, 0523, 0524), quinn-udp 0.5.16 (RUSTSEC-2026-0538), ctutils 0.4.8 (RUSTSEC-2026-0385).
+- tokio 1.54.1, rustix 1.1.6, and faster-hex 0.10.1 for their unsound warnings (RUSTSEC-2026-0386, 0486, 0306).
+- Frontend dev dependencies updated by `npm audit fix`: vite 8.3.8, source-map-js 1.2.2, zod 4.6.7, and the Scalar API reference bundle 1.78.0. The production dependency audit was already clean. picomatch GHSA-fc5q-39xc-vjpf remains in dev tooling (vite, unplugin) until npm has a release past 4.0.7.
+
 ## app 1.8.1 / chart 0.13.1
 
 ### Security
