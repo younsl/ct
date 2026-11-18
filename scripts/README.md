@@ -64,7 +64,7 @@ Fails when an addon dependency lockfile holds a known vulnerability. It runs `ca
 
 For Rust, a vulnerability always fails, and so does an unsound advisory that a patched release fixes. Unmaintained and yanked notices do not fail, because no update resolves them.
 
-It runs in three places: the `audit-lockfiles` pre-commit hook when a manifest or lockfile changes, the CI Audit workflow on every such push and once a day (new advisories land without any change here), and the test job of the Rust container release workflow.
+It runs as the `audit-lockfiles` pre-commit hook when a manifest or lockfile changes. No workflow runs it, so an advisory published against an untouched lockfile shows up only on a manual run.
 
 An advisory with no patched release is ignored per component, each entry with a one-line reason.
 

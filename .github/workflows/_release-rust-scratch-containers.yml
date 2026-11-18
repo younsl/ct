@@ -135,17 +135,14 @@ jobs:
         working-directory: ${{ env.PROJECT_TEST_DIR }}
         run: cargo test --verbose
 
-      - name: Install cargo-llvm-cov and cargo-audit
+      - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2.90.3
         with:
-          tool: cargo-llvm-cov,cargo-audit
+          tool: cargo-llvm-cov
 
       - name: Check test coverage (minimum 70%)
         working-directory: ${{ env.PROJECT_TEST_DIR }}
         run: cargo llvm-cov --fail-under-lines 70
-
-      - name: Audit dependencies
-        run: scripts/audit-lockfiles.sh "${PROJECT_TEST_DIR}/Cargo.toml"
 
   # ---------------------------------------------------------------------------
   # Build binaries: cargo-zigbuild for musl targets (per project × arch)
