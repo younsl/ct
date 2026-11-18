@@ -356,6 +356,7 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
         gitlab_token: cfg.coverage.gitlab_token.clone(),
         forklift_host: cfg.external_url.clone(),
     });
+    coverage_scanner.set_shared(store.is_postgres());
     if let Err(e) = coverage_scanner.load().await {
         tracing::warn!(err = %e, "coverage: loading stored state failed");
     }
@@ -454,18 +455,31 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
     if cfg.ha.enabled && runs_jobs {
         elector = Some(cluster::Elector::new(cfg.ha.clone()).context("init leader election")?);
     }
+    // An api pod reads the Lease to report which worker leads, and never campaigns.
+    let lease_reader = if cfg.ha.enabled && !runs_jobs {
+        match cluster::Elector::new(cfg.ha.clone()) {
+            Ok(reader) => Some(reader),
+            Err(e) => {
+                tracing::warn!(target: LOG_TARGET, err = %e, "ha: reading the lease is unavailable");
+                None
+            }
+        }
+    } else {
+        elector.clone()
+    };
 
     api_handler.set_ha_status(ha::ha_status_fn(
         Arc::clone(&cfg),
-        elector.clone(),
+        lease_reader.clone(),
+        runs_jobs,
         Arc::clone(&leader_state),
         Utc::now(),
     ));
 
     // Manual failover for the management console: ask this instance to release
     // leadership so a standby takes over. Only wired in HA mode; single-instance
-    // has no peer to fail over to.
-    if let Some(elector) = &elector {
+    // has no peer to fail over to. An api pod never leads, so it refuses.
+    if let Some(elector) = &lease_reader {
         api_handler.set_ha_step_down(Arc::new({
             let elector = Arc::clone(elector);
             move || elector.step_down()
@@ -582,6 +596,10 @@ async fn run(cfg: Arc<config::Config>, cancel: CancellationToken) -> anyhow::Res
                 Arc::clone(&coverage_scanner),
                 shutdown.clone(),
             ));
+            tokio::spawn(sync_coverage_scan(
+                Arc::clone(&coverage_scanner),
+                shutdown.clone(),
+            ));
         }
     }
     if !runs_jobs {
@@ -638,6 +656,22 @@ async fn sync_coverage(scanner: Arc<coverage::Scanner>, cancel: CancellationToke
             _ = ticker.tick() => {
                 if let Err(err) = scanner.sync_from_store().await {
                     tracing::warn!(target: LOG_TARGET, err = %err, "coverage: sync from store failed");
+                }
+            }
+        }
+    }
+}
+
+/// Follows the scan the leader runs, so every pod reports its progress.
+async fn sync_coverage_scan(scanner: Arc<coverage::Scanner>, cancel: CancellationToken) {
+    let mut ticker = tokio::time::interval(forklift::leaderjob::POLL_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            _ = ticker.tick() => {
+                if let Err(err) = scanner.sync_scan_state().await {
+                    tracing::warn!(target: LOG_TARGET, err = %err, "coverage: sync scan state failed");
                 }
             }
         }

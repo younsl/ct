@@ -235,6 +235,8 @@ The scan is leader-gated: it writes the result, the history row and the
 exclusion state, and SQLite has one writer. In an HA deployment only the elected
 leader scans.
 
+On PostgreSQL every API pod serves the coverage page, but only the pod holding the Lease scans (the worker in active-active mode). **Scan now** on any pod records the request in the database, the leader starts it within a few seconds, and publishes its progress and outcome there, so every pod shows the same progress bar and the same scan error. A request nobody picks up within 5 minutes is dropped.
+
 A completed scan is persisted, so a restart shows the previous picture rather
 than an empty page, and a rolling deploy does not re-crawl GitLab once per pod.
 Only a forklift with no stored result at all scans on startup, 30 seconds after

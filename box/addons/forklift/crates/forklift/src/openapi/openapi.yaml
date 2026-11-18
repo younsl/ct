@@ -1659,8 +1659,8 @@ paths:
                 properties:
                   started: { type: boolean }
         "403": { description: Requires insights.write }
-        "409": { description: An analysis is already running, or this instance is not the leader }
-        "503": { description: Security insights are disabled }
+        "409": { description: An analysis is already running or requested }
+        "503": { description: Security insights are disabled, or this SQLite instance is not the leader }
   /api/v1/insights/settings:
     get:
       tags: [insights]
@@ -2113,7 +2113,9 @@ paths:
       summary: Start a coverage scan now (coverage.write)
       description: >
         Returns as soon as the scan is accepted; a full crawl takes minutes. Poll
-        GET /api/v1/coverage and read scan_progress to follow it.
+        GET /api/v1/coverage and read scan_progress to follow it. On PostgreSQL
+        any pod accepts it and the pod that runs the background jobs starts it
+        within seconds.
       security: [{ basicAuth: [] }, { bearerAuth: [] }]
       responses:
         "200":
@@ -2121,8 +2123,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CoverageScanStarted" }
-        "409": { description: A scan is already in progress }
-        "503": { description: Coverage scanning is not configured }
+        "409": { description: A scan is already in progress or requested }
+        "503": { description: Coverage scanning is not configured, or this SQLite instance is not the leader }
   /api/v1/coverage/notification/preview:
     get:
       tags: [coverage]

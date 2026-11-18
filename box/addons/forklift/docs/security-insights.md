@@ -16,7 +16,7 @@ Security Insights reads all of it on a schedule and returns one ranked list of i
 
 The leader analyzes when it takes leadership if the interval has passed since the last report, and then every interval. The interval is set on the Settings page (see [Settings](#settings)) and defaults to `FORKLIFT_INSIGHTS_INTERVAL` (`1h`) until somebody saves it. A run reads every versioned artifact row, the scan results, the OCI tags, the accounts, roles, tokens, pending approvals, the last 24 hours of refused requests and the last 7 days of policy blocks, then evaluates the rules in memory. The report is stored in the database, so every replica serves the same one.
 
-Administrators and security reviewers can start a run from the page (Analyze now) or with `POST /api/v1/insights/refresh`. The run is detached from the request, and the page polls until it finishes. A run already in progress, or a request that reaches a non-leader replica, answers 409.
+Administrators and security reviewers can start a run from the page (Analyze now) or with `POST /api/v1/insights/refresh`. The run is detached from the request, and the page polls until it finishes. A run already in progress or requested answers 409. On PostgreSQL any API pod accepts the request, and the pod that runs the background jobs starts the analysis within seconds. Every pod reports it as running until it ends.
 
 Each run keeps a trend row (score and severity counts) for 90 days. Only the newest run keeps its full report.
 

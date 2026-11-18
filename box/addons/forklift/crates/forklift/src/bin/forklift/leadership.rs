@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use crate::FINAL_SYNC_TIMEOUT;
 use crate::LOG_TARGET;
 use crate::coverage_schedule::run_coverage_schedule;
+use crate::hooks;
 
 /// Writes everything this process owns declaratively: the bootstrap admin, the
 /// chart-provided RBAC policy and the seeded default repositories. It is
@@ -221,6 +222,17 @@ impl Leadership {
         }
         if let Some(analyzer) = &self.insights {
             tokio::spawn(Arc::clone(analyzer).run(cancel.clone(), Arc::clone(&self.notifier)));
+            if self.serve_always {
+                tokio::spawn(hooks::serve_requests(
+                    cancel.clone(),
+                    Arc::clone(analyzer),
+                    |analyzer: Arc<insights::Analyzer>| async move { analyzer.take_request().await },
+                    |analyzer: Arc<insights::Analyzer>, triggered_by: String| async move {
+                        analyzer.run_once(&triggered_by).await
+                    },
+                    "security insights failed",
+                ));
+            }
         }
         if self.coverage.enabled() {
             tokio::spawn(run_coverage_schedule(
@@ -229,6 +241,17 @@ impl Leadership {
                 Arc::clone(&self.coverage),
                 Arc::clone(&self.notifier),
             ));
+            if self.serve_always {
+                tokio::spawn(hooks::serve_requests(
+                    cancel.clone(),
+                    Arc::clone(&self.coverage),
+                    |scanner: Arc<coverage::Scanner>| async move { scanner.take_scan_request().await },
+                    |scanner: Arc<coverage::Scanner>, triggered_by: String| async move {
+                        scanner.scan(&triggered_by).await
+                    },
+                    "coverage: scan failed",
+                ));
+            }
         }
     }
 

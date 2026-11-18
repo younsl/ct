@@ -41,6 +41,7 @@ mod blob;
 mod coverage;
 mod group_metadata_cache;
 mod insight;
+mod job;
 mod label;
 mod license;
 mod migrations;

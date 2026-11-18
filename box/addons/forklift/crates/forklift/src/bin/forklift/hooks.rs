@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use forklift::leaderjob::{POLL_INTERVAL, Trigger};
 use forklift::{coverage, meta, metrics, notify, repo};
 use tokio_util::sync::CancellationToken;
 
@@ -198,7 +199,7 @@ pub(crate) fn coverage_stats(
             percent: overview.summary.percent,
             last_scanned_at: overview.last_scanned_at,
             last_scan_seconds: overview.last_scan_duration_ms as f64 / 1000.0,
-            scanning: overview.scanning,
+            scanning: scanner.scanning_here(),
             last_scan_failed: !overview.last_scan_error.is_empty(),
             scans_succeeded: stats.succeeded,
             scans_failed: stats.failed,
@@ -210,8 +211,8 @@ pub(crate) fn coverage_stats(
 
 /// Builds an on-demand trigger for a leader-only job that outlives the request
 /// asking for it. It is bound to the process `shutdown` token instead, and
-/// reports whether the job was accepted: refused on a standby and while
-/// `busy` reports a run already in progress.
+/// reports what it did: [`Trigger::Standby`] on a pod that does not lead, and
+/// [`Trigger::Busy`] while `busy` reports a run already in progress.
 pub(crate) fn leader_trigger<T, B, R, Fut, O, E>(
     leader_state: &Arc<AtomicBool>,
     shutdown: &CancellationToken,
@@ -219,7 +220,7 @@ pub(crate) fn leader_trigger<T, B, R, Fut, O, E>(
     busy: B,
     run: R,
     failure: &'static str,
-) -> Arc<dyn Fn(&str) -> bool + Send + Sync>
+) -> Arc<dyn Fn(&str) -> Trigger + Send + Sync>
 where
     T: Send + Sync + 'static,
     B: Fn(&T) -> bool + Send + Sync + 'static,
@@ -232,8 +233,11 @@ where
     let shutdown = shutdown.clone();
     let target = Arc::clone(target);
     Arc::new(move |triggered_by: &str| {
-        if !leader_state.load(Ordering::SeqCst) || busy(&target) {
-            return false;
+        if !leader_state.load(Ordering::SeqCst) {
+            return Trigger::Standby;
+        }
+        if busy(&target) {
+            return Trigger::Busy;
         }
         let job = run(Arc::clone(&target), triggered_by.to_string());
         let shutdown = shutdown.clone();
@@ -248,6 +252,50 @@ where
                 }
             }
         });
-        true
+        Trigger::Started
     })
+}
+
+/// Runs, on the leader, the on-demand runs that pods which do not lead
+/// requested through the store, until the term's `cancel` fires. `claim`
+/// returns who asked, and the run is attributed to them.
+pub(crate) async fn serve_requests<T, C, CF, CE, R, RF, O, RE>(
+    cancel: CancellationToken,
+    target: Arc<T>,
+    claim: C,
+    run: R,
+    failure: &'static str,
+) where
+    T: Send + Sync,
+    C: Fn(Arc<T>) -> CF + Send + Sync,
+    CF: Future<Output = Result<Option<String>, CE>> + Send,
+    CE: std::fmt::Display,
+    R: Fn(Arc<T>, String) -> RF + Send + Sync,
+    RF: Future<Output = Result<O, RE>> + Send,
+    RE: std::fmt::Display,
+{
+    let mut ticker = tokio::time::interval(POLL_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            _ = ticker.tick() => {}
+        }
+        let triggered_by = match claim(Arc::clone(&target)).await {
+            Ok(Some(by)) => by,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::warn!(target: LOG_TARGET, err = %e, "{failure}: claiming a request failed");
+                continue;
+            }
+        };
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            res = run(Arc::clone(&target), triggered_by.clone()) => {
+                if let Err(e) = res {
+                    tracing::warn!(target: LOG_TARGET, triggered_by = %triggered_by, err = %e, "{failure}");
+                }
+            }
+        }
+    }
 }

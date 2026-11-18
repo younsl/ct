@@ -180,6 +180,11 @@ impl Scanner {
         // Restamps every project in memory against the new state, this one
         // included.
         self.refresh_muted().await?;
+        // The leader may have stored a newer scan since this pod last synced,
+        // and persist below writes the whole result back.
+        if self.shared() && !self.scanning_here() {
+            self.apply_stored_result().await?;
+        }
 
         {
             let mut state = self.state.write();

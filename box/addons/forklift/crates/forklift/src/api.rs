@@ -15,6 +15,7 @@ use crate::audit;
 use crate::auth as auth_service;
 use crate::coverage as coverage_scanner;
 use crate::insights as insight_engine;
+pub use crate::leaderjob::Trigger;
 use crate::meta::{self, Store};
 use crate::notify;
 use crate::repo;
@@ -47,13 +48,12 @@ pub type HAStatusFn = Arc<dyn Fn() -> HAStatus + Send + Sync>;
 /// Asks this instance to release leadership, reporting whether it was the
 /// leader (and so stepped down).
 pub type HAStepDownFn = Arc<dyn Fn() -> bool + Send + Sync>;
-/// Starts a manual coverage scan detached from the request, reporting whether it
-/// was accepted (false when one is already running).
-pub type CoverageScanFn = Arc<dyn Fn(&str) -> bool + Send + Sync>;
-/// Starts a security insight analysis detached from the request, reporting
-/// whether it was accepted (false when one is running or this instance is not
-/// the leader).
-pub type InsightsRefreshFn = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+/// Starts a manual coverage scan detached from the request, reporting what it
+/// did with it.
+pub type CoverageScanFn = Arc<dyn Fn(&str) -> Trigger + Send + Sync>;
+/// Starts a security insight analysis detached from the request, reporting what
+/// it did with it.
+pub type InsightsRefreshFn = Arc<dyn Fn(&str) -> Trigger + Send + Sync>;
 /// Queries the object store's admin API for cluster capacity and health.
 pub type ClusterInfoFn = Arc<
     dyn Fn() -> std::pin::Pin<

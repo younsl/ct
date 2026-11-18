@@ -10,13 +10,17 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
+use crate::leaderjob::{self, JobState};
+
 pub mod adaptive;
+pub mod cluster;
 pub mod cron;
 pub mod evidence;
 pub mod gitlab;
@@ -103,6 +107,11 @@ pub trait Store: Send + Sync {
     async fn add_coverage_muted(&self, project_path: &str, by: &str, scopes: MuteScopes)
     -> Res<()>;
     async fn remove_coverage_muted(&self, project_path: &str) -> Res<()>;
+    async fn read_scan_job(&self) -> Res<JobState>;
+    async fn request_scan_job(&self, by: &str) -> Res<()>;
+    async fn take_scan_job_request(&self) -> Res<Option<JobState>>;
+    async fn write_scan_job_progress(&self, progress: &str) -> Res<()>;
+    async fn finish_scan_job(&self, error: &str) -> Res<()>;
 }
 
 /// The metadata store speaks the scanner's Store trait directly; the SQL lives
@@ -134,6 +143,29 @@ impl Store for crate::meta::Store {
     }
     async fn remove_coverage_muted(&self, project_path: &str) -> Res<()> {
         Ok(Self::remove_coverage_muted(self, project_path).await?)
+    }
+    async fn read_scan_job(&self) -> Res<JobState> {
+        Ok(self.read_leader_job(leaderjob::COVERAGE_SCAN).await?)
+    }
+    async fn request_scan_job(&self, by: &str) -> Res<()> {
+        Ok(self
+            .request_leader_job(leaderjob::COVERAGE_SCAN, by)
+            .await?)
+    }
+    async fn take_scan_job_request(&self) -> Res<Option<JobState>> {
+        Ok(self
+            .take_leader_job_request(leaderjob::COVERAGE_SCAN)
+            .await?)
+    }
+    async fn write_scan_job_progress(&self, progress: &str) -> Res<()> {
+        Ok(self
+            .write_leader_job_progress(leaderjob::COVERAGE_SCAN, progress)
+            .await?)
+    }
+    async fn finish_scan_job(&self, error: &str) -> Res<()> {
+        Ok(self
+            .finish_leader_job(leaderjob::COVERAGE_SCAN, error)
+            .await?)
     }
 }
 
@@ -207,6 +239,9 @@ pub(crate) struct ScannerState {
     pub(crate) last_scan_error: String,
     pub(crate) scanning: bool,
     pub(crate) progress: Option<Progress>,
+    /// The scan as the store last reported it, which is how a pod that does
+    /// not run scans sees the one the leader runs. Read only when `shared`.
+    pub(crate) remote: JobState,
     /// Scan outcomes since start, and the concurrency the last crawl settled on.
     /// Kept here rather than in a metrics module so this one stays free of a
     /// Prometheus dependency; the binary adapts them onto a collector.
@@ -228,6 +263,8 @@ pub struct Scanner {
     /// scan_mu serialises whole scans. The `scanning` flag reports the state to
     /// the console; this is what actually prevents two overlapping crawls.
     pub(crate) scan_mu: tokio::sync::Mutex<()>,
+    /// Set when several pods share the store, see [`crate::leaderjob`].
+    pub(crate) shared: AtomicBool,
 }
 
 impl Scanner {
@@ -251,12 +288,14 @@ impl Scanner {
                 last_scan_error: String::new(),
                 scanning: false,
                 progress: None,
+                remote: JobState::default(),
                 scans_succeeded: 0,
                 scans_failed: 0,
                 last_concurrency: 0,
                 peak_concurrency: 0,
             }),
             scan_mu: tokio::sync::Mutex::new(()),
+            shared: AtomicBool::new(false),
         })
     }
 
@@ -332,8 +371,15 @@ impl Scanner {
         !self.match_host().is_empty()
     }
 
-    /// Scanning reports whether a scan is in flight.
+    /// Scanning reports whether a scan is in flight or requested, on this pod
+    /// or, when the store is shared, on the leader.
     pub fn scanning(&self) -> bool {
+        let state = self.state.read();
+        state.scanning || (self.shared() && state.remote.active(Utc::now()))
+    }
+
+    /// Reports whether this process is running a scan.
+    pub fn scanning_here(&self) -> bool {
         self.state.read().scanning
     }
 
@@ -353,7 +399,7 @@ impl Scanner {
     /// others until they restart. Skipped while a scan runs here, since that
     /// scan is about to replace the result.
     pub async fn sync_from_store(&self) -> Res<()> {
-        if self.scanning() {
+        if self.scanning_here() {
             return Ok(());
         }
         self.refresh_settings().await?;

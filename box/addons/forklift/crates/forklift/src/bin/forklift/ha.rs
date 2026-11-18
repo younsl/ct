@@ -29,6 +29,7 @@ fn ha_mode(cfg: &config::Config) -> &'static str {
 pub(crate) fn ha_status_fn(
     cfg: Arc<config::Config>,
     elector: Option<Arc<cluster::Elector>>,
+    runs_jobs: bool,
     leader_state: Arc<AtomicBool>,
     started_at: DateTime<Utc>,
 ) -> api::HAStatusFn {
@@ -69,6 +70,10 @@ pub(crate) fn ha_status_fn(
             st.storage_endpoint.clone_from(&cfg.data_dir);
         }
         let Some(elector) = &elector else {
+            if !runs_jobs {
+                st.role = cluster::ROLE_STANDBY.to_string();
+                return st;
+            }
             // Single instance is always the leader and serves itself.
             st.is_leader = true;
             st.leader.clone_from(&cfg.ha.identity);
@@ -104,6 +109,39 @@ pub(crate) fn ha_status_fn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn api_pod_never_reports_itself_as_leader() {
+        let mut cfg = config::Config::default();
+        cfg.ha.enabled = true;
+        cfg.ha.identity = "forklift-api-0".into();
+        let status = ha_status_fn(
+            Arc::new(cfg),
+            None,
+            false,
+            Arc::new(AtomicBool::new(false)),
+            Utc::now(),
+        )();
+        assert!(!status.is_leader);
+        assert_eq!(status.role, cluster::ROLE_STANDBY);
+        assert!(
+            status.leader.is_empty(),
+            "the api pod is not the lease holder"
+        );
+    }
+
+    #[test]
+    fn single_instance_reports_itself_as_leader() {
+        let status = ha_status_fn(
+            Arc::new(config::Config::default()),
+            None,
+            true,
+            Arc::new(AtomicBool::new(false)),
+            Utc::now(),
+        )();
+        assert!(status.is_leader);
+        assert_eq!(status.role, cluster::ROLE_LEADER);
+    }
 
     #[test]
     fn ha_mode_names_each_topology() {

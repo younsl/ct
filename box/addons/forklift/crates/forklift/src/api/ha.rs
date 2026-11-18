@@ -87,9 +87,10 @@ pub(super) async fn get_status(State(h): State<Arc<Handler>>) -> Response {
 }
 
 /// Triggers a manual failover: the current leader releases its Lease so a
-/// standby takes over. Admin-only. Admin traffic is routed to the leader, so the
-/// request normally lands there; if it lands on a standby (or HA is off) there is
-/// no leadership to release and it reports 409.
+/// standby takes over. Admin-only. On SQLite admin traffic is routed to the
+/// leader, so the request normally lands there. A standby, an api pod (which
+/// never leads) or an instance without HA has no leadership to release and
+/// reports 409.
 pub(super) async fn step_down(State(h): State<Arc<Handler>>) -> Response {
     let step_down = h.injected.read().ha_step_down.clone();
     let Some(step_down) = step_down else {

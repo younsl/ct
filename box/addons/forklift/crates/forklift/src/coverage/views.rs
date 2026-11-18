@@ -183,8 +183,11 @@ impl Scanner {
 
     /// Overview assembles the dashboard payload.
     pub fn overview(&self) -> Overview {
+        let shared = self.shared();
+        let now = Utc::now();
         let (cfg, mut out) = {
             let state = self.state.read();
+            let remote = shared.then_some(&state.remote);
             let out = Overview {
                 summary: summarize(&state.projects, &state.excluded_projects),
                 projects: state.projects.clone(),
@@ -193,8 +196,12 @@ impl Scanner {
                 last_scan_duration_ms: state.last_duration_ms,
                 last_scan_triggered_by: state.last_triggered_by.clone(),
                 last_scan_error: state.last_scan_error.clone(),
-                scanning: state.scanning,
-                scan_progress: state.progress.clone(),
+                scanning: state.scanning || remote.is_some_and(|r| r.active(now)),
+                scan_progress: state.progress.clone().or_else(|| {
+                    remote
+                        .and_then(|r| r.running(now))
+                        .and_then(|p| serde_json::from_str(p).ok())
+                }),
                 gitlab_url: String::new(),
                 forklift_host: String::new(),
                 configured: false,
@@ -220,7 +227,7 @@ impl Scanner {
         out.auto_scan_enabled = cfg.auto_scan_enabled;
         out.alarm_configured = cfg.report_enabled && !cfg.receiver.is_empty();
         out.history_retention_days = HISTORY_RETENTION_DAYS;
-        out.next_run_at = self.next_run_at(Utc::now());
+        out.next_run_at = self.next_run_at(now);
         out
     }
 

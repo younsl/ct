@@ -14,7 +14,7 @@ use super::notifications::{
     AlarmHistoryQuery, NotificationSampleReportDTO, NotificationSampleResultDTO,
     SampleReceiverInfo, write_alarm_history,
 };
-use super::{Handler, map_error, principal_name, write_error, write_json};
+use super::{Handler, Trigger, map_error, principal_name, write_error, write_json};
 
 impl Handler {
     /// Returns the scanner, or the 503 that a deployment with no GitLab
@@ -389,6 +389,11 @@ pub(super) async fn update_settings(State(h): State<Arc<Handler>>, request: Requ
         return write_error(StatusCode::BAD_REQUEST, "invalid body");
     };
 
+    // Another pod may have saved since this one last synced, and the write below
+    // replaces the whole row, so the merge starts from what is stored.
+    if let Err(err) = scanner.refresh_settings().await {
+        return write_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string());
+    }
     let mut cfg = scanner.settings();
     if let Some(raw) = &req.forklift_host {
         let host = coverage::normalize_host(raw);
@@ -573,8 +578,28 @@ pub(super) async fn start_scan(State(h): State<Arc<Handler>>, request: Request) 
     let Some(start) = h.coverage_scan() else {
         return coverage_unconfigured();
     };
-    if !start(&principal_name(&parts)) {
-        return write_error(StatusCode::CONFLICT, "a scan is already in progress");
+    let triggered_by = principal_name(&parts);
+    match start(&triggered_by) {
+        Trigger::Started => {}
+        Trigger::Busy => {
+            return write_error(StatusCode::CONFLICT, "a scan is already in progress");
+        }
+        // Another pod runs the scans, so it is asked through the store.
+        Trigger::Standby if scanner.shared() => {
+            if let Err(e) = scanner.request_scan(&triggered_by).await {
+                tracing::error!(err = %e, "coverage: requesting a scan failed");
+                return write_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "requesting a scan failed",
+                );
+            }
+        }
+        Trigger::Standby => {
+            return write_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "this instance is not the leader",
+            );
+        }
     }
     h.audit(&parts, "", "coverage.scan", 200);
     write_json(StatusCode::OK, CoverageScanStartedDTO { started: true })

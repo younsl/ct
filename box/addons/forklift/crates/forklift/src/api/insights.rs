@@ -18,7 +18,7 @@ use super::notifications::{
     AlarmHistoryQuery, NotificationSampleReportDTO, NotificationSampleResultDTO,
     write_alarm_history,
 };
-use super::{Handler, map_error, principal_name, write_error, write_json};
+use super::{Handler, Trigger, map_error, principal_name, write_error, write_json};
 
 /// The trend window the view draws.
 const HISTORY: TimeDelta = TimeDelta::days(30);
@@ -175,7 +175,7 @@ pub(super) async fn get(State(h): State<Arc<Handler>>, request: Request) -> Resp
             report,
             history,
             scope: if everything { "all" } else { "repositories" },
-            running: analyzer.running(),
+            running: analyzer.running_anywhere().await,
             interval_seconds,
             can_refresh: refresh.is_some() && may_refresh(&h, &parts),
         },
@@ -190,17 +190,37 @@ pub(super) async fn refresh(State(h): State<Arc<Handler>>, request: Request) -> 
             "refreshing security insights requires admin or security permission",
         );
     }
-    let Some((_, Some(start))) = h.insights() else {
+    let Some((analyzer, Some(start))) = h.insights() else {
         return write_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "security insights are disabled",
         );
     };
-    if !start(&principal_name(&parts)) {
-        return write_error(
-            StatusCode::CONFLICT,
-            "an analysis is already running, or this instance is not the leader",
-        );
+    if analyzer.running_anywhere().await {
+        return write_error(StatusCode::CONFLICT, "an analysis is already running");
+    }
+    let triggered_by = principal_name(&parts);
+    match start(&triggered_by) {
+        Trigger::Started => {}
+        Trigger::Busy => {
+            return write_error(StatusCode::CONFLICT, "an analysis is already running");
+        }
+        // Another pod runs the analysis, so it is asked through the store.
+        Trigger::Standby if h.store.is_postgres() => {
+            if let Err(e) = analyzer.request_run(&triggered_by).await {
+                tracing::error!(err = %e, "insights: requesting an analysis failed");
+                return write_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "requesting an analysis failed",
+                );
+            }
+        }
+        Trigger::Standby => {
+            return write_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "this instance is not the leader",
+            );
+        }
     }
     h.audit(&parts, "", "insights.refresh", 200);
     write_json(StatusCode::OK, RefreshDTO { started: true })

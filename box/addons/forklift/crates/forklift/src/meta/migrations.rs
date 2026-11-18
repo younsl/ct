@@ -3,8 +3,13 @@
 
 /// PostgreSQL migrations, numbered independently of the SQLite ones. A schema
 /// change adds one file to each list.
-pub(crate) const PG_MIGRATIONS: &[(&str, &str)] =
-    &[("0001_init.sql", include_str!("migrations_pg/0001_init.sql"))];
+pub(crate) const PG_MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init.sql", include_str!("migrations_pg/0001_init.sql")),
+    (
+        "0002_leader_jobs.sql",
+        include_str!("migrations_pg/0002_leader_jobs.sql"),
+    ),
+];
 
 /// (file name, SQL body) pairs sorted by name; names look like `0001_init.sql`.
 pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
@@ -200,5 +205,9 @@ pub(crate) const MIGRATIONS: &[(&str, &str)] = &[
     (
         "0049_artifact_validators.sql",
         include_str!("migrations/0049_artifact_validators.sql"),
+    ),
+    (
+        "0050_leader_jobs.sql",
+        include_str!("migrations/0050_leader_jobs.sql"),
     ),
 ];

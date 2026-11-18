@@ -8,6 +8,7 @@ use std::time::Duration;
 use chrono::{DateTime, TimeDelta, Utc};
 use tokio_util::sync::CancellationToken;
 
+use crate::leaderjob::{self, HEARTBEAT_INTERVAL};
 use crate::meta::{self, InsightReportRow, Store};
 use crate::notify;
 
@@ -97,17 +98,89 @@ impl Analyzer {
         ))
     }
 
+    /// Reports whether this process is analyzing.
     pub fn running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
 
+    /// Reports whether an analysis is running or requested on any pod. Several
+    /// pods share the store only on PostgreSQL, see [`crate::leaderjob`].
+    pub async fn running_anywhere(&self) -> bool {
+        if self.running() {
+            return true;
+        }
+        if !self.store.is_postgres() {
+            return false;
+        }
+        match self.store.read_leader_job(leaderjob::INSIGHTS).await {
+            Ok(job) => job.active(Utc::now()),
+            Err(e) => {
+                tracing::warn!(err = %e, "insights: reading the shared run state failed");
+                false
+            }
+        }
+    }
+
+    /// Asks the leader for an analysis.
+    pub async fn request_run(&self, triggered_by: &str) -> Result<(), Error> {
+        Ok(self
+            .store
+            .request_leader_job(leaderjob::INSIGHTS, triggered_by)
+            .await?)
+    }
+
+    /// Claims a waiting request and returns who asked, or `None` when there is
+    /// none or it expired.
+    pub async fn take_request(&self) -> Result<Option<String>, Error> {
+        let job = self
+            .store
+            .take_leader_job_request(leaderjob::INSIGHTS)
+            .await?;
+        Ok(job.and_then(|job| job.pending(Utc::now()).then_some(job.requested_by)))
+    }
+
     /// Analyzes once and stores the report. Refuses with [`Error::Busy`] while
-    /// another run is in flight.
+    /// another run is in flight. On a shared store the run keeps a heartbeat so
+    /// every pod reports it.
     pub async fn run_once(&self, triggered_by: &str) -> Result<Report, Error> {
         if self.running.swap(true, Ordering::SeqCst) {
             return Err(Error::Busy);
         }
         let _guard = RunGuard(&self.running);
+        if !self.store.is_postgres() {
+            return self.analyze(triggered_by).await;
+        }
+        let res = tokio::select! {
+            res = self.analyze(triggered_by) => res,
+            () = self.heartbeat() => unreachable!("heartbeat never returns"),
+        };
+        if let Err(e) = self
+            .store
+            .finish_leader_job(
+                leaderjob::INSIGHTS,
+                &res.as_ref().err().map_or_default(ToString::to_string),
+            )
+            .await
+        {
+            tracing::warn!(err = %e, "insights: clearing the shared run state failed");
+        }
+        res
+    }
+
+    async fn heartbeat(&self) {
+        loop {
+            if let Err(e) = self
+                .store
+                .write_leader_job_progress(leaderjob::INSIGHTS, "{}")
+                .await
+            {
+                tracing::warn!(err = %e, "insights: publishing the shared run state failed");
+            }
+            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+        }
+    }
+
+    async fn analyze(&self, triggered_by: &str) -> Result<Report, Error> {
         let started = std::time::Instant::now();
         let now = Utc::now();
         let snapshot = collect(

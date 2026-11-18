@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use http::{Method, StatusCode};
 
+use forklift::api::Trigger;
 use forklift::insights::Analyzer;
 use forklift::testing::api::{USER_PASS, mk_read_user, new_test_server};
 
@@ -24,7 +25,7 @@ async fn insights_report_is_scoped_to_the_caller() {
         String::new(),
     );
     srv.handler
-        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| true));
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Started));
     let empty = srv.admin_do(Method::GET, "/insights", "").await.json();
     assert!(empty["report"].is_null(), "{empty}");
     assert_eq!(empty["can_refresh"], true, "{empty}");
@@ -91,9 +92,27 @@ async fn insights_report_is_scoped_to_the_caller() {
     assert_eq!(resp.status, StatusCode::OK, "{}", resp.text());
 
     srv.handler
-        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| false));
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Busy));
     let resp = srv.admin_do(Method::POST, "/insights/refresh", "").await;
     assert_eq!(resp.status, StatusCode::CONFLICT, "{}", resp.text());
+
+    srv.handler
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Standby));
+    let resp = srv.admin_do(Method::POST, "/insights/refresh", "").await;
+    if srv.store.is_postgres() {
+        assert_eq!(resp.status, StatusCode::OK, "{}", resp.text());
+        let resp = srv.admin_do(Method::GET, "/insights", "").await;
+        assert!(resp.text().contains(r#""running":true"#), "{}", resp.text());
+        let claimed = analyzer.take_request().await.expect("take");
+        assert!(claimed.is_some(), "the request reached the store");
+    } else {
+        assert_eq!(
+            resp.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{}",
+            resp.text()
+        );
+    }
 }
 
 #[tokio::test]
@@ -110,7 +129,7 @@ async fn insights_alarm_preview_and_send() {
         String::new(),
     );
     srv.handler
-        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| true));
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Started));
     let resp = srv
         .admin_do(Method::GET, "/insights/notification/preview", "")
         .await;
@@ -239,7 +258,7 @@ async fn acknowledging_a_check_takes_it_out_of_the_score() {
         String::new(),
     );
     srv.handler
-        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| true));
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Started));
     let body = r#"{"name":"open","format":"raw","type":"hosted","config":{"public":true}}"#;
     srv.admin_do(Method::POST, "/repositories", body).await;
     analyzer.run_once("test").await.expect("analyze");
@@ -325,7 +344,7 @@ async fn check_history_records_each_run() {
         String::new(),
     );
     srv.handler
-        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| true));
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Started));
     let body = r#"{"name":"open","format":"raw","type":"hosted","config":{"public":true}}"#;
     srv.admin_do(Method::POST, "/repositories", body).await;
     analyzer.run_once("test").await.expect("first run");
@@ -393,7 +412,7 @@ async fn check_affected_pages_through_flagged_items() {
         String::new(),
     );
     srv.handler
-        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| true));
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Started));
     let resp = srv.admin_do(Method::GET, uri, "").await;
     assert_eq!(resp.status, StatusCode::NOT_FOUND, "{}", resp.text());
 
@@ -448,7 +467,7 @@ async fn insight_settings_drive_the_scheduled_alarm() {
         String::new(),
     );
     srv.handler
-        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| true));
+        .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Started));
 
     let defaults = srv.admin_do(Method::GET, "/insights/settings", "").await;
     assert_eq!(defaults.status, StatusCode::OK, "{}", defaults.text());

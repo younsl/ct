@@ -127,9 +127,15 @@ impl Scanner {
             });
         }
 
-        let err = self
-            .run_scan(&cfg, &host, triggered_by, started, &cancel)
-            .await;
+        let run = self.run_scan(&cfg, &host, triggered_by, started, &cancel);
+        let err = if self.shared() {
+            tokio::select! {
+                res = run => res,
+                () = self.publish_progress() => unreachable!("publish_progress never returns"),
+            }
+        } else {
+            run.await
+        };
 
         {
             let mut state = self.state.write();
@@ -142,6 +148,10 @@ impl Scanner {
                 }
                 Ok(()) => state.scans_succeeded += 1,
             }
+        }
+        if self.shared() {
+            let error = err.as_ref().err().map_or_default(ToString::to_string);
+            self.finish_shared(&error).await;
         }
 
         if let Err(e) = &err {
@@ -664,6 +674,7 @@ pub(crate) mod tests {
         Settings, Snapshot, Store, types::STATE_APPLIED, types::STATE_ERROR,
         types::STATE_NOT_APPLIED, types::STATE_PARTIAL,
     };
+    use crate::leaderjob::JobState;
 
     pub(crate) const HOST: &str = "forklift.example.com";
 
@@ -690,6 +701,8 @@ pub(crate) mod tests {
         result: Option<ScanResult>,
         snapshots: Vec<Snapshot>,
         muted: HashMap<String, MuteScopes>,
+        job: JobState,
+        progress_writes: Vec<String>,
     }
 
     pub(crate) struct MemStore {
@@ -708,6 +721,10 @@ pub(crate) mod tests {
     impl MemStore {
         pub(crate) fn snapshot_count(&self) -> usize {
             self.inner.lock().snapshots.len()
+        }
+
+        pub(crate) fn progress_writes(&self) -> Vec<String> {
+            self.inner.lock().progress_writes.clone()
         }
     }
 
@@ -751,6 +768,44 @@ pub(crate) mod tests {
 
         async fn remove_coverage_muted(&self, path: &str) -> Res<()> {
             self.inner.lock().muted.remove(path);
+            Ok(())
+        }
+
+        async fn read_scan_job(&self) -> Res<JobState> {
+            Ok(self.inner.lock().job.clone())
+        }
+
+        async fn request_scan_job(&self, by: &str) -> Res<()> {
+            let mut inner = self.inner.lock();
+            inner.job.requested_by = by.to_string();
+            inner.job.requested_at = Some(chrono::Utc::now());
+            Ok(())
+        }
+
+        async fn take_scan_job_request(&self) -> Res<Option<JobState>> {
+            let mut inner = self.inner.lock();
+            if inner.job.requested_by.is_empty() {
+                return Ok(None);
+            }
+            let taken = inner.job.clone();
+            inner.job.requested_by.clear();
+            inner.job.requested_at = None;
+            Ok(Some(taken))
+        }
+
+        async fn write_scan_job_progress(&self, progress: &str) -> Res<()> {
+            let mut inner = self.inner.lock();
+            inner.job.progress = progress.to_string();
+            inner.job.heartbeat_at = Some(chrono::Utc::now());
+            inner.progress_writes.push(progress.to_string());
+            Ok(())
+        }
+
+        async fn finish_scan_job(&self, error: &str) -> Res<()> {
+            let mut inner = self.inner.lock();
+            inner.job.progress.clear();
+            inner.job.last_error = error.to_string();
+            inner.progress_writes.push(String::new());
             Ok(())
         }
     }
@@ -1132,6 +1187,84 @@ pub(crate) mod tests {
         let got = scanner.overview().projects[0].clone();
         assert_eq!(got.applied, STATE_APPLIED);
         assert_eq!(got.format, "maven", "want maven guessed from the filenames");
+    }
+
+    #[tokio::test]
+    async fn shared_scan_publishes_progress_and_clears_it() {
+        let srv = fake_gitlab(vec![fake_project(
+            1,
+            "team/app",
+            &["main"],
+            &[("main:.gitlab-ci.yml", "script: echo hi\n".to_string())],
+        )])
+        .await;
+        let store = new_mem_store(with_host(HOST));
+        let scanner = new_test_scanner(Arc::clone(&store) as Arc<dyn Store>, &srv, None);
+        scanner.set_shared(true);
+        scanner.scan("tester").await.expect("Scan");
+
+        let writes = store.progress_writes();
+        assert!(
+            writes.first().is_some_and(|w| w.contains("\"phase\"")),
+            "progress was published while scanning: {writes:?}"
+        );
+        assert_eq!(
+            writes.last().map(String::as_str),
+            Some(""),
+            "progress cleared"
+        );
+        assert!(!scanner.scanning());
+    }
+
+    #[tokio::test]
+    async fn unshared_scan_leaves_the_job_row_alone() {
+        let srv = fake_gitlab(vec![fake_project(1, "team/app", &["main"], &[])]).await;
+        let store = new_mem_store(with_host(HOST));
+        let scanner = new_test_scanner(Arc::clone(&store) as Arc<dyn Store>, &srv, None);
+        scanner.scan("tester").await.expect("Scan");
+        assert_eq!(store.progress_writes(), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn standby_pod_sees_a_requested_and_running_scan() {
+        let srv = fake_gitlab(vec![]).await;
+        let store = new_mem_store(with_host(HOST));
+        let api = new_test_scanner(Arc::clone(&store) as Arc<dyn Store>, &srv, None);
+        api.set_shared(true);
+        assert!(!api.scanning());
+
+        api.request_scan("alice").await.expect("request");
+        assert!(
+            api.scanning(),
+            "the requesting pod reports the scan at once"
+        );
+        assert!(api.overview().scanning);
+
+        let leader = new_test_scanner(Arc::clone(&store) as Arc<dyn Store>, &srv, None);
+        leader.set_shared(true);
+        assert_eq!(
+            leader.take_scan_request().await.expect("take").as_deref(),
+            Some("alice")
+        );
+        assert!(leader.take_scan_request().await.expect("take").is_none());
+
+        store
+            .write_scan_job_progress(r#"{"phase":"scanning","done":3,"total":9,"excluded":0,"started_at":"2026-11-18T00:00:00Z","applied":1,"partial":0,"not_applied":2,"errored":0,"skipped":0}"#)
+            .await
+            .expect("progress");
+        api.sync_scan_state().await.expect("sync");
+        let overview = api.overview();
+        assert!(overview.scanning);
+        assert_eq!(overview.scan_progress.map(|p| p.done), Some(3));
+
+        store.finish_scan_job("gitlab: 401").await.expect("finish");
+        api.sync_scan_state().await.expect("sync");
+        assert!(!api.scanning(), "a finished scan stops reporting");
+        assert_eq!(
+            api.overview().last_scan_error,
+            "gitlab: 401",
+            "the leader's failure shows here"
+        );
     }
 
     #[tokio::test]

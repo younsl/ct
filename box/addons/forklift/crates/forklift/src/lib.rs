@@ -11,6 +11,7 @@ pub mod cluster;
 pub mod config;
 pub mod coverage;
 pub mod insights;
+pub mod leaderjob;
 pub mod license;
 pub mod memlimit;
 pub mod meta;
