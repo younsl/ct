@@ -3,8 +3,8 @@ name: kubernetes-upgrade-operator
 description: Kubernetes Upgrade Operator for EKS clusters
 type: application
 deprecated: false
-version: 0.2.0
-appVersion: "0.6.0"
+version: 0.2.1
+appVersion: "0.6.1"
 home: https://github.com/younsl/ct
 sources:
   - https://github.com/younsl/ct/tree/main/box/addons/kubernetes-upgrade-operator
@@ -20,9 +20,5 @@ keywords:
   - aws
 annotations:
   artifacthub.io/changes: |
-    - kind: changed
-      description: "First release under the kubernetes-upgrade-operator name, continuing the kuo chart (last released as 0.8.0) with the same templates and values. Resource names and the app.kubernetes.io/name label follow the new chart name, so set nameOverride: kuo to upgrade an existing kuo release in place"
-    - kind: changed
-      description: "The default image moves from younsl/kuo to younsl/kubernetes-upgrade-operator, the same 0.6.0 app published under the full name"
-    - kind: added
-      description: "Add serviceAccount.imagePullSecrets to set image pull secrets on the ServiceAccount, separate from the pod-level imagePullSecrets"
+    - kind: security
+      description: "App 0.6.1 updates aws-lc-sys, rustls, rustls-webpki, webpki-roots, h2, and rmcp for 19 RUSTSEC advisories"

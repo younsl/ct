@@ -6,7 +6,7 @@ FROM scratch AS runtime
 
 LABEL org.opencontainers.image.title="kubernetes-upgrade-operator" \
       org.opencontainers.image.description="Kubernetes operator for declarative EKS cluster upgrades" \
-      org.opencontainers.image.version="0.6.0" \
+      org.opencontainers.image.version="0.6.1" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="scratch" \
       org.opencontainers.image.deprecated="false"

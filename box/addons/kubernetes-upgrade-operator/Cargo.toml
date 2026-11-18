@@ -1,6 +1,6 @@
 [package]
 name = "kuo"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 rust-version = "1.100.0"
 authors = ["Younsung Lee <cysl@kakao.com>"]
@@ -33,7 +33,7 @@ aws-sdk-sts = { version = "1.56", default-features = false, features = ["default
 aws-smithy-types = "1"
 
 # Async runtime
-tokio = { version = "1.41", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time", "fs"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time", "fs"] }
 tokio-util = "0.7"
 futures = "0.3"
 
@@ -60,13 +60,13 @@ axum = { version = "0.8", features = ["tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider"] }
 
 # TLS crypto provider
-rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
+rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 
 # Metrics
 prometheus-client = "0.23"
 
 # MCP server (kagent integration)
-rmcp = { version = "3.1", features = ["transport-streamable-http-server"] }
+rmcp = { version = "3.11", features = ["transport-streamable-http-server"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

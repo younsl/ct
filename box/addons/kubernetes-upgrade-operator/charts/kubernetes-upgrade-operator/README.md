@@ -1,6 +1,6 @@
 # kubernetes-upgrade-operator
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.6.0](https://img.shields.io/badge/AppVersion-0.6.0-informational?style=flat-square)
+![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.6.1](https://img.shields.io/badge/AppVersion-0.6.1-informational?style=flat-square)
 
 Kubernetes Upgrade Operator for EKS clusters
 
@@ -39,7 +39,7 @@ helm install kubernetes-upgrade-operator oci://ghcr.io/younsl/charts/kubernetes-
 Install a specific version:
 
 ```console
-helm install kubernetes-upgrade-operator oci://ghcr.io/younsl/charts/kubernetes-upgrade-operator --version 0.2.0
+helm install kubernetes-upgrade-operator oci://ghcr.io/younsl/charts/kubernetes-upgrade-operator --version 0.2.1
 ```
 
 ### Install from local chart
@@ -47,7 +47,7 @@ helm install kubernetes-upgrade-operator oci://ghcr.io/younsl/charts/kubernetes-
 Download kubernetes-upgrade-operator chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/kubernetes-upgrade-operator --untar --version 0.2.0
+helm pull oci://ghcr.io/younsl/charts/kubernetes-upgrade-operator --untar --version 0.2.1
 helm install kubernetes-upgrade-operator ./kubernetes-upgrade-operator
 ```
 

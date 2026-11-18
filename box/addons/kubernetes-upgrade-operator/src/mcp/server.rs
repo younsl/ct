@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, ServerHandler, schemars, tool};
@@ -676,12 +676,12 @@ impl ServerHandler for KuoMcp {
     // rmcp marks these structs non_exhaustive, so they are built by mutating
     // defaults rather than with struct expressions.
     #[allow(clippy::field_reassign_with_default)]
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let mut server_info = Implementation::default();
         server_info.name = "kuo".into();
         server_info.version = crate::VERSION.into();
 
-        let mut info = ServerInfo::default();
+        let mut info = ServerConfig::default();
         info.server_info = server_info;
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info.instructions = Some(
