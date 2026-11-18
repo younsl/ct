@@ -134,6 +134,13 @@
     "priorityClassName": {
       "type": "string"
     },
+    "dnsPolicy": {
+      "type": ["string", "null"],
+      "enum": ["", "ClusterFirst", "ClusterFirstWithHostNet", "Default", "None", null]
+    },
+    "dnsConfig": {
+      "type": ["object", "null"]
+    },
     "podSecurityContext": {
       "type": "object"
     },
@@ -169,7 +176,7 @@
       "type": ["object", "null"],
       "propertyNames": {
         "not": {
-          "enum": ["affinity", "containers", "imagePullSecrets", "nodeSelector", "priorityClassName", "securityContext", "serviceAccountName", "tolerations", "topologySpreadConstraints", "volumes"]
+          "enum": ["affinity", "containers", "dnsConfig", "dnsPolicy", "imagePullSecrets", "nodeSelector", "priorityClassName", "securityContext", "serviceAccountName", "tolerations", "topologySpreadConstraints", "volumes"]
         }
       }
     },

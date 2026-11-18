@@ -148,6 +148,12 @@ resources:
 # -- (string) Priority class name for the pod
 priorityClassName: ""
 
+# -- (string) Pod DNS policy. One of `ClusterFirst`, `ClusterFirstWithHostNet`, `Default`, or `None`. Empty uses the Kubernetes default.
+dnsPolicy: ""
+
+# -- (object) Pod DNS config. Required when dnsPolicy is `None`. See PodDNSConfig spec (nameservers, searches, options).
+dnsConfig: {}
+
 # -- (object) Pod-level security context
 # @default -- See `values.yaml`
 podSecurityContext:

@@ -117,6 +117,8 @@ The following table lists the configurable parameters and their default values.
 | resources.requests.memory | string | `"64Mi"` | Memory request |
 | resources.limits.memory | string | `"128Mi"` | Memory limit |
 | priorityClassName | string | `""` | Priority class name for the pod |
+| dnsPolicy | string | `""` | Pod DNS policy. One of `ClusterFirst`, `ClusterFirstWithHostNet`, `Default`, or `None`. Empty uses the Kubernetes default. |
+| dnsConfig | object | `{}` | Pod DNS config. Required when dnsPolicy is `None`. See PodDNSConfig spec (nameservers, searches, options). |
 | podSecurityContext | object | See `values.yaml` | Pod-level security context |
 | securityContext | object | See `values.yaml` | Container-level security context |
 | pdb.enabled | bool | `false` | Enable PodDisruptionBudget |
