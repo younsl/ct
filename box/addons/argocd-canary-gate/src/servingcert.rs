@@ -9,12 +9,12 @@
 //! `failurePolicy: Fail` that is every gated sync in the cluster, invisible from
 //! this side because the request never reaches the handler.
 
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use rustls::ServerConfig;
+use rustls::pki_types::pem::{self, PemObject};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use thiserror::Error;
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
@@ -141,15 +141,11 @@ fn mod_time(path: &Path) -> SystemTime {
 
 fn read_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>, LoadError> {
     let display = path.display().to_string();
-    let file = std::fs::File::open(path).map_err(|source| LoadError::Read {
-        path: display.clone(),
-        source,
-    })?;
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut BufReader::new(file))
-        .collect::<Result<_, _>>()
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_file_iter(path)
+        .and_then(Iterator::collect)
         .map_err(|source| LoadError::Read {
             path: display.clone(),
-            source,
+            source: pem_io_error(source),
         })?;
     if certs.is_empty() {
         return Err(LoadError::NoCertificate { path: display });
@@ -159,16 +155,21 @@ fn read_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>, LoadError> {
 
 fn read_key(path: &Path) -> Result<PrivateKeyDer<'static>, LoadError> {
     let display = path.display().to_string();
-    let file = std::fs::File::open(path).map_err(|source| LoadError::Read {
-        path: display.clone(),
-        source,
-    })?;
-    rustls_pemfile::private_key(&mut BufReader::new(file))
-        .map_err(|source| LoadError::Read {
-            path: display.clone(),
-            source,
-        })?
-        .ok_or(LoadError::NoKey { path: display })
+    match PrivateKeyDer::from_pem_file(path) {
+        Ok(key) => Ok(key),
+        Err(pem::Error::NoItemsFound) => Err(LoadError::NoKey { path: display }),
+        Err(source) => Err(LoadError::Read {
+            path: display,
+            source: pem_io_error(source),
+        }),
+    }
+}
+
+fn pem_io_error(err: pem::Error) -> std::io::Error {
+    match err {
+        pem::Error::Io(source) => source,
+        other => std::io::Error::new(std::io::ErrorKind::InvalidData, other),
+    }
 }
 
 fn leaf_info(der: &CertificateDer<'_>) -> Option<LeafInfo> {

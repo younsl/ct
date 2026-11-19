@@ -1,6 +1,6 @@
 [package]
 name = "argocd-canary-gate"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.100.0"
 authors = ["younsl <cysl@kakao.com>"]
@@ -28,7 +28,6 @@ k8s-openapi = { version = "0.28", features = ["v1_32"] }
 # Pin the process-wide rustls crypto provider so the webhook listener and kube
 # share aws-lc-rs.
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "tls12"] }
-rustls-pemfile = "2"
 x509-parser = "0.18"
 
 # Serialization

@@ -3,8 +3,8 @@ name: argocd-canary-gate
 description: Admission gate that blocks an Argo CD Application sync while an Argo Rollouts canary is still in progress
 type: application
 deprecated: false
-version: 0.3.0
-appVersion: "0.1.0"
+version: 0.3.1
+appVersion: "0.1.1"
 kubeVersion: ">=1.30.0-0"
 home: https://github.com/younsl/ct
 sources:
@@ -23,4 +23,9 @@ keywords:
   - progressive-delivery
   - deployment-gate
 annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: "dnsPolicy and dnsConfig values for the pod, both omitted by default so the Kubernetes default (ClusterFirst) applies"
+    - kind: security
+      description: "appVersion 0.1.1, which drops the unmaintained rustls-pemfile crate (RUSTSEC-2025-0134)"
   artifacthub.io/license: Apache-2.0

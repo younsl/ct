@@ -1,6 +1,6 @@
 # argocd-canary-gate
 
-![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.1.0](https://img.shields.io/badge/AppVersion-0.1.0-informational?style=flat-square)
+![Version: 0.3.1](https://img.shields.io/badge/Version-0.3.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.1.1](https://img.shields.io/badge/AppVersion-0.1.1-informational?style=flat-square)
 
 Admission gate that blocks an Argo CD Application sync while an Argo Rollouts canary is still in progress
 
@@ -43,7 +43,7 @@ helm install argocd-canary-gate oci://ghcr.io/younsl/charts/argocd-canary-gate -
 Install a specific version:
 
 ```console
-helm install argocd-canary-gate oci://ghcr.io/younsl/charts/argocd-canary-gate --version 0.3.0
+helm install argocd-canary-gate oci://ghcr.io/younsl/charts/argocd-canary-gate --version 0.3.1
 ```
 
 ### Install from local chart
@@ -51,7 +51,7 @@ helm install argocd-canary-gate oci://ghcr.io/younsl/charts/argocd-canary-gate -
 Download argocd-canary-gate chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/argocd-canary-gate --untar --version 0.3.0
+helm pull oci://ghcr.io/younsl/charts/argocd-canary-gate --untar --version 0.3.1
 helm install argocd-canary-gate ./argocd-canary-gate
 ```
 
@@ -96,6 +96,8 @@ The following table lists the configurable parameters and their default values.
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Container-level security context |
 | resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"20m","memory":"64Mi"}}` | Resource requests and limits. No CPU limit: throttling admission turns latency into failed syncs |
 | resizePolicy | list | `[{"resourceName":"cpu","restartPolicy":"NotRequired"},{"resourceName":"memory","restartPolicy":"RestartContainer"}]` | Container resize policy for in-place vertical scaling. A cpu resize applies without a restart, a memory resize needs one |
+| dnsPolicy | string | `""` | Pod DNS policy. One of `ClusterFirst`, `ClusterFirstWithHostNet`, `Default`, or `None`. Empty uses the Kubernetes default |
+| dnsConfig | object | `{}` | Pod DNS config. Required when dnsPolicy is `None`. See PodDNSConfig spec (nameservers, searches, options) |
 | nodeSelector | object | `{}` | Node selector for the gate pods |
 | tolerations | list | `[]` | Tolerations for the gate pods |
 | topologySpreadConstraints | list | `[{"labelSelector":{"matchLabels":{"app.kubernetes.io/name":"argocd-canary-gate"}},"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway"}]` | Topology spread constraints. Spreading replicas keeps one node loss from failing every gated sync |
