@@ -28,7 +28,9 @@ how the standby gets a copy of the leader's state.
 
 forklift runs as one process serving everything on port 8080 (metrics on 8081):
 
-![Architecture](assets/architecture.svg)
+![Architecture](assets/architecture-active-active.png)
+
+Diagram source: [architecture-active-active.svg](assets/architecture-active-active.svg)
 
 - A content-addressed blob store on a PersistentVolume holds artifact bytes (deduplicated by SHA-256).
 - Embedded SQLite holds metadata: repositories, the artifact index, users, roles, and tokens.

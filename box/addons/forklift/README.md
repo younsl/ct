@@ -7,7 +7,7 @@
 
 Lightweight, Kubernetes-native artifact repository. One static Rust binary hosts and proxies Maven, npm, Cargo, Go module, PyPI and OCI (container image and Helm chart) artifacts, with a web console, OIDC login and supply-chain policy gates. A focused alternative to heavyweight JVM-based repository managers.
 
-<p align="center"><img src="docs/assets/architecture-active-active.png" alt="forklift active-active architecture on Kubernetes" width="760"></p>
+![Architecture](docs/assets/architecture-active-active.png)
 
 Diagram source: [architecture-active-active.svg](docs/assets/architecture-active-active.svg)
 
