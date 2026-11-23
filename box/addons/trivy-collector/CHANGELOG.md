@@ -29,6 +29,11 @@ The single image splits into a scraper image and a server image, and alert rules
 - Chart `scraper.resizePolicy` and `server.resizePolicy` default to resizing CPU in place and restarting the container for memory.
 - Chart value descriptions are one line each.
 
+### Security
+
+- url 2.5.9 (RUSTSEC-2026-0592) and cookie 0.18.3 (RUSTSEC-2026-0594), released after the first build of this version, so both images are rebuilt at the same version.
+- vergen-gitcl replaces vergen-gix for the build metadata. It reads the commit from the git CLI, so the gix crates and the heapless 0.8.0 they pin leave the lockfile (RUSTSEC-2026-0574 to 0582). The binaries carry the same short SHA and dirty flag.
+
 ## app 1.8.2 / chart 0.15.1
 
 ### Security

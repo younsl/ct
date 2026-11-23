@@ -17,6 +17,10 @@ Notable changes to the node-configuration-operator (NCO) app (the container imag
 - `Agent DaemonSet synced` is a debug line now. The lines above replace it at the info level.
 - The controller reads the agent DaemonSet, and the PodMonitor when the chart ships one, before every apply to tell a change from none. The Role of the chart already allows it.
 
+### Security
+
+- url 2.5.9 (RUSTSEC-2026-0592), released after the first build of this version, so both images are rebuilt at the same version.
+
 ## 0.3.0 (2026-11-13)
 
 ### Added

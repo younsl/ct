@@ -1,9 +1,9 @@
-use vergen_gix::{Build, Cargo, Emitter, Gix, Rustc};
+use vergen_gitcl::{Build, Cargo, Emitter, Gitcl, Rustc};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let build = Build::builder().build_timestamp(true).build();
     let cargo = Cargo::builder().target_triple(true).build();
-    let git = Gix::builder().sha(true).dirty(true).build();
+    let git = Gitcl::builder().sha(true).dirty(true).build();
     let rustc = Rustc::builder()
         .semver(true)
         .channel(true)

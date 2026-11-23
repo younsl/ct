@@ -1,20 +1,20 @@
-use vergen_gix::{BuildBuilder, Emitter, GixBuilder, RustcBuilder};
+use vergen_gitcl::{Build, Emitter, Gitcl, Rustc};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Rerun when the override env var changes (Docker builds without .git in
-    // the context pass the SHA via --build-arg → ENV VERGEN_GIT_SHA=...).
     println!("cargo:rerun-if-env-changed=VERGEN_GIT_SHA");
 
+    let build = Build::builder().build_date(true).build();
+    let rustc = Rustc::builder().semver(true).build();
+    let git = Gitcl::builder().sha(true).dirty(true).build();
+
     let mut emitter = Emitter::default();
+    emitter
+        .fail_on_error()
+        .add_instructions(&build)?
+        .add_instructions(&rustc)?;
 
-    emitter.add_instructions(&BuildBuilder::default().build_date(true).build()?)?;
-    emitter.add_instructions(&RustcBuilder::default().semver(true).build()?)?;
-
-    // Try gix; if no .git is reachable (e.g. inside a Docker builder stage),
-    // fall back to the SHA passed in via env. Last resort: "unknown".
-    if let Ok(git) = GixBuilder::default().sha(true).dirty(true).build() {
-        emitter.add_instructions(&git)?;
-    } else {
+    // Builds without a git worktree take the SHA from VERGEN_GIT_SHA.
+    if emitter.add_instructions(&git).is_err() {
         let sha = std::env::var("VERGEN_GIT_SHA").unwrap_or_else(|_| "unknown".into());
         println!("cargo:rustc-env=VERGEN_GIT_SHA={sha}");
         println!("cargo:rustc-env=VERGEN_GIT_DIRTY=unknown");

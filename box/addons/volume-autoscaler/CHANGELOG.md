@@ -10,6 +10,7 @@ Dependency update for RUSTSEC advisories. No behavior change.
 
 Only the crates with an advisory move, so the lockfile stays close to 0.2.0.
 
+- url 2.5.9 (RUSTSEC-2026-0592), released after the first build of this version, so the image is rebuilt at the same version.
 - rustls 0.23.46 (RUSTSEC-2026-0346, 0347, 0348, 0349), rustls-webpki 0.103.17 (RUSTSEC-2026-0382), webpki-root-certs 1.0.12 (RUSTSEC-2026-0383).
 - ctutils 0.4.8 (RUSTSEC-2026-0385).
 - tokio 1.54.1 and rustix 1.1.6 for their unsound warnings (RUSTSEC-2026-0386, 0486).

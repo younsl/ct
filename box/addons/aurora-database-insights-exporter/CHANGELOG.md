@@ -10,6 +10,7 @@ Dependency update for RUSTSEC advisories, with one error reporting fix.
 
 Only the crates with an advisory move, so the lockfile stays close to 0.1.2.
 
+- url 2.5.9 (RUSTSEC-2026-0592), released after the first build of this version, so the image is rebuilt at the same version.
 - rustls 0.23.46 (RUSTSEC-2026-0285, 0346, 0348, 0349) and rustls-webpki 0.103.17 (RUSTSEC-2026-0098, 0099, 0104, 0382).
 - h2 0.4.20 (RUSTSEC-2026-0258).
 - prometheus 0.14.0, which moves protobuf to 3.7.2 (RUSTSEC-2024-0437).

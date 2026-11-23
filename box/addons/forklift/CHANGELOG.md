@@ -19,6 +19,7 @@ Notable changes per release. Container image versions come from the
 
 ### Security
 
+- url 2.5.9 (RUSTSEC-2026-0592), released after the first build of this version, so the forklift and forklift-mcp images are rebuilt at the same version.
 - rustls 0.23.46 (RUSTSEC-2026-0346 to 0349), rustls-webpki 0.103.17 (RUSTSEC-2026-0382) and webpki-root-certs 1.0.12 (RUSTSEC-2026-0383).
 - rusqlite 0.41.1 with the bundled SQLite of libsqlite3-sys 0.39.1 (RUSTSEC-2026-0459).
 - zip 9.7.0 (RUSTSEC-2026-0367, 0368, 0369, 0429, 0545 to 0548). Archive entries whose names cannot be decoded are rejected as invalid archives.
