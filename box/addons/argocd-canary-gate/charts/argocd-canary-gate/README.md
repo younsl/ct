@@ -96,8 +96,8 @@ The following table lists the configurable parameters and their default values.
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}` | Container-level security context |
 | resources | object | `{"limits":{"memory":"128Mi"},"requests":{"cpu":"20m","memory":"64Mi"}}` | Resource requests and limits. No CPU limit: throttling admission turns latency into failed syncs |
 | resizePolicy | list | `[{"resourceName":"cpu","restartPolicy":"NotRequired"},{"resourceName":"memory","restartPolicy":"RestartContainer"}]` | Container resize policy for in-place vertical scaling. A cpu resize applies without a restart, a memory resize needs one |
-| dnsPolicy | string | `""` | Pod DNS policy. One of `ClusterFirst`, `ClusterFirstWithHostNet`, `Default`, or `None`. Empty uses the Kubernetes default |
-| dnsConfig | object | `{}` | Pod DNS config. Required when dnsPolicy is `None`. See PodDNSConfig spec (nameservers, searches, options) |
+| dnsPolicy | string | `""` | Pod DNS policy. Empty uses the Kubernetes default (`ClusterFirst`) |
+| dnsConfig | object | `{}` | Pod DNS config, required when dnsPolicy is `None` |
 | nodeSelector | object | `{}` | Node selector for the gate pods |
 | tolerations | list | `[]` | Tolerations for the gate pods |
 | topologySpreadConstraints | list | `[{"labelSelector":{"matchLabels":{"app.kubernetes.io/name":"argocd-canary-gate"}},"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway"}]` | Topology spread constraints. Spreading replicas keeps one node loss from failing every gated sync |

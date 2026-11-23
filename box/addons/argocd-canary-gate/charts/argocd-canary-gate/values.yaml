@@ -68,10 +68,13 @@ resizePolicy:
   - resourceName: memory
     restartPolicy: RestartContainer
 
-# -- (string) Pod DNS policy. One of `ClusterFirst`, `ClusterFirstWithHostNet`, `Default`, or `None`. Empty uses the Kubernetes default
+# -- (string) Pod DNS policy. Empty uses the Kubernetes default (`ClusterFirst`)
 dnsPolicy: ""
-# -- (object) Pod DNS config. Required when dnsPolicy is `None`. See PodDNSConfig spec (nameservers, searches, options)
+# -- (object) Pod DNS config, required when dnsPolicy is `None`
 dnsConfig: {}
+#   options:
+#     - name: ndots
+#       value: "2"
 
 # -- (object) Node selector for the gate pods
 nodeSelector: {}
