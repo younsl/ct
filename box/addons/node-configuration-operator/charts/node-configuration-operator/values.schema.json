@@ -108,6 +108,13 @@
     "priorityClassName": {
       "type": ["string", "null"]
     },
+    "dnsPolicy": {
+      "type": ["string", "null"],
+      "enum": ["", "ClusterFirst", "ClusterFirstWithHostNet", "Default", "None", null]
+    },
+    "dnsConfig": {
+      "type": ["object", "null"]
+    },
     "podAnnotations": {
       "$ref": "#/definitions/nullableStringMap"
     },
@@ -133,7 +140,7 @@
       "type": ["object", "null"],
       "propertyNames": {
         "not": {
-          "enum": ["affinity", "containers", "imagePullSecrets", "nodeSelector", "priorityClassName", "serviceAccountName", "tolerations", "topologySpreadConstraints"]
+          "enum": ["affinity", "containers", "dnsConfig", "dnsPolicy", "imagePullSecrets", "nodeSelector", "priorityClassName", "serviceAccountName", "tolerations", "topologySpreadConstraints"]
         }
       }
     },
@@ -180,6 +187,13 @@
         "priorityClassName": {
           "type": ["string", "null"]
         },
+        "dnsPolicy": {
+          "type": ["string", "null"],
+          "enum": ["", "ClusterFirst", "ClusterFirstWithHostNet", "Default", "None", null]
+        },
+        "dnsConfig": {
+          "type": ["object", "null"]
+        },
         "podAnnotations": {
           "$ref": "#/definitions/nullableStringMap"
         },
@@ -199,7 +213,7 @@
           "type": ["object", "null"],
           "propertyNames": {
             "not": {
-              "enum": ["affinity", "containers", "hostPID", "imagePullSecrets", "nodeSelector", "priorityClassName", "serviceAccountName", "tolerations", "volumes"]
+              "enum": ["affinity", "containers", "dnsConfig", "dnsPolicy", "hostPID", "imagePullSecrets", "nodeSelector", "priorityClassName", "serviceAccountName", "tolerations", "volumes"]
             }
           }
         },

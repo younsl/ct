@@ -3,7 +3,7 @@ name: node-configuration-operator
 description: Continuously reconciles the OS configuration of EKS managed node group nodes from NodeConfiguration custom resources
 type: application
 deprecated: false
-version: 0.3.1
+version: 0.4.0
 appVersion: "0.3.1"
 home: https://github.com/younsl/ct
 sources:
@@ -20,5 +20,5 @@ keywords:
   - operator
 annotations:
   artifacthub.io/changes: |
-    - kind: changed
-      description: "App version 0.3.1, which logs every create, update, delete, and drift repair of the agent DaemonSet, PodMonitor, and bindings"
+    - kind: added
+      description: "dnsPolicy and dnsConfig values for the controller and agent.dnsPolicy and agent.dnsConfig for the agent, all omitted by default so the Kubernetes default (ClusterFirst) applies"

@@ -113,6 +113,13 @@ spec:
       {{- with .Values.agent.priorityClassName }}
       priorityClassName: {{ . }}
       {{- end }}
+      {{- with .Values.agent.dnsPolicy }}
+      dnsPolicy: {{ . }}
+      {{- end }}
+      {{- with .Values.agent.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

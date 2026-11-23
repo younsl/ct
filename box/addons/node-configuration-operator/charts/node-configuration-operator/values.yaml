@@ -86,6 +86,10 @@ securityContext:
 
 # -- (string) Pod priority class name of the controller. Empty uses the Kubernetes default.
 priorityClassName: ""
+# -- (string) Pod DNS policy of the controller. Empty uses the Kubernetes default (`ClusterFirst`).
+dnsPolicy: ""
+# -- (object) Pod DNS config of the controller, required when dnsPolicy is `None`.
+dnsConfig: {}
 
 # -- (object) Annotations to add to the controller pod.
 podAnnotations: {}
@@ -174,6 +178,10 @@ agent:
       maxUnavailable: 10%
   # -- (string) Pod priority class name of the agent. Empty uses the Kubernetes default.
   priorityClassName: ""
+  # -- (string) Pod DNS policy of the agent. Empty uses the Kubernetes default (`ClusterFirst`).
+  dnsPolicy: ""
+  # -- (object) Pod DNS config of the agent, required when dnsPolicy is `None`.
+  dnsConfig: {}
   # -- (object) Annotations to add to the agent pods.
   podAnnotations: {}
   # -- (object) Node selector of the agent pods, on top of the node affinity the controller adds.

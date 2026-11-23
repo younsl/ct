@@ -1,6 +1,6 @@
 # node-configuration-operator
 
-![Version: 0.3.1](https://img.shields.io/badge/Version-0.3.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.1](https://img.shields.io/badge/AppVersion-0.3.1-informational?style=flat-square)
+![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.3.1](https://img.shields.io/badge/AppVersion-0.3.1-informational?style=flat-square)
 
 Continuously reconciles the OS configuration of EKS managed node group nodes from NodeConfiguration custom resources
 
@@ -39,7 +39,7 @@ helm install node-configuration-operator oci://ghcr.io/younsl/charts/node-config
 Install a specific version:
 
 ```console
-helm install node-configuration-operator oci://ghcr.io/younsl/charts/node-configuration-operator --version 0.3.1
+helm install node-configuration-operator oci://ghcr.io/younsl/charts/node-configuration-operator --version 0.4.0
 ```
 
 ### Install from local chart
@@ -47,7 +47,7 @@ helm install node-configuration-operator oci://ghcr.io/younsl/charts/node-config
 Download node-configuration-operator chart and install from local directory:
 
 ```console
-helm pull oci://ghcr.io/younsl/charts/node-configuration-operator --untar --version 0.3.1
+helm pull oci://ghcr.io/younsl/charts/node-configuration-operator --untar --version 0.4.0
 helm install node-configuration-operator ./node-configuration-operator
 ```
 
@@ -104,6 +104,8 @@ The following table lists the configurable parameters and their default values.
 | resources.requests.memory | string | `"32Mi"` | Memory request of the controller. |
 | securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true,"runAsNonRoot":true,"runAsUser":65532}` | Container security context of the controller. |
 | priorityClassName | string | `""` | Pod priority class name of the controller. Empty uses the Kubernetes default. |
+| dnsPolicy | string | `""` | Pod DNS policy of the controller. Empty uses the Kubernetes default (`ClusterFirst`). |
+| dnsConfig | object | `{}` | Pod DNS config of the controller, required when dnsPolicy is `None`. |
 | podAnnotations | object | `{}` | Annotations to add to the controller pod. |
 | nodeSelector | object | `{}` | Node selector for controller pod scheduling. |
 | tolerations | list | `[]` | Tolerations for controller pod scheduling. |
@@ -129,6 +131,8 @@ The following table lists the configurable parameters and their default values.
 | agent.securityContext | object | `{"allowPrivilegeEscalation":false,"capabilities":{"add":["CHOWN","DAC_OVERRIDE","FOWNER"],"drop":["ALL"]},"privileged":false,"readOnlyRootFilesystem":true,"runAsGroup":0,"runAsNonRoot":false,"runAsUser":0,"seccompProfile":{"type":"RuntimeDefault"}}` | Container security context of the agent, unused when `agent.allowScripts` is on. It writes host files as root, and the three capabilities cover modes and owners of files that belong to other accounts. |
 | agent.updateStrategy | object | `{"rollingUpdate":{"maxUnavailable":"10%"},"type":"RollingUpdate"}` | Update strategy of the agent DaemonSet itself, used when the image, these settings, or the set of targeted nodes changes. Rule changes roll out per NodeConfiguration instead. |
 | agent.priorityClassName | string | `""` | Pod priority class name of the agent. Empty uses the Kubernetes default. |
+| agent.dnsPolicy | string | `""` | Pod DNS policy of the agent. Empty uses the Kubernetes default (`ClusterFirst`). |
+| agent.dnsConfig | object | `{}` | Pod DNS config of the agent, required when dnsPolicy is `None`. |
 | agent.podAnnotations | object | `{}` | Annotations to add to the agent pods. |
 | agent.nodeSelector | object | `{}` | Node selector of the agent pods, on top of the node affinity the controller adds. |
 | agent.affinity | object | `{}` | Extra affinity of the agent pods. The controller sets the required node affinity from the targets of the NodeConfiguration resources and replaces one given here. |
