@@ -88,7 +88,7 @@ list must therefore be evaluated in process regardless, exactly as
 
 ## Architecture
 
-![Architecture](region-filtering.svg)
+![Architecture](../assets/region-filtering.svg)
 
 Both lists are evaluated in one place, `EventFilter::evaluate`. `DescribeEvents`
 is called exactly as before, without a `regions` narrowing, so every event the

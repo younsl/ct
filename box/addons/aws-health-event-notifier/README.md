@@ -7,7 +7,7 @@
 
 Polls the [AWS Health API](https://docs.aws.amazon.com/health/latest/ug/health-api.html) and posts events to Slack, emitting a Kubernetes Event alongside each published alarm.
 
-![Architecture](./docs/architecture.svg)
+![Architecture](./docs/assets/architecture.svg)
 
 ## Features
 

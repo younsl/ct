@@ -1,6 +1,6 @@
 # Architecture
 
-![Architecture](architecture.svg)
+![Architecture](assets/architecture.svg)
 
 A pull-model daemon. The pod queries the AWS Health [DescribeEvents](https://docs.aws.amazon.com/health/latest/APIReference/API_DescribeEvents.html) API on an interval, filters events in process, and forwards new ones to a Slack Incoming Webhook. No EventBridge rule or push endpoint is required.
 

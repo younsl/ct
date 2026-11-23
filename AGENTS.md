@@ -39,6 +39,12 @@ Applies to READMEs, docs, this file, commit messages, and chart annotations.
 - One physical line per paragraph or list item. Hard wraps turn a one-word edit into a multi-line diff.
 - README prose paragraphs (announcements, introductions) prefer plain text over inline code. Fenced command blocks and tables are fine.
 
+### Doc assets
+
+- Every component keeps its documentation assets (diagrams, screenshots, logos) under `<component>/docs/assets/`, optionally in topic subdirectories. Never next to the Markdown that embeds them, and never in a nested `assets/` such as `docs/designs/assets/`.
+- Markdown references them by relative path (`docs/assets/architecture.svg` from the README, `../assets/architecture.svg` from `docs/designs/`).
+- Files a build or runtime ships (frontend `src/assets`, UI extension bundles such as `argocd-canary-gate/assets/`) are not doc assets and stay where the build expects them.
+
 ## Rust
 
 There is no repository-wide workspace. A component is one standalone crate, or one [Cargo workspace](https://doc.rust-lang.org/cargo/reference/workspaces.html) when it ships several crates, released together (`node-configuration-operator`) or as separate images with their own versions (`forklift`). Such a workspace keeps its crates under `crates/` and the package fields, dependency versions, lints, and profile below in its root `Cargo.toml`. Match these when adding or touching a crate.

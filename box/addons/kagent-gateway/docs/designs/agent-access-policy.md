@@ -32,7 +32,7 @@ An env-only design (`CHAT_AGENT_ALLOWED_USERS=agent=U1|U2,...`) was considered f
 
 ## Architecture
 
-![Agent access policy](assets/agent-access-policy.svg)
+![Agent access policy](../assets/agent-access-policy.svg)
 
 The gateway runs a controller over `AgentAccessPolicy` objects in `KAGENT_NAMESPACE`. It reads them from its reflector cache on every mention and writes back only their status. Each policy points at one or more kagent `Agent`s through `agentRefs`, and a mention reaches one of them over A2A only when the asker passes the policy.
 
@@ -174,7 +174,7 @@ Before this design one decision, which agent owns a channel, was written in up t
 
 ### Readiness wakeup
 
-![Policy cache sync](assets/policy-cache-sync.svg)
+![Policy cache sync](../assets/policy-cache-sync.svg)
 
 The Controller and `track_sync` both wait on the same store's readiness signal. kube-runtime backs that signal with a single oneshot channel that keeps one waker, so when the initial list finishes only the waiter that registered last is woken. In the first rollout the Controller won: reconciles ran and every policy read `Ready`, while `track_sync` slept, `access_policies_synced` stayed 0, and every alert and mention failed closed as `policy_unsynced`. Restarts repeated the same order.
 

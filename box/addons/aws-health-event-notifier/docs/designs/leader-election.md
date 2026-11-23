@@ -8,7 +8,7 @@
 
 Run two replicas. A Kubernetes Lease picks one leader that polls AWS Health and posts to the Slack webhook. A ConfigMap ledger, written only through compare-and-swap, records every send so a failover, restart, or split-brain never posts the same event twice.
 
-![Lease-based leader election](leader-election.svg)
+![Lease-based leader election](../assets/leader-election.svg)
 
 ## Goals
 
