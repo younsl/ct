@@ -9,8 +9,6 @@ Lightweight, Kubernetes-native artifact repository. One static Rust binary hosts
 
 ![Architecture](docs/assets/architecture-active-active.png)
 
-Diagram source: [architecture-active-active.svg](docs/assets/architecture-active-active.svg)
-
 ## Features
 
 - Hosted, proxy and group repositories for six formats
