@@ -72,9 +72,6 @@ resizePolicy:
 dnsPolicy: ""
 # -- (object) Pod DNS config, required when dnsPolicy is `None`
 dnsConfig: {}
-#   options:
-#     - name: ndots
-#       value: "2"
 
 # -- (object) Node selector for the gate pods
 nodeSelector: {}
