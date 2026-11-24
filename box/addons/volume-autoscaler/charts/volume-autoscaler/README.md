@@ -100,7 +100,7 @@ The following table lists the configurable parameters and their default values.
 | config.reconcileInterval | string | `"5m"` | InstanceVolumeAutoscaler reconcile interval |
 | config.claimReconcileInterval | string | `"1m"` | PersistentVolumeClaimAutoscaler reconcile interval, at least 10s |
 | config.reconcileConcurrency | int | `10` | Max instances reconciled in parallel |
-| config.ssmCommandTimeout | string | `"5m"` | SSM command timeout |
+| config.ssmCommandTimeout | string | `"5m"` | SSM command timeout, at least 30s |
 | config.ssmPollInterval | string | `"1s"` | SSM and volume modification poll interval |
 | config.volumeModifyTimeout | string | `"10m"` | ModifyVolume optimizing-wait timeout |
 | config.dryRun | bool | `false` | Measure and decide only, never modify |

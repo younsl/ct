@@ -957,6 +957,11 @@ mod tests {
                 Box::new(|c| c.ssm_command_timeout == Duration::from_mins(5)),
             ),
             (
+                with("ssmCommandTimeout: 10s\n"),
+                "ssmCommandTimeout must be at least 30s (the SSM SendCommand minimum), got 10s, using 30s",
+                Box::new(|c| c.ssm_command_timeout == Duration::from_secs(30)),
+            ),
+            (
                 with("volumeModifyTimeout: 1.5h\n"),
                 "invalid volumeModifyTimeout",
                 Box::new(|c| c.volume_modify_timeout == Duration::from_mins(10)),

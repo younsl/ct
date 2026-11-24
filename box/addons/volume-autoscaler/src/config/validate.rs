@@ -17,6 +17,7 @@ use super::{
 use crate::humanize::go_duration;
 
 const MIN_CLAIM_RECONCILE_INTERVAL: Duration = Duration::from_secs(10);
+const MIN_SSM_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_DELETIONS_PER_PASS: usize = 100;
 
 /// Raises `value` to `min` and records it.
@@ -70,6 +71,13 @@ impl Config {
             "ssmPollInterval",
             &mut self.ssm_poll_interval,
             Duration::from_secs(1),
+        );
+        at_least(
+            fx,
+            "ssmCommandTimeout",
+            &mut self.ssm_command_timeout,
+            MIN_SSM_COMMAND_TIMEOUT,
+            " (the SSM SendCommand minimum)",
         );
         if ![NOTIFY_ON_ALL, NOTIFY_ON_SUCCESS, NOTIFY_ON_FAILURE]
             .contains(&self.alertmanager_notify_on.as_str())

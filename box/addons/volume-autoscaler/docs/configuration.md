@@ -16,7 +16,7 @@ region: ap-northeast-2                 # required
 reconcileInterval: 5m                  # duration: 30s, 5m, 1h, 1h30m
 claimReconcileInterval: 1m             # PersistentVolumeClaimAutoscaler re-evaluation, at least 10s
 reconcileConcurrency: 10               # max instances reconciled in parallel per pass
-ssmCommandTimeout: 5m
+ssmCommandTimeout: 5m                  # SSM Run Command timeout, at least 30s
 ssmPollInterval: 1s                    # delay between SSM command and volume modification status polls
 volumeModifyTimeout: 10m               # ModifyVolume optimizing-wait timeout
 dryRun: false                          # measure and decide only

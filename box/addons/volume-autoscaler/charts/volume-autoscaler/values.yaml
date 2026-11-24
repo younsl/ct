@@ -124,7 +124,7 @@ config:
   claimReconcileInterval: "1m"
   # -- (int) Max instances reconciled in parallel
   reconcileConcurrency: 10
-  # -- (string) SSM command timeout
+  # -- (string) SSM command timeout, at least 30s
   ssmCommandTimeout: "5m"
   # -- (string) SSM and volume modification poll interval
   ssmPollInterval: "1s"
