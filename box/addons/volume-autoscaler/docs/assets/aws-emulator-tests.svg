@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 750" width="1200" height="750">
+  <style>
+    .t{font-family:Geist,Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+    .m{font-family:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .h{fill:#ededed;font-size:26px;font-weight:600;letter-spacing:-0.5px}
+    .s{fill:#a1a1a1;font-size:16px}
+    .n{fill:#ededed;font-size:17px;font-weight:600}
+    .d{fill:#a1a1a1;font-size:15px}
+    .l{fill:#8f8f8f;font-size:14px}
+    .k{fill:#ededed;font-size:13px}
+    .kc{fill:#ededed;font-size:12px}
+    .kd{fill:#8f8f8f;font-size:13px}
+    .e{fill:#8f8f8f;font-size:12px;letter-spacing:1.2px}
+    .b{fill:#000;font-size:12px;font-weight:600}
+    .card{fill:#0a0a0a;stroke:#2e2e2e}
+    .hi{fill:#0a0a0a;stroke:#3291ff}
+    .chip{fill:#111;stroke:#262626}
+    .bound{fill:none;stroke:#2e2e2e;stroke-dasharray:4 4}
+    .edge{stroke:#525252;stroke-width:1.5;fill:none}
+    .lead{stroke:#3291ff;stroke-width:1.5;fill:none}
+    .dash{stroke:#525252;stroke-width:1.5;fill:none;stroke-dasharray:5 4}
+  </style>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.9" fill="#161616"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8f8f8f"/>
+    </marker>
+    <marker id="arrow-hi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3291ff"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="750" fill="#000"/>
+  <rect width="1200" height="750" fill="url(#grid)"/>
+
+  <rect x="1068" y="30" width="92" height="26" rx="13" class="chip"/>
+  <text x="1114" y="48" text-anchor="middle" class="t l">Testing</text>
+
+  <text x="40" y="54" class="t h">Ignored tests drive the real AWS SDK clients against a local AWS Emulator</text>
+  <text x="40" y="82" class="t s">No AWS account. The same Clients the controller ships call EC2, SSM, and IAM on 127.0.0.1 over HTTPS with SigV4</text>
+
+  <g transform="translate(0,30)">
+  <rect x="40" y="150" width="252" height="390" rx="8" class="card"/>
+  <text x="56" y="176" class="m e">RUNNER</text>
+  <text x="56" y="202" class="t n">make emulator-test</text>
+  <text x="56" y="222" class="m kd">tests/aws-emulator/run.sh</text>
+  <text x="56" y="256" class="t d">Builds the image, RPM</text>
+  <text x="56" y="276" class="t d">verified with the AWS key</text>
+  <text x="56" y="306" class="t d">Starts the container</text>
+  <text x="56" y="326" class="t d">with telemetry off</text>
+  <text x="56" y="356" class="t d">Exports the endpoint</text>
+  <rect x="56" y="368" width="220" height="88" rx="4" class="chip"/>
+  <text x="68" y="390" class="m kc">AWS_ENDPOINT_URL</text>
+  <text x="68" y="414" class="m kc">SSL_CERT_FILE</text>
+  <text x="68" y="438" class="m kc">AWS_SHARED_CREDENTIALS_FILE</text>
+  <text x="56" y="486" class="t d">Removes the container</text>
+  <text x="56" y="506" class="t d">and temp dir on exit</text>
+  <rect x="320" y="110" width="440" height="450" rx="10" class="bound"/>
+  <image x="336" y="120" width="22" height="22" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjcuNzgxODAxbW0iIGhlaWdodD0iMjcuNzgxNTcybW0iIHZpZXdCb3g9IjAgMCAyNy43ODE4MDEgMjcuNzgxNTcyIiB2ZXJzaW9uPSIxLjEiIHhtbDpzcGFjZT0icHJlc2VydmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6c3ZnPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgZmlsbD0iI2Y3NGMwMCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNDEuNTgzNTQ2LC0zLjA0ODQ0MzkpIj48cGF0aCBkPSJtIC0yNy43MzgxMTksMy4wNTEwNzM2IGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIC0wLjI5NTA3MywwLjE5MDE2OSBsIC0wLjcwNjQxNiwxLjE3NzE4OSBjIC0wLjEyMzc4LDAuMDEwMjggLTAuMjQ3MjU1LDAuMDIxMjggLTAuMzcwMDA0LDAuMDM1MTQgbCAtMC45MjEzOTEsLTEuMDE1NDQyIGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIC0wLjY2ODE3NSwwLjEzMjgwOSBsIC0wLjQ2MzAyMSwxLjI5MTkxIGMgLTAuMTE5NDA3LDAuMDM0MzkgLTAuMjM4NjM0LDAuMDY5MTUgLTAuMzU2NTY3LDAuMTA2OTcgbCAtMS4xMDEyMjUsLTAuODE1OTcgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuNjI5NDE5LDAuMjYwNDQ5IGwgLTAuMjAyNTcxLDEuMzYxNjc0IGMgLTAuMTA4NTUyLDAuMDU2MjYgLTAuMjE2ODA5LDAuMTEyNzcyIC0wLjMyMzQ5NCwwLjE3MjA4MiBsIC0xLjI0NDM2OSwtMC41ODc1NjEgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuNTY1ODU2LDAuMzc4MjcyIGwgMC4wNjcxOCwxLjM3OTI0NCBjIC0wLjA5NDI4LDAuMDc1MyAtMC4xODc1MjMsMC4xNTE1MjIgLTAuMjc5NTY5LDAuMjI5NDQzIGwgLTEuMzM5NDUzLC0wLjMzNDg2MyBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAtMC40ODE2MjUsMC40ODE2MjQgbCAwLjMzNDg2NCwxLjMzOTQ1NCBjIC0wLjA3NzkyLDAuMDkyMDUgLTAuMTU0MTQ2LDAuMTg1MjkgLTAuMjI5NDQ0LDAuMjc5NTcgbCAtMS4zNzkyNDQsLTAuMDY3MTggYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuMzc4MjcxLDAuNTY1ODU3IGwgMC41ODc1NjEsMS4yNDQzNjg0IGMgLTAuMDU5MzEsMC4xMDY2ODYgLTAuMTE1ODE4LDAuMjE0OTQzIC0wLjE3MjA4MywwLjMyMzQ5NSBsIC0xLjM2MTY3NCwwLjIwMjU3MSBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAtMC4yNjA0NDksMC42Mjk0MTkgbCAwLjgxNTk3MSwxLjEwMTIyNSBjIC0wLjAzNzgyLDAuMTE3OTMzIC0wLjA3MjU4LDAuMjM3MTYgLTAuMTA2OTcsMC4zNTY1NjcgbCAtMS4yOTE5MTEsMC40NjMwMjEgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuMTMyODA4LDAuNjY4MTc2IGwgMS4wMTU0NDEsMC45MjEzOTEgYyAtMC4wMTM4NiwwLjEyMjc0OSAtMC4wMjQ4NiwwLjI0NjIyNCAtMC4wMzUxNCwwLjM3MDAwNCBsIC0xLjE3NzE4OSwwLjcwNjQxNiBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLDAuNjgxMDk2IGwgMS4xNzcxODksMC43MDY0MTYgYyAwLjAxMDI4LDAuMTIzNzggMC4wMjEyOCwwLjI0NzI1NSAwLjAzNTE0LDAuMzcwMDA0IGwgLTEuMDE1NDQxLDAuOTIxMzkxIGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIDAuMTMyODA4LDAuNjY4MTc2IGwgMS4yOTE5MTEsMC40NjMwMjEgYyAwLjAzNDM5LDAuMTE5NDA3IDAuMDY5MTUsMC4yMzg2MzMgMC4xMDY5NywwLjM1NjU2NyBsIC0wLjgxNTk3MSwxLjEwMTIyNSBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLjI2MDQ0OSwwLjYyOTQxOSBsIDEuMzYxNjc0LDAuMjAyNTcxIGMgMC4wNTYyNiwwLjEwODU1MiAwLjExMjc3MywwLjIxNjgwOSAwLjE3MjA4MywwLjMyMzQ5NSBsIC0wLjU4NzU2MSwxLjI0NDM2OCBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLjM3ODI3MSwwLjU2NTg1NyBsIDEuMzc5MjQ0LC0wLjA2NzE4IGMgMC4wNzUzLDAuMDk0MjggMC4xNTE1MjMsMC4xODc1MjMgMC4yMjk0NDQsMC4yNzk1NyBsIC0wLjMzNDg2NCwxLjMzOTQ1MyBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLjQ4MTYyNSwwLjQ4MTYyNCBsIDEuMzM5NDUzLC0wLjMzNDg2MyBjIDAuMDkyMDUsMC4wNzc5MiAwLjE4NTI5LDAuMTU0MTQ1IDAuMjc5NTY5LDAuMjI5NDQzIGwgLTAuMDY3MTgsMS4zNzkyNDQgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgMC41NjU4NTYsMC4zNzgyNzIgbCAxLjI0NDM2OSwtMC41ODc1NiBjIDAuMTA2Njg2LDAuMDU5MzEgMC4yMTQ5NDIsMC4xMTU4MTYgMC4zMjM0OTQsMC4xNzIwODIgbCAwLjIwMjU3MSwxLjM2MTY3MyBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLjYyOTQxOSwwLjI2MDQ1IGwgMS4xMDEyMjUsLTAuODE1OTcyIGMgMC4xMTc5MzQsMC4wMzc4MiAwLjIzNzE2LDAuMDcyNTggMC4zNTY1NjcsMC4xMDY5NzEgbCAwLjQ2MzAyMSwxLjI5MTkxIGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIDAuNjY4MTc1LDAuMTMyODA4IGwgMC45MjEzOTEsLTEuMDE1NDQyIGMgMC4xMjI3NSwwLjAxMzg2IDAuMjQ2MjI0LDAuMDI0ODYgMC4zNzAwMDQsMC4wMzUxNCBsIDAuNzA2NDE2LDEuMTc3MTg3IGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIDAuNjgxMDk2LDAgbCAwLjcwNjQxNiwtMS4xNzcxODcgYyAwLjEyMzc4LC0wLjAxMDI4IDAuMjQ3MjU1LC0wLjAyMTI4IDAuMzcwMDA0LC0wLjAzNTE0IGwgMC45MjEzOTEsMS4wMTU0NDIgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgMC42NjgxNzYsLTAuMTMyODA4IGwgMC40NjMwMjEsLTEuMjkxOTEgYyAwLjExOTQwNywtMC4wMzQzOSAwLjIzODYzMywtMC4wNjkxNSAwLjM1NjU2NywtMC4xMDY5NzEgbCAxLjEwMTIyNSwwLjgxNTk3MiBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLjYyOTQxOSwtMC4yNjA0NSBsIDAuMjAyNTcxLC0xLjM2MTY3MyBjIDAuMTA4NTUyLC0wLjA1NjI3IDAuMjE2ODA5LC0wLjExMjc3MyAwLjMyMzQ5NSwtMC4xNzIwODIgbCAxLjI0NDM2OCwwLjU4NzU2IGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIDAuNTY1ODU3LC0wLjM3ODI3MiBsIC0wLjA2NzE4LC0xLjM3OTI0NCBjIDAuMDk0MjgsLTAuMDc1MyAwLjE4NzUyMywtMC4xNTE1MjIgMC4yNzk1NywtMC4yMjk0NDMgbCAxLjMzOTQ1MywwLjMzNDg2MyBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLjQ4MTYyNCwtMC40ODE2MjQgbCAtMC4zMzQ4NjMsLTEuMzM5NDUzIGMgMC4wNzc5MiwtMC4wOTIwNSAwLjE1NDE0NSwtMC4xODUyOTEgMC4yMjk0NDMsLTAuMjc5NTcgbCAxLjM3OTI0NCwwLjA2NzE4IGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIDAuMzc4MjcyLC0wLjU2NTg1NyBsIC0wLjU4NzU2LC0xLjI0NDM2OCBjIDAuMDU5MzEsLTAuMTA2Njg2IDAuMTE1ODE2LC0wLjIxNDk0MyAwLjE3MjA4MiwtMC4zMjM0OTUgbCAxLjM2MTY3MywtMC4yMDI1NzEgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgMC4yNjA0NSwtMC42Mjk0MTkgbCAtMC44MTU5NzIsLTEuMTAxMjI1IGMgMC4wMzc4MiwtMC4xMTc5MzQgMC4wNzI1OCwtMC4yMzcxNiAwLjEwNjk3MSwtMC4zNTY1NjcgbCAxLjI5MTkxLC0wLjQ2MzAyMSBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAwLjEzMjgwOSwtMC42NjgxNzYgbCAtMS4wMTU0NDMsLTAuOTIxMzkxIGMgMC4wMTM4NiwtMC4xMjI3NDkgMC4wMjQ4NiwtMC4yNDYyMjQgMC4wMzUxNCwtMC4zNzAwMDQgbCAxLjE3NzE4NywtMC43MDY0MTYgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgMCwtMC42ODEwOTYgbCAtMS4xNzcxODcsLTAuNzA2NDE2IGMgLTAuMDEwMjgsLTAuMTIzNzggLTAuMDIxMjgsLTAuMjQ3MjU1IC0wLjAzNTE0LC0wLjM3MDAwNCBsIDEuMDE1NDQzLC0wLjkyMTM5MSBhIDAuMzk2OTE0NjksMC4zOTY5MTQ2OSAwIDAgMCAtMC4xMzI4MDksLTAuNjY4MTc2IGwgLTEuMjkxOTEsLTAuNDYzMDIxIGMgLTAuMDM0MzksLTAuMTE5NDA3IC0wLjA2OTE1LC0wLjIzODYzNCAtMC4xMDY5NzEsLTAuMzU2NTY3IGwgMC44MTU5NzIsLTEuMTAxMjI1IGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIC0wLjI2MDQ1LC0wLjYyOTQxOSBMIC0xNi41Mjk1LDExLjE3OTc3NyBjIC0wLjA1NjI3LC0wLjEwODU1MiAtMC4xMTI3NzMsLTAuMjE2ODA5IC0wLjE3MjA4MiwtMC4zMjM0OTUgbCAwLjU4NzU2LC0xLjI0NDM2ODQgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuMzc4MjcyLC0wLjU2NTg1NyBsIC0xLjM3OTI0NCwwLjA2NzE4IGMgLTAuMDc1MywtMC4wOTQyOCAtMC4xNTE1MjIsLTAuMTg3NTIzIC0wLjIyOTQ0MywtMC4yNzk1NjkgbCAwLjMzNDg2MywtMS4zMzk0NTQgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuNDgxNjI0LC0wLjQ4MTYyNCBsIC0xLjMzOTQ1MywwLjMzNDg2MyBjIC0wLjA5MjA1LC0wLjA3NzkyIC0wLjE4NTI5MSwtMC4xNTQxNDUgLTAuMjc5NTcsLTAuMjI5NDQzIGwgMC4wNjcxOCwtMS4zNzkyNDQgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuNTY1ODU4LC0wLjM3ODI3MiBsIC0xLjI0NDM2OCwwLjU4NzU2MSBjIC0wLjEwNjY4NiwtMC4wNTkzMSAtMC4yMTQ5NDMsLTAuMTE1ODE3IC0wLjMyMzQ5NSwtMC4xNzIwODIgbCAtMC4yMDI1NzEsLTEuMzYxNjc0IGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIC0wLjYyOTQxOSwtMC4yNjA0NDkgbCAtMS4xMDEyMjUsMC44MTU5NyBjIC0wLjExNzkzNCwtMC4wMzc4MiAtMC4yMzcxNiwtMC4wNzI1OCAtMC4zNTY1NjcsLTAuMTA2OTcgbCAtMC40NjMwMjEsLTEuMjkxOTExIGEgMC4zOTY5MTQ2OSwwLjM5NjkxNDY5IDAgMCAwIC0wLjY2ODE3NiwtMC4xMzI4MDkgbCAtMC45MjEzOTEsMS4wMTU0NDIgYyAtMC4xMjI3NDksLTAuMDEzODYgLTAuMjQ2MjI0LC0wLjAyNDg2IC0wLjM3MDAwNCwtMC4wMzUxNCBsIC0wLjcwNjQxNiwtMS4xNzcxODkgYSAwLjM5NjkxNDY5LDAuMzk2OTE0NjkgMCAwIDAgLTAuMzg2MDIzLC0wLjE5MDE2OSB6IG0gMC4wNDU0NywyLjUxMDk1NyBhIDAuNzkzNzUsMC43OTM3NSAwIDAgMSAwLjc5Mzc1LDAuNzkzNzUgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIC0wLjc5Mzc1LDAuNzkzNzUgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIC0wLjc5Mzc1LC0wLjc5Mzc1IDAuNzkzNzUsMC43OTM3NSAwIDAgMSAwLjc5Mzc1LC0wLjc5Mzc1IHogbSAtMS44NzQ4MjEsMS4zNjQyNTggMS4zMTM2MTUsMS4zMTM2MTYgYSAwLjc5MzgyOTM3LDAuNzkzODI5MzcgMCAwIDAgMS4xMjI0MTIsMCBsIDEuMzEzNjE1LC0xLjMxMzYxNiBjIDMuMDU5MzA2LDAuNTY1OTQgNS42MzI0ODQsMi40ODk4MzQgNy4wNzE5Miw1LjEyODg4NjQgbCAtMC44NDY5NzcsMS42NjE5MTUgYSAwLjc5MzgyOTM3LDAuNzkzODI5MzcgMCAwIDAgMC4zNDcyNjYsMS4wNjc2MzUgbCAxLjY1MzEyOSwwLjg0MjMyNSBjIDAuMDU0OTMsMC40Mjk3NyAwLjA4NjMsMC44NjY5NzkgMC4wODYzLDEuMzEyMDY1IDAsMC4yNjc0NDkgLTAuMDEzNTEsMC41MzE1ODcgLTAuMDMzNTksMC43OTM3NSBoIC0xLjAyNDc0NCBhIDAuMTMyMzA0OSwwLjEzMjMwNDkgMCAwIDAgLTAuMTMyMjkyLDAuMTMyMjkyIHYgMC41MjkxNjYgYyAwLDAuNTAxNjA2IC0wLjE1MzY2LDAuODQyOTQxIC0wLjM3NTY4NywxLjA2ODY2OSAtMC4yMjIwMjgsMC4yMjU3MjkgLTAuNTE5NDgzLDAuMzM4MzU4IC0wLjgyMTY1NiwwLjM1MzQ2NyAtMC4zMDIxNzIsMC4wMTUxMSAtMC42MDU2MzMsLTAuMDY5NiAtMC44MjU3ODksLTAuMjI3Mzc3IC0wLjIyMDE1NiwtMC4xNTc3NzggLTAuMzU4MTE4LC0wLjM3ODk2IC0wLjM1ODExOCwtMC42NjU1OTIgYSAwLjEzMjMwNDksMC4xMzIzMDQ5IDAgMCAwIC0wLjAwMjYsLTAuMDI1ODQgYyAtMC4xMzc2MTMsLTAuNjg4MDY4IC0wLjQ3NzgzLC0xLjI5ODU1NSAtMC44MTg1NTQsLTEuNzQxNDk2IC0wLjE3MDM2MiwtMC4yMjE0NyAtMC4zNDA4NDUsLTAuNDAxMDggLTAuNDkwNDA5LC0wLjUyODY1IC0wLjA1NDU1LC0wLjA0NjUyIC0wLjEwMzMxLC0wLjA3ODA1IC0wLjE1MjQ0NiwtMC4xMTA1ODcgMC44NzczNzIsLTAuNTE4MTk0IDEuNDY0MjQ3LC0xLjEzOTcwMSAxLjczOTQyOSwtMS44MDk3MDkgMC4yOTg2MTMsLTAuNzI3MDU5IDAuMjcyMTgxLC0xLjQ5MTYyMiAwLjAxMzk1LC0yLjE4MDIyOSAtMC41MTY0MjcsLTEuMzc3MjExIC0xLjk1MDM2NywtMi40NjcwMyAtMy41OTY2NjEsLTIuNDY3MDMgaCAtMTAuODI5MzA2IGMgMS40NjA2OTQsLTEuNTk3MDQ0NCAzLjQyNjA4OSwtMi43MjI3Nzc0IDUuNjQ3MTk4LC0zLjEzMzY2MDQgeiBtIC04LjE2Nzk3NSw1Ljk0ODk5MTQgYSAwLjc5Mzc1LDAuNzkzNzUgMCAwIDEgMC4yMjI3MjYsMC4wMzg3NiAwLjc5Mzc1LDAuNzkzNzUgMCAwIDEgMC41MDk1MjksMC45OTk5MzkgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIC0wLjk5OTkzOSwwLjUwOTUyOSAwLjc5Mzc1LDAuNzkzNzUgMCAwIDEgLTAuNTA5NTI5LC0wLjk5OTkzOSAwLjc5Mzc1LDAuNzkzNzUgMCAwIDEgMC43NzcyMTMsLTAuNTQ4Mjg3IHogbSAyMC4wODU1OTQsMCBhIDAuNzkzNzUsMC43OTM3NSAwIDAgMSAwLjc3NzIxMywwLjU0ODI4NyAwLjc5Mzc1LDAuNzkzNzUgMCAwIDEgLTAuNTA5NTI5LDAuOTk5OTM5IDAuNzkzNzUsMC43OTM3NSAwIDAgMSAtMC45OTk5MzksLTAuNTA5NTI5IDAuNzkzNzUsMC43OTM3NSAwIDAgMSAwLjUwOTUyOSwtMC45OTk5MzkgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIDAuMjIyNzI2LC0wLjAzODc2IHogbSAtMTguMzg4NTQsMC4zNTk2NjggaCAxLjczMTE2IHYgNi42MTQ1ODQgaCAtMy4xNTAxOTQgYyAtMC4yNzI5OTQsLTAuOTIxOTEyIC0wLjQyMTY4LC0xLjg5ODA4MSAtMC40MjE2OCwtMi45MTA0MTcgMCwtMC40NDUwODYgMC4wMzEzNywtMC44ODIyOTUgMC4wODYzLC0xLjMxMjA2NSBsIDEuNjUzMTI5LC0wLjg0MjMyNSBhIDAuNzkzODI5MzcsMC43OTM4MjkzNyAwIDAgMCAwLjM0NzI2NSwtMS4wNjc2MzUgeiBtIDYuMjI5MDc1LDAgaCAzLjMwNzI5MiBjIDAuNTA3MTE4LDAgMC44NzQ2ODIsMC4xMjcxMDQgMS4xMTEwNDMsMC4zMDQzNzUgMC4yMzYzNjEsMC4xNzcyNyAwLjM0NDE2NSwwLjQwMTE4MSAwLjM0NDE2NSwwLjYyMTY2NyAwLDAuMjIwNDg2IC0wLjEwNzgwNCwwLjQ0NDM5NyAtMC4zNDQxNjUsMC42MjE2NjcgLTAuMjM2MzYxLDAuMTc3MjcxIC0wLjYwMzkyNSwwLjMwNDM3NSAtMS4xMTEwNDMsMC4zMDQzNzUgaCAtMy4zMDcyOTIgeiBtIDAsNC43NjI1IGggMi41MTM1NDIgYyAwLjY5MzUyOCwwIDEuMDg1NDQ4LDAuMjUyOTkxIDEuMzYzMjI0LDAuNjU0MjI0IDAuMjc3Nzc3LDAuNDAxMjMyIDAuNDI2NDMzLDAuOTY1MDAxIDAuNTU4MTA2LDEuNTU3NTI4IDAuMTMxNjcyLDAuNTkyNTI2IDAuMjQ2ODY4LDEuMjExNTc0IDAuNDg4ODU5LDEuNzMwMTI3IDAuMjQxOTkxLDAuNTE4NTUyIDAuNjI3OTQ2LDAuOTQwNTI4IDEuMjY1MDM5LDEuMDgyMTA0IGEgMC4xMzIzMDQ5LDAuMTMyMzA0OSAwIDAgMCAwLjAyODk0LDAuMDAzMSBoIDQuMDc2NzUzIGMgLTAuMjM4NDIyLDAuMzIwMzYzIC0wLjQ5Njc3MywwLjYyNDUwOCAtMC43NzA0OTUsMC45MTQxNTYgbCAtMS44NDAxOTgsLTAuMjkxNDU1IGEgMC43OTM4MjkzNywwLjc5MzgyOTM3IDAgMCAwIC0wLjkwNzk1NSwwLjY1OTM5MSBsIC0wLjI5MTk3MiwxLjg0MTc0OCBjIC0xLjMyMjYyOCwwLjYyNjEyNCAtMi44MDI1MDYsMC45NzcyMDEgLTQuMzY3MTc1LDAuOTc3MjAxIC0xLjU2NDY2OSwwIC0zLjA0NDU0NiwtMC4zNTEwNzcgLTQuMzY3MTc0LC0wLjk3NzIwMSBsIC0wLjI5MTk3MywtMS44NDE3NDcgYSAwLjc5MzgyOTM3LDAuNzkzODI5MzcgMCAwIDAgLTAuOTA3OTU1LC0wLjY1OTM5MSBsIC0xLjg0MDE5OCwwLjI5MTQ1NSBjIC0wLjI3MzcyLC0wLjI4OTY0OCAtMC41MzIwNzIsLTAuNTkzNzkzIC0wLjc3MDQ5NCwtMC45MTQxNTYgaCA4LjMxMDA4NSBhIDAuMTMyMzA0OSwwLjEzMjMwNDkgMCAwIDAgMC4xMzIyOTEsLTAuMTMyMjkyIHYgLTIuOTEwNDE3IGEgMC4xMzIzMDQ5LDAuMTMyMzA0OSAwIDAgMCAtMC4xMzIyOTEsLTAuMTMyMjkxIGggLTIuMjQ4OTU5IHogbSAtNC4wNTg2NjUsNi43MTEyMTggYSAwLjc5Mzc1LDAuNzkzNzUgMCAwIDEgMC40MjExNjIsMC4xNTAzNzkgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIDAuMTc1NywxLjEwODk3NiAwLjc5Mzc1LDAuNzkzNzUgMCAwIDEgLTEuMTA4OTc2LDAuMTc1MTgzIDAuNzkzNzUsMC43OTM3NSAwIDAgMSAtMC4xNzUxODMsLTEuMTA4NDU5IDAuNzkzNzUsMC43OTM3NSAwIDAgMSAwLjY4NzI5NywtMC4zMjYwNzkgeiBtIDEyLjM1MDY2NiwwIGEgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIDAuNjg3Mjk2LDAuMzI2MDc5IDAuNzkzNzUsMC43OTM3NSAwIDAgMSAtMC4xNzUxODMsMS4xMDg0NTkgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIC0xLjEwODk3NiwtMC4xNzUxODMgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIDAuMTc1NywtMS4xMDg5NzYgMC43OTM3NSwwLjc5Mzc1IDAgMCAxIDAuNDIxMTYzLC0wLjE1MDM3OSB6IiAvPjwvZz48L3N2Zz4="/>
+  <text x="366" y="137" class="m kd">cargo test --lib aws_emulator -- --ignored</text>
+
+  <rect x="336" y="150" width="408" height="128" rx="6" class="card"/>
+  <text x="352" y="176" class="m e">SRC/AWS_EMULATOR.RS</text>
+  <text x="352" y="202" class="m k">root_volume_grows_through_modification_states</text>
+  <text x="352" y="222" class="m k">throughput_and_iops_ride_along_with_the_resize</text>
+  <text x="352" y="242" class="m k">run_script_reports_guest_output_and_failures</text>
+  <text x="352" y="262" class="m k">reconcile_grows_a_tagged_instance_end_to_end</text>
+
+  <rect x="336" y="294" width="408" height="150" rx="6" class="hi"/>
+  <text x="352" y="320" class="m e">UNDER TEST</text>
+  <rect x="644" y="306" width="84" height="22" rx="11" fill="#3291ff"/>
+  <text x="686" y="321" text-anchor="middle" class="t b">real SDK</text>
+  <text x="352" y="346" class="t n">Production clients</text>
+  <text x="352" y="370" class="m k">Clients::new  aws-sdk-ec2, aws-sdk-ssm</text>
+  <text x="352" y="390" class="m k">modify_volume, wait_for_modification</text>
+  <text x="352" y="410" class="m k">run_script, Resizer::reconcile</text>
+  <text x="352" y="430" class="t l">FakeSsm scripts df and growpart in reconcile</text>
+
+  <rect x="336" y="460" width="408" height="84" rx="6" class="card"/>
+  <text x="352" y="486" class="m e">SEED</text>
+  <text x="352" y="510" class="t d">RunInstances with a 20 GiB gp3 root volume</text>
+  <text x="352" y="530" class="t d">IAM role and SSM instance profile</text>
+  <rect x="820" y="110" width="340" height="450" rx="10" class="bound"/>
+  <text x="836" y="137" class="t l">AWS Emulator container <tspan class="m kd">127.0.0.1:9297</tspan></text>
+
+  <rect x="836" y="150" width="308" height="190" rx="6" class="card"/>
+  <text x="852" y="176" class="m e">EC2</text>
+  <text x="852" y="202" class="m k">DescribeInstances</text>
+  <text x="852" y="222" class="m k">DescribeVolumes</text>
+  <text x="852" y="242" class="m k">ModifyVolume</text>
+  <text x="852" y="262" class="m k">DescribeVolumesModifications</text>
+  <text x="852" y="282" class="m k">DescribeInstanceTypes</text>
+  <text x="852" y="310" class="t l">modifying, optimizing, completed</text>
+  <text x="852" y="328" class="t l">500 ms apart</text>
+
+  <rect x="836" y="356" width="308" height="104" rx="6" class="card"/>
+  <text x="852" y="382" class="m e">SSM</text>
+  <text x="852" y="406" class="m k">SendCommand</text>
+  <text x="852" y="426" class="m k">GetCommandInvocation</text>
+  <text x="852" y="448" class="t l">Guest shell runs echo, no df</text>
+
+  <rect x="836" y="476" width="308" height="68" rx="6" class="card"/>
+  <text x="852" y="502" class="m e">IAM</text>
+  <text x="852" y="526" class="m k">CreateRole, CreateInstanceProfile</text>
+
+  <rect x="820" y="590" width="340" height="44" rx="6" class="chip"/>
+  <text x="836" y="617" class="t l">Temp dir <tspan class="m kd">ca.pem, emulator_credentials</tspan></text>
+  <path d="M160 150 V100 H990 V106" class="edge" marker-end="url(#arrow)"/>
+  <circle cx="575" cy="100" r="11" fill="#ededed"/>
+  <text x="575" y="104.5" text-anchor="middle" class="t b">1</text>
+  <text x="594" y="92" class="t l">build and start</text>
+
+  <path d="M990 590 V570" class="dash"/>
+  <path d="M820 612 H160 V544" class="dash" marker-end="url(#arrow)"/>
+  <circle cx="575" cy="612" r="11" fill="#ededed"/>
+  <text x="575" y="616.5" text-anchor="middle" class="t b">2</text>
+  <text x="594" y="602" class="t l">writes CA and keys per run</text>
+
+  <path d="M292 214 H332" class="edge" marker-end="url(#arrow)"/>
+  <circle cx="310" cy="214" r="11" fill="#ededed"/>
+  <text x="310" y="218.5" text-anchor="middle" class="t b">3</text>
+
+  <path d="M744 330 H780 V245 H832" class="lead" marker-end="url(#arrow-hi)"/>
+  <path d="M744 408 H832" class="lead" marker-end="url(#arrow-hi)"/>
+  <path d="M744 510 H832" class="edge" marker-end="url(#arrow)"/>
+  <circle cx="790" cy="408" r="11" fill="#3291ff"/>
+  <text x="790" y="412.5" text-anchor="middle" class="t b">4</text>
+
+  <text x="40" y="686" class="t s">The loopback guard fails every test when AWS_ENDPOINT_URL is not 127.0.0.1 or localhost, so no call reaches a real account</text>
+  </g>
+</svg>
