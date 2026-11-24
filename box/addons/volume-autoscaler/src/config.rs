@@ -136,8 +136,8 @@ pub struct Config {
     pub pod_name: String,
     pub pod_namespace: String,
     pub pod_uid: String,
-    /// Enables single-active-instance leader election via a Lease. Ignored
-    /// when `pod_name` is empty.
+    /// Enables single-active-instance leader election via a Lease. Inside a
+    /// cluster it needs `pod_name` and `pod_namespace`, or startup fails.
     pub leader_elect: bool,
     pub lease_name: String,
     pub alertmanager_enabled: bool,

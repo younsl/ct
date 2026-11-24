@@ -12,6 +12,7 @@ Enforces the SSM Run Command timeout floor and adds AWS Emulator tests for the E
 
 ### Changed
 
+- Startup fails inside a cluster when `leaderElect` is `true` but `POD_NAME` or `POD_NAMESPACE` is unset. It used to run every replica without leader election, so two replicas could reconcile the same volumes and claims. The chart always sets both. Outside a cluster (a local run) it logs a warning and runs directly. Added after the first build of this version, so the image is rebuilt at the same version.
 - AWS SDK update within semver: aws-config 1.13.3, aws-sdk-ec2 1.283.0, aws-sdk-ssm 1.139.0, and the smithy runtime crates. The pin-utils unmaintained warning from the previous SDK is gone.
 
 ### Security

@@ -74,6 +74,36 @@ impl Controllers {
     }
 }
 
+/// Whether the loops run under a Lease or directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeaderMode {
+    Elect,
+    Direct,
+}
+
+/// Resolves the leader mode before anything starts. Inside a cluster a
+/// missing Pod identity fails startup: every replica would run directly and
+/// reconcile the same volumes and claims. Outside a cluster (local runs) the
+/// loops run directly.
+fn leader_mode(cfg: &Config, in_cluster: bool) -> Result<LeaderMode> {
+    if !cfg.leader_elect {
+        return Ok(LeaderMode::Direct);
+    }
+    if !cfg.pod_name.is_empty() && !cfg.pod_namespace.is_empty() {
+        return Ok(LeaderMode::Elect);
+    }
+    if in_cluster {
+        anyhow::bail!(
+            "leaderElect is true but POD_NAME or POD_NAMESPACE is unset, so replicas cannot elect a leader and would all reconcile: set both from the downward API, or set leaderElect: false to run a single replica"
+        );
+    }
+    Ok(LeaderMode::Direct)
+}
+
+fn in_cluster() -> bool {
+    std::env::var_os("KUBERNETES_SERVICE_HOST").is_some_and(|v| !v.is_empty())
+}
+
 /// Loads the collaborators and runs the enabled controllers until SIGINT or
 /// SIGTERM.
 #[allow(clippy::too_many_lines)]
@@ -101,6 +131,12 @@ pub async fn run(cfg: Config, enabled: Controllers) -> Result<()> {
     if enabled.persistent_volume_claim_autoscaler && cfg.metrics.url.is_empty() {
         anyhow::bail!(
             "metrics.url is required by the persistent-volume-claim-autoscaler controller"
+        );
+    }
+    let mode = leader_mode(&cfg, in_cluster())?;
+    if cfg.leader_elect && mode == LeaderMode::Direct {
+        warn!(
+            "POD_NAME or POD_NAMESPACE unset outside a cluster; leader election disabled, running directly"
         );
     }
     if enabled.instance_volume_autoscaler {
@@ -254,7 +290,7 @@ pub async fn run(cfg: Config, enabled: Controllers) -> Result<()> {
 
     // Leader election lets the Deployment scale to multiple replicas for HA
     // while only the leader reconciles.
-    if cfg.leader_elect && !cfg.pod_name.is_empty() {
+    if mode == LeaderMode::Elect {
         let leases = KubeLeases::new(client.clone(), &cfg.pod_namespace, &cfg.lease_name);
         let leader_cfg = LeaderConfig {
             identity: cfg.pod_name.clone(),
@@ -269,9 +305,6 @@ pub async fn run(cfg: Config, enabled: Controllers) -> Result<()> {
                 err
             })?;
     } else {
-        if cfg.leader_elect {
-            info!("POD_NAME unset; leader election disabled, running directly");
-        }
         run_loop(shutdown.clone()).await;
     }
 
@@ -919,6 +952,42 @@ mod tests {
             _: &crate::autoscaler::instance_volume::crd::InstanceVolumeAutoscalerStatus,
         ) -> Result<(), String> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn leader_mode_requires_pod_identity_in_cluster() {
+        let with = |elect: bool, name: &str, ns: &str| Config {
+            leader_elect: elect,
+            pod_name: name.into(),
+            pod_namespace: ns.into(),
+            ..cfg()
+        };
+
+        for in_cluster in [true, false] {
+            assert_eq!(
+                leader_mode(&with(true, "pod-0", "kube-system"), in_cluster).unwrap(),
+                LeaderMode::Elect
+            );
+            assert_eq!(
+                leader_mode(&with(false, "", ""), in_cluster).unwrap(),
+                LeaderMode::Direct,
+                "leaderElect: false is the explicit single-replica opt-out"
+            );
+        }
+
+        for (name, ns) in [("", "kube-system"), ("pod-0", ""), ("", "")] {
+            let err = leader_mode(&with(true, name, ns), true).unwrap_err();
+            assert!(
+                err.to_string()
+                    .starts_with("leaderElect is true but POD_NAME or POD_NAMESPACE is unset"),
+                "{err}"
+            );
+            assert_eq!(
+                leader_mode(&with(true, name, ns), false).unwrap(),
+                LeaderMode::Direct,
+                "local runs outside a cluster keep running"
+            );
         }
     }
 

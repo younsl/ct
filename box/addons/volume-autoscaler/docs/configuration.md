@@ -20,7 +20,7 @@ ssmCommandTimeout: 5m                  # SSM Run Command timeout, at least 30s
 ssmPollInterval: 1s                    # delay between SSM command and volume modification status polls
 volumeModifyTimeout: 10m               # ModifyVolume optimizing-wait timeout
 dryRun: false                          # measure and decide only
-leaderElect: true                      # HA leader election; requires in-cluster config
+leaderElect: true                      # HA leader election, fails startup in a cluster without POD_NAME and POD_NAMESPACE
 logLevel: info                         # debug, info, warn, error
 logFormat: json                        # json or text
 alertmanager:

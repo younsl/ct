@@ -70,6 +70,8 @@ so extra replicas stand by and only the leader reconciles. This avoids concurren
 `ModifyVolume` calls against the same volume. The leader holds a
 `coordination.k8s.io` [Lease][k8s-leases] in its own namespace.
 
+Inside a cluster, `leaderElect: true` without `POD_NAME` and `POD_NAMESPACE` fails startup instead of letting every replica reconcile. The chart always sets both from the downward API. Outside a cluster (a local run) the controller logs a warning and runs directly.
+
 ![High availability with two replicas and a Lease](assets/high-availability.svg)
 
 [ebs-modify-reqs]: https://docs.aws.amazon.com/ebs/latest/userguide/modify-volume-requirements.html

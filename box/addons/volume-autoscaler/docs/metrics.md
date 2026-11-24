@@ -504,8 +504,8 @@ whose loops have wedged. Any liveness alert over the counters above must be
 scoped with `and on (pod) volume_autoscaler_leader == 1`, or it fires on
 every non-leader replica as soon as the Deployment is scaled past one.
 
-When leader election is disabled, or `POD_NAME` is unset, the process runs the
-loops directly and reports `1`.
+When leader election is disabled, or `POD_NAME` is unset in a local run outside a cluster, the process runs the
+loops directly and reports `1`. Inside a cluster a missing `POD_NAME` or `POD_NAMESPACE` fails startup instead.
 
 ## Example queries
 
