@@ -15,6 +15,8 @@
 mod alertmanager;
 mod annotations;
 pub mod autoscaler;
+#[cfg(test)]
+mod aws_emulator;
 mod awsx;
 pub mod cli;
 pub mod config;

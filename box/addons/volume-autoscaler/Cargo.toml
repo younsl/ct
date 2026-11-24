@@ -84,6 +84,7 @@ tempfile = "3.27.0"
 # Paused-clock tests for the controller loop
 tokio = { version = "1.54.1", features = ["test-util"] }
 indoc = "2.0.8"
+aws-sdk-iam = { version = "1.139.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "rt-tokio"] }
 
 [lints.rust]
 unsafe_code = "forbid"

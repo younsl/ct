@@ -5,7 +5,7 @@ IMAGE      := $(REGISTRY)/$(BINARY)
 COVER_MIN  ?= 70
 CONFIG     ?= config.example.yaml
 
-.PHONY: all build release run dev validate crd test coverage fmt lint check clean \
+.PHONY: all build release run dev validate crd test coverage fmt lint check clean emulator-test \
         zigbuild-amd64 zigbuild-arm64 zigbuild docker-build docker-push help
 
 .DEFAULT_GOAL := help
@@ -40,6 +40,10 @@ crd:
 ## test: run tests
 test:
 	cargo test
+
+## emulator-test: run the EC2 and SSM tests against AWS Emulator in a container (docker or podman)
+emulator-test:
+	./tests/aws-emulator/run.sh
 
 ## coverage: enforce minimum line coverage (cargo-llvm-cov)
 coverage:
