@@ -2,6 +2,26 @@
 
 Notable changes to the volume-autoscaler app (the container image), newest first. Entries are headed by the image version and its release date (KST).
 
+## 0.3.0 (2026-11-24)
+
+Enforces the SSM Run Command timeout floor and adds AWS Emulator tests for the EC2 root volume growth path.
+
+### Fixed
+
+- `ssmCommandTimeout` below `30s` is raised to `30s` with a config warning. SSM rejects a `TimeoutSeconds` below 30, so a shorter value failed every measure and resize on real AWS.
+
+### Changed
+
+- AWS SDK update within semver: aws-config 1.13.3, aws-sdk-ec2 1.283.0, aws-sdk-ssm 1.139.0, and the smithy runtime crates. The pin-utils unmaintained warning from the previous SDK is gone.
+
+### Security
+
+- No patchable advisory. `cargo audit` and a Trivy scan of the lockfile report no vulnerability. The unmaintained warnings for chrono and unsafe-libyaml (through serde_yaml) remain, as neither has a replacement release.
+
+### Development
+
+- `make emulator-test` runs ignored tests against [AWS Emulator](https://github.com/aws/aws-emulator) through the real AWS SDK clients: instance discovery, the `modifying`, `optimizing`, `completed` states of a resize, the `IncorrectModificationState` refusal, throughput and IOPS changes, SSM Run Command results, and a full reconcile pass. See [docs/development.md](docs/development.md#aws-emulator).
+
 ## 0.2.1 (2026-11-18)
 
 Dependency update for RUSTSEC advisories. No behavior change.
