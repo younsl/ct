@@ -50,8 +50,11 @@ const MAX_LISTED_TOOLS: usize = 3;
 /// the rest.
 const MAX_INDICATED_TOOLS: usize = 1;
 
-/// The typing indicator shown while a mention waits for a slot.
-const QUEUED_INDICATOR: &str = "실행 슬롯을 기다리는 중... ⏳";
+/// Slack refused a 51 character typing indicator line with
+/// `invalid_arguments` and took a 50 character one, so lines stay under 50.
+/// Counted in UTF-16 units, which an emoji outside the BMP fills twice, to
+/// stay on the safe side of how Slack counts.
+const INDICATOR_MAX_LEN: usize = 49;
 
 /// Matches the leading user mention, which Slack renders as a link rather
 /// than as the handle people typed. The anchor is what keeps this to the
@@ -333,6 +336,7 @@ impl Gateway {
             started,
             interval: self.cfg.chat_status_interval,
             style: self.cfg.chat_status_style,
+            agent: agent.clone(),
             native: AtomicBool::new(false),
             ts: Mutex::new(None),
         });
@@ -586,6 +590,7 @@ struct StatusMessage {
     /// first status standing until the answer replaces it.
     interval: Duration,
     style: ChatStatusStyle,
+    agent: String,
     /// Set once the typing indicator was accepted, which makes it the status
     /// for the rest of the turn.
     native: AtomicBool,
@@ -625,7 +630,7 @@ impl StatusMessage {
         if self.style == ChatStatusStyle::Assistant {
             match self
                 .slack
-                .set_thread_status(&self.channel, &self.thread, QUEUED_INDICATOR)
+                .set_thread_status(&self.channel, &self.thread, &queued_indicator(&self.agent))
                 .await
             {
                 Ok(()) => {
@@ -650,7 +655,7 @@ impl StatusMessage {
         loop {
             tokio::select! {
                 out = &mut fut => return out,
-                () = sleep(INDICATOR_KEEPALIVE) => self.indicate(QUEUED_INDICATOR).await,
+                () = sleep(INDICATOR_KEEPALIVE) => self.indicate(&queued_indicator(&self.agent)).await,
             }
         }
     }
@@ -846,9 +851,13 @@ fn working_status(agent: &str, elapsed: Duration, activity: &Activity, with_aler
     )
 }
 
-/// Renders the typing indicator, which Slack shows after the app name. It
-/// is plain text and reads as an ongoing action, so it carries the same
-/// facts as [`working_status`] in a shorter form.
+/// The typing indicator shown while a mention waits for a slot.
+fn queued_indicator(agent: &str) -> String {
+    indicator_line(agent, "슬롯 대기 중", None, "⏳")
+}
+
+/// Renders the typing indicator: the agent, what it is doing, the elapsed
+/// time, and one emoji for the phase, in at most [`INDICATOR_MAX_LEN`].
 fn working_indicator(
     agent: &str,
     elapsed: Duration,
@@ -856,22 +865,66 @@ fn working_indicator(
     with_alert: bool,
 ) -> String {
     let elapsed = korean_duration(elapsed);
-    if !activity.tools.is_empty() {
-        return format!(
-            "{agent} 에이전트가 {} 도구를 실행하는 중... (경과 {elapsed}) 🔧",
-            tool_list(&activity.tools, "", MAX_INDICATED_TOOLS)
-        );
+    if let Some(first) = activity.tools.first() {
+        let rest = match activity.tools.len().saturating_sub(MAX_INDICATED_TOOLS) {
+            0 => String::new(),
+            n => format!(" 외 {n}개"),
+        };
+        let phrase = |tool: &str| format!("{tool}{rest} 실행 중");
+        let overflow =
+            utf16_len(&format!("{agent} {} 🔧", phrase(first))).saturating_sub(INDICATOR_MAX_LEN);
+        let tool = if overflow == 0 {
+            first.clone()
+        } else {
+            let keep = utf16_len(first).saturating_sub(overflow + 1);
+            format!("{}…", truncate_utf16(first, keep))
+        };
+        return indicator_line(agent, &phrase(&tool), Some(&elapsed), "🔧");
     }
     let (phrase, emoji) = match (activity.state.as_str(), with_alert) {
-        ("" | "submitted", true) => ("이 스레드의 알람으로 작업을 시작하는 중", "🚨"),
-        ("" | "submitted", false) => ("작업을 시작하는 중", "🚀"),
-        ("working", true) => ("이 스레드의 알람을 확인하는 중", "🔍"),
-        ("working", false) => ("답변을 준비하는 중", "💬"),
-        (other, _) => {
-            return format!("{agent} 에이전트가 확인하는 중... (상태 {other}, 경과 {elapsed}) 🤔");
-        }
+        ("" | "submitted", true) => ("알람 분석 시작 중".to_string(), "🚨"),
+        ("" | "submitted", false) => ("작업 시작 중".to_string(), "🚀"),
+        ("working", true) => ("알람 확인 중".to_string(), "🔍"),
+        ("working", false) => ("답변 준비 중".to_string(), "💬"),
+        (other, _) => (format!("{other} 상태 확인 중"), "🤔"),
     };
-    format!("{agent} 에이전트가 {phrase}... (경과 {elapsed}) {emoji}")
+    indicator_line(agent, &phrase, Some(&elapsed), emoji)
+}
+
+/// Joins an indicator line as `{agent} {phrase} ({elapsed}) {emoji}` and fits
+/// it into [`INDICATOR_MAX_LEN`]: the elapsed time goes first, then the text
+/// before the emoji is cut, so the emoji always closes the line.
+fn indicator_line(agent: &str, phrase: &str, elapsed: Option<&str>, emoji: &str) -> String {
+    if let Some(elapsed) = elapsed {
+        let line = format!("{agent} {phrase} ({elapsed}) {emoji}");
+        if utf16_len(&line) <= INDICATOR_MAX_LEN {
+            return line;
+        }
+    }
+    let line = format!("{agent} {phrase} {emoji}");
+    if utf16_len(&line) <= INDICATOR_MAX_LEN {
+        return line;
+    }
+    let tail = format!("… {emoji}");
+    let head = format!("{agent} {phrase}");
+    let keep = INDICATOR_MAX_LEN.saturating_sub(utf16_len(&tail));
+    format!("{}{tail}", truncate_utf16(&head, keep))
+}
+
+fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// Cuts `s` to at most `max` UTF-16 units without splitting a character.
+fn truncate_utf16(s: &str, max: usize) -> &str {
+    let mut units = 0;
+    for (i, c) in s.char_indices() {
+        units += c.len_utf16();
+        if units > max {
+            return &s[..i];
+        }
+    }
+    s
 }
 
 /// Names the running tools, each wrapped in `quote`, listing at most `max`
@@ -1813,28 +1866,76 @@ mod tests {
         let d = Duration::from_secs(95);
         assert_eq!(
             working_indicator("triage", d, &activity("working", "prometheus_query"), true),
-            "triage 에이전트가 prometheus_query 도구를 실행하는 중... (경과 1분 35초) 🔧"
+            "triage prometheus_query 실행 중 (1분 35초) 🔧"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("submitted", ""), true),
-            "triage 에이전트가 이 스레드의 알람으로 작업을 시작하는 중... (경과 1분 35초) 🚨"
+            "triage 알람 분석 시작 중 (1분 35초) 🚨"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("", ""), false),
-            "triage 에이전트가 작업을 시작하는 중... (경과 1분 35초) 🚀"
+            "triage 작업 시작 중 (1분 35초) 🚀"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("working", ""), true),
-            "triage 에이전트가 이 스레드의 알람을 확인하는 중... (경과 1분 35초) 🔍"
+            "triage 알람 확인 중 (1분 35초) 🔍"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("working", ""), false),
-            "triage 에이전트가 답변을 준비하는 중... (경과 1분 35초) 💬"
+            "triage 답변 준비 중 (1분 35초) 💬"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("input-required", ""), false),
-            "triage 에이전트가 확인하는 중... (상태 input-required, 경과 1분 35초) 🤔"
+            "triage input-required 상태 확인 중 (1분 35초) 🤔"
         );
+        assert_eq!(queued_indicator("triage"), "triage 슬롯 대기 중 ⏳");
+    }
+
+    #[test]
+    fn indicator_lines_fit_the_slack_limit() {
+        let agent = "aws-alert-triage-agent";
+        let d = Duration::from_secs(3599);
+        assert_eq!(
+            working_indicator(agent, d, &activity("working", ""), false),
+            "aws-alert-triage-agent 답변 준비 중 (59분 59초) 💬"
+        );
+        assert_eq!(
+            working_indicator(
+                agent,
+                d,
+                &activity("working", "prometheus_query,b,c"),
+                false
+            ),
+            "aws-alert-triage-agent prometheus_q… 외 2개 실행 중 🔧"
+        );
+        assert_eq!(
+            working_indicator(
+                agent,
+                d,
+                &activity("working", "platform_get_loki_components,b"),
+                false
+            ),
+            "aws-alert-triage-agent platform_get… 외 1개 실행 중 🔧"
+        );
+        let long = "security-alert-triage-agent-with-a-very-long-name";
+        for state in ["", "submitted", "working", "input-required"] {
+            for tools in [
+                "",
+                "k8s_get_resources",
+                "platform_get_loki_components,a,b",
+                "a,b,c,d,e,f,g,h,i,j,k,l",
+                "prometheus_query,k8s_get_resources,platform_get_loki_components,d,e,f,g,h,i,j,k,l",
+            ] {
+                for with_alert in [true, false] {
+                    for name in [agent, long] {
+                        let line = working_indicator(name, d, &activity(state, tools), with_alert);
+                        assert!(utf16_len(&line) <= INDICATOR_MAX_LEN, "{line}");
+                    }
+                }
+            }
+        }
+        assert!(utf16_len(&queued_indicator(long)) <= INDICATOR_MAX_LEN);
+        assert!(queued_indicator(long).ends_with("… ⏳"));
     }
 
     #[test]
@@ -1842,11 +1943,11 @@ mod tests {
         let d = Duration::from_secs(5);
         assert_eq!(
             working_indicator("aws", d, &activity("working", "a,b"), false),
-            "aws 에이전트가 a 외 1개 도구를 실행하는 중... (경과 5초) 🔧"
+            "aws a 외 1개 실행 중 (5초) 🔧"
         );
         assert_eq!(
             working_indicator("aws", d, &activity("working", "a,b,c,d,e"), false),
-            "aws 에이전트가 a 외 4개 도구를 실행하는 중... (경과 5초) 🔧"
+            "aws a 외 4개 실행 중 (5초) 🔧"
         );
         assert_eq!(
             working_status("aws", d, &activity("working", "a,b,c,d,e"), false),
@@ -1870,6 +1971,7 @@ mod tests {
             started: Instant::now(),
             interval: Duration::from_secs(10),
             style: ChatStatusStyle::Assistant,
+            agent: "aws".into(),
             native: AtomicBool::new(true),
             ts: Mutex::new(None),
         });
@@ -1913,14 +2015,12 @@ mod tests {
 
         let calls = slack.calls();
         assert!(
-            matches!(&calls[0], Call::ThreadStatus { channel, thread_ts, status } if channel == "C1" && thread_ts == "1.0" && status == QUEUED_INDICATOR)
+            matches!(&calls[0], Call::ThreadStatus { channel, thread_ts, status } if channel == "C1" && thread_ts == "1.0" && status.ends_with("슬롯 대기 중 ⏳"))
         );
         let shown = indicators(&slack);
         assert!(shown.len() >= 2, "{shown:?}");
         assert!(
-            shown[1].starts_with(
-                "alert-triage-agent 에이전트가 k8s_get_resources 도구를 실행하는 중..."
-            ),
+            shown[1].starts_with("alert-triage-agent k8s_get_resources 실행 중"),
             "{}",
             shown[1]
         );
@@ -1973,6 +2073,7 @@ mod tests {
             started: Instant::now(),
             interval: Duration::from_millis(20),
             style: ChatStatusStyle::Assistant,
+            agent: "aws".into(),
             native: AtomicBool::new(true),
             ts: Mutex::new(None),
         };
@@ -1984,7 +2085,8 @@ mod tests {
             })
             .await;
         assert_eq!(out, 7);
-        assert_eq!(indicators(&slack), vec![QUEUED_INDICATOR, QUEUED_INDICATOR]);
+        let queued = queued_indicator("aws");
+        assert_eq!(indicators(&slack), vec![queued.clone(), queued]);
     }
 
     #[tokio::test]

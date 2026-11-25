@@ -14,7 +14,8 @@ The typing indicator shows the agent's real progress instead of a generic "worki
 
 ### Changed
 
-- Every indicator line names the agent in full and ends in one emoji tied to the phase (⏳ queued, 🚀 or 🚨 starting, 💬 or 🔍 working, 🔧 tools running, 🤔 unknown state).
+- Every indicator line reads `{agent} {phrase} ({elapsed}) {emoji}` with one emoji tied to the phase (⏳ queued, 🚀 or 🚨 starting, 💬 or 🔍 working, 🔧 tools running, 🤔 unknown state). The queued line names the agent too.
+- Slack refuses an indicator line of 51 characters or more with `invalid_arguments`, which left only the queued line up. Lines stay under 50 characters: the elapsed time is dropped first, then the tool name is cut with `…`.
 
 ## 0.4.0 (2026-11-25)
 
