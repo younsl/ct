@@ -42,12 +42,16 @@ const INDICATOR_KEEPALIVE: Duration = Duration::from_secs(60);
 /// instead of only the status it started with.
 const PROGRESS_CHECK: Duration = Duration::from_secs(1);
 
-/// Caps the tool names a status lists, so a model fanning out to many tools
-/// does not push the elapsed time off the line.
+/// Caps the tool names a status message lists, so a model fanning out to
+/// many tools does not push the elapsed time off the line.
 const MAX_LISTED_TOOLS: usize = 3;
 
+/// The typing indicator is one short line, so it names one tool and counts
+/// the rest.
+const MAX_INDICATED_TOOLS: usize = 1;
+
 /// The typing indicator shown while a mention waits for a slot.
-const QUEUED_INDICATOR: &str = "실행 슬롯을 기다리는 중...";
+const QUEUED_INDICATOR: &str = "실행 슬롯을 기다리는 중... ⏳";
 
 /// Matches the leading user mention, which Slack renders as a link rather
 /// than as the handle people typed. The anchor is what keeps this to the
@@ -831,7 +835,10 @@ fn working_status(agent: &str, elapsed: Duration, activity: &Activity, with_aler
     let phrase = if activity.tools.is_empty() {
         state_phrase(&activity.state, with_alert)
     } else {
-        format!("{} 도구를 실행 중입니다.", tool_list(&activity.tools, "`"))
+        format!(
+            "{} 도구를 실행 중입니다.",
+            tool_list(&activity.tools, "`", MAX_LISTED_TOOLS)
+        )
     };
     format!(
         ":mag: kagent의 {agent} 에이전트가 {phrase} (경과 {})",
@@ -851,32 +858,32 @@ fn working_indicator(
     let elapsed = korean_duration(elapsed);
     if !activity.tools.is_empty() {
         return format!(
-            "{agent} 에이전트가 {} 도구를 실행하는 중... (경과 {elapsed})",
-            tool_list(&activity.tools, "")
+            "{agent} 에이전트가 {} 도구를 실행하는 중... (경과 {elapsed}) 🔧",
+            tool_list(&activity.tools, "", MAX_INDICATED_TOOLS)
         );
     }
-    let phrase = match (activity.state.as_str(), with_alert) {
-        ("" | "submitted", true) => "이 스레드의 알람으로 작업을 시작하는 중",
-        ("" | "submitted", false) => "작업을 시작하는 중",
-        ("working", true) => "이 스레드의 알람을 확인하는 중",
-        ("working", false) => "답변을 준비하는 중",
+    let (phrase, emoji) = match (activity.state.as_str(), with_alert) {
+        ("" | "submitted", true) => ("이 스레드의 알람으로 작업을 시작하는 중", "🚨"),
+        ("" | "submitted", false) => ("작업을 시작하는 중", "🚀"),
+        ("working", true) => ("이 스레드의 알람을 확인하는 중", "🔍"),
+        ("working", false) => ("답변을 준비하는 중", "💬"),
         (other, _) => {
-            return format!("{agent} 에이전트가 확인하는 중... (상태 {other}, 경과 {elapsed})");
+            return format!("{agent} 에이전트가 확인하는 중... (상태 {other}, 경과 {elapsed}) 🤔");
         }
     };
-    format!("{agent} 에이전트가 {phrase}... (경과 {elapsed})")
+    format!("{agent} 에이전트가 {phrase}... (경과 {elapsed}) {emoji}")
 }
 
-/// Names the running tools, each wrapped in `quote`, listing at most
-/// [`MAX_LISTED_TOOLS`] and counting the rest.
-fn tool_list(tools: &[String], quote: &str) -> String {
+/// Names the running tools, each wrapped in `quote`, listing at most `max`
+/// and counting the rest.
+fn tool_list(tools: &[String], quote: &str, max: usize) -> String {
     let listed = tools
         .iter()
-        .take(MAX_LISTED_TOOLS)
+        .take(max)
         .map(|t| format!("{quote}{t}{quote}"))
         .collect::<Vec<_>>()
         .join(", ");
-    match tools.len().saturating_sub(MAX_LISTED_TOOLS) {
+    match tools.len().saturating_sub(max) {
         0 => listed,
         rest => format!("{listed} 외 {rest}개"),
     }
@@ -1806,27 +1813,27 @@ mod tests {
         let d = Duration::from_secs(95);
         assert_eq!(
             working_indicator("triage", d, &activity("working", "prometheus_query"), true),
-            "triage 에이전트가 prometheus_query 도구를 실행하는 중... (경과 1분 35초)"
+            "triage 에이전트가 prometheus_query 도구를 실행하는 중... (경과 1분 35초) 🔧"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("submitted", ""), true),
-            "triage 에이전트가 이 스레드의 알람으로 작업을 시작하는 중... (경과 1분 35초)"
+            "triage 에이전트가 이 스레드의 알람으로 작업을 시작하는 중... (경과 1분 35초) 🚨"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("", ""), false),
-            "triage 에이전트가 작업을 시작하는 중... (경과 1분 35초)"
+            "triage 에이전트가 작업을 시작하는 중... (경과 1분 35초) 🚀"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("working", ""), true),
-            "triage 에이전트가 이 스레드의 알람을 확인하는 중... (경과 1분 35초)"
+            "triage 에이전트가 이 스레드의 알람을 확인하는 중... (경과 1분 35초) 🔍"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("working", ""), false),
-            "triage 에이전트가 답변을 준비하는 중... (경과 1분 35초)"
+            "triage 에이전트가 답변을 준비하는 중... (경과 1분 35초) 💬"
         );
         assert_eq!(
             working_indicator("triage", d, &activity("input-required", ""), false),
-            "triage 에이전트가 확인하는 중... (상태 input-required, 경과 1분 35초)"
+            "triage 에이전트가 확인하는 중... (상태 input-required, 경과 1분 35초) 🤔"
         );
     }
 
@@ -1835,11 +1842,15 @@ mod tests {
         let d = Duration::from_secs(5);
         assert_eq!(
             working_indicator("aws", d, &activity("working", "a,b"), false),
-            "aws 에이전트가 a, b 도구를 실행하는 중... (경과 5초)"
+            "aws 에이전트가 a 외 1개 도구를 실행하는 중... (경과 5초) 🔧"
         );
         assert_eq!(
             working_indicator("aws", d, &activity("working", "a,b,c,d,e"), false),
-            "aws 에이전트가 a, b, c 외 2개 도구를 실행하는 중... (경과 5초)"
+            "aws 에이전트가 a 외 4개 도구를 실행하는 중... (경과 5초) 🔧"
+        );
+        assert_eq!(
+            working_status("aws", d, &activity("working", "a,b,c,d,e"), false),
+            ":mag: kagent의 aws 에이전트가 `a`, `b`, `c` 외 2개 도구를 실행 중입니다. (경과 5초)"
         );
         assert_eq!(
             working_status("aws", d, &activity("working", "a,b"), false),

@@ -36,6 +36,7 @@ Designs:
 
 - [Slack mention invocation](docs/designs/slack-mention-invocation.md)
 - [Agent access policy](docs/designs/agent-access-policy.md)
+- [Slack status indicator](docs/designs/slack-status-indicator.md)
 
 ## Installation
 
