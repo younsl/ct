@@ -2,6 +2,16 @@
 
 Notable changes to the kagent-gateway app (the container image), newest first. Entries are headed by the image version and its release date (KST).
 
+## 0.4.1 (2026-11-25)
+
+The typing indicator shows the agent's real progress instead of a generic "working" label.
+
+### Fixed
+
+- In channel threads Slack showed the indicator only as a generic "<App> working" label. The text now also goes out as the `loading_messages` entry, which Slack renders as the custom line.
+- The status moved only every `CHAT_STATUS_INTERVAL`, so a turn of 5 to 15 seconds ended before its first refresh. Progress is now checked every second, and a change in the task state or running tools is shown on the next check. An unchanged status still refreshes every `CHAT_STATUS_INTERVAL`.
+- Tools a model calls in parallel are all listed (up to three, then a count), instead of only the last one.
+
 ## 0.4.0 (2026-11-25)
 
 A mention is answered under Slack's native typing indicator instead of a status reply rewritten in place.
