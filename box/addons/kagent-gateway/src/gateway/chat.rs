@@ -37,6 +37,15 @@ const STATUS_UPDATE_TIMEOUT: Duration = Duration::from_secs(15);
 /// when `CHAT_STATUS_INTERVAL` is longer.
 const INDICATOR_KEEPALIVE: Duration = Duration::from_secs(60);
 
+/// How often the ticker looks at the agent's progress. A change is shown on
+/// the next look, so a turn of a few seconds still shows the tools it ran
+/// instead of only the status it started with.
+const PROGRESS_CHECK: Duration = Duration::from_secs(1);
+
+/// Caps the tool names a status lists, so a model fanning out to many tools
+/// does not push the elapsed time off the line.
+const MAX_LISTED_TOOLS: usize = 3;
+
 /// The typing indicator shown while a mention waits for a slot.
 const QUEUED_INDICATOR: &str = "실행 슬롯을 기다리는 중...";
 
@@ -113,8 +122,8 @@ impl Handler for Arc<Gateway> {
 struct Activity {
     /// The A2A task state.
     state: String,
-    /// The tool the agent is waiting on, empty while the model itself works.
-    tool: String,
+    /// The tools the agent is waiting on, empty while the model itself works.
+    tools: Vec<String>,
 }
 
 type ProgressState = Arc<Mutex<Activity>>;
@@ -371,7 +380,7 @@ impl Gateway {
         let hook: crate::a2a::ProgressHook = Arc::new(move |p: Progress| {
             *hook_state.lock().expect("progress state lock") = Activity {
                 state: p.state,
-                tool: p.tool,
+                tools: p.tools,
             };
         });
 
@@ -762,13 +771,25 @@ impl StatusMessage {
             };
         }
         let child = token.clone();
+        let check = PROGRESS_CHECK.min(interval);
         let handle = tokio::spawn(async move {
+            // What the status last showed and when: a change in what the
+            // agent reports is shown on the next check, and an unchanged one
+            // only once `interval` has passed, which moves the elapsed time
+            // and keeps the indicator alive.
+            let mut shown: Option<Activity> = None;
+            let mut refreshed = Instant::now();
             loop {
                 tokio::select! {
                     () = child.cancelled() => return,
-                    () = sleep(interval) => {}
+                    () = sleep(check) => {}
                 }
                 let current = state.lock().expect("progress state lock").clone();
+                if shown.as_ref() == Some(&current) && refreshed.elapsed() < interval {
+                    continue;
+                }
+                shown = Some(current.clone());
+                refreshed = Instant::now();
                 let elapsed = self.started.elapsed();
                 if self.native() {
                     self.indicate(&working_indicator(&agent, elapsed, &current, with_alert))
@@ -807,10 +828,10 @@ fn queued_status() -> String {
 /// number the line already shows, and the one case where it diverges, a
 /// controller that stopped answering, is what `agent_requests_total` reports.
 fn working_status(agent: &str, elapsed: Duration, activity: &Activity, with_alert: bool) -> String {
-    let phrase = if activity.tool.is_empty() {
+    let phrase = if activity.tools.is_empty() {
         state_phrase(&activity.state, with_alert)
     } else {
-        format!("`{}` 도구를 실행 중입니다.", activity.tool)
+        format!("{} 도구를 실행 중입니다.", tool_list(&activity.tools, "`"))
     };
     format!(
         ":mag: kagent의 {agent} 에이전트가 {phrase} (경과 {})",
@@ -828,10 +849,10 @@ fn working_indicator(
     with_alert: bool,
 ) -> String {
     let elapsed = korean_duration(elapsed);
-    if !activity.tool.is_empty() {
+    if !activity.tools.is_empty() {
         return format!(
             "{agent} 에이전트가 {} 도구를 실행하는 중... (경과 {elapsed})",
-            activity.tool
+            tool_list(&activity.tools, "")
         );
     }
     let phrase = match (activity.state.as_str(), with_alert) {
@@ -844,6 +865,21 @@ fn working_indicator(
         }
     };
     format!("{agent} 에이전트가 {phrase}... (경과 {elapsed})")
+}
+
+/// Names the running tools, each wrapped in `quote`, listing at most
+/// [`MAX_LISTED_TOOLS`] and counting the rest.
+fn tool_list(tools: &[String], quote: &str) -> String {
+    let listed = tools
+        .iter()
+        .take(MAX_LISTED_TOOLS)
+        .map(|t| format!("{quote}{t}{quote}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match tools.len().saturating_sub(MAX_LISTED_TOOLS) {
+        0 => listed,
+        rest => format!("{listed} 외 {rest}개"),
+    }
 }
 
 /// Picks the typing indicator refresh cadence: the configured interval, but
@@ -1724,7 +1760,11 @@ mod tests {
     fn activity(state: &str, tool: &str) -> Activity {
         Activity {
             state: state.into(),
-            tool: tool.into(),
+            tools: tool
+                .split(',')
+                .filter(|t| !t.is_empty())
+                .map(String::from)
+                .collect(),
         }
     }
 
@@ -1791,6 +1831,55 @@ mod tests {
     }
 
     #[test]
+    fn parallel_tools_are_listed_and_capped() {
+        let d = Duration::from_secs(5);
+        assert_eq!(
+            working_indicator("aws", d, &activity("working", "a,b"), false),
+            "aws 에이전트가 a, b 도구를 실행하는 중... (경과 5초)"
+        );
+        assert_eq!(
+            working_indicator("aws", d, &activity("working", "a,b,c,d,e"), false),
+            "aws 에이전트가 a, b, c 외 2개 도구를 실행하는 중... (경과 5초)"
+        );
+        assert_eq!(
+            working_status("aws", d, &activity("working", "a,b"), false),
+            ":mag: kagent의 aws 에이전트가 `a`, `b` 도구를 실행 중입니다. (경과 5초)"
+        );
+    }
+
+    #[tokio::test]
+    async fn tracker_shows_a_change_before_the_interval_and_refreshes_after_it() {
+        tokio::time::pause();
+        let slack = Arc::new(FakeSlack::default());
+        let status = Arc::new(StatusMessage {
+            slack: slack.clone(),
+            metrics: Arc::new(Metrics::new()),
+            channel: "C1".into(),
+            thread: "1.0".into(),
+            started: Instant::now(),
+            interval: Duration::from_secs(10),
+            style: ChatStatusStyle::Assistant,
+            native: AtomicBool::new(true),
+            ts: Mutex::new(None),
+        });
+        let state: ProgressState = Arc::default();
+        let tracker = status.clone().track(state.clone(), "aws".into(), false);
+
+        sleep(Duration::from_millis(1500)).await;
+        assert_eq!(indicators(&slack).len(), 1, "first look shows the start");
+        *state.lock().unwrap() = activity("working", "k8s_get_resources");
+        sleep(Duration::from_secs(1)).await;
+        let shown = indicators(&slack);
+        assert_eq!(shown.len(), 2, "{shown:?}");
+        assert!(shown[1].contains("k8s_get_resources"), "{}", shown[1]);
+        sleep(Duration::from_secs(5)).await;
+        assert_eq!(indicators(&slack).len(), 2, "unchanged within the interval");
+        sleep(Duration::from_secs(6)).await;
+        assert_eq!(indicators(&slack).len(), 3, "refreshed after the interval");
+        tracker.stop().await;
+    }
+
+    #[test]
     fn indicator_interval_stays_inside_the_slack_timeout() {
         assert_eq!(indicator_interval(Duration::ZERO), INDICATOR_KEEPALIVE);
         assert_eq!(
@@ -1808,7 +1897,7 @@ mod tests {
         let (g, slack, agent, metrics) = gateway(assistant_config());
         *agent.delay.lock().unwrap() = Duration::from_millis(120);
         *agent.states.lock().unwrap() = vec!["working"];
-        *agent.tool.lock().unwrap() = "k8s_get_resources";
+        *agent.tools.lock().unwrap() = vec!["k8s_get_resources"];
         run(&g, mention("<@UBOT> q")).await;
 
         let calls = slack.calls();

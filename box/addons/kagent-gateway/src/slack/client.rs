@@ -767,18 +767,23 @@ impl SlackClient for Client {
     /// Slack clears the indicator by itself when the app posts in the thread,
     /// or two minutes after the last call, so a long turn has to refresh it.
     /// It needs only `chat:write`, the scope that also posts the answer.
+    ///
+    /// The text goes out as the single `loading_messages` entry as well: in a
+    /// channel thread Slack shows `status` only as a generic "working" label
+    /// and renders the custom line from `loading_messages`.
     async fn set_thread_status(
         &self,
         channel: &str,
         thread_ts: &str,
         status: &str,
     ) -> Result<(), Error> {
-        self.write(
-            "assistant.threads.setStatus",
-            &json!({"channel_id": channel, "thread_ts": thread_ts, "status": status}),
-        )
-        .await
-        .map(|_| ())
+        let mut body = json!({"channel_id": channel, "thread_ts": thread_ts, "status": status});
+        if !status.is_empty() {
+            body["loading_messages"] = json!([status]);
+        }
+        self.write("assistant.threads.setStatus", &body)
+            .await
+            .map(|_| ())
     }
 
     /// The mention path compares a configured allow list against the ID the
@@ -1412,9 +1417,12 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/assistant.threads.setStatus"))
             .and(header("authorization", "Bearer xoxb-test"))
-            .and(body_partial_json(
-                json!({"channel_id": "C0000001", "thread_ts": "1.0", "status": "is thinking..."}),
-            ))
+            .and(body_partial_json(json!({
+                "channel_id": "C0000001",
+                "thread_ts": "1.0",
+                "status": "is thinking...",
+                "loading_messages": ["is thinking..."]
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
             .expect(1)
             .mount(&server)
@@ -1434,11 +1442,15 @@ mod tests {
             )
             .mount(&server)
             .await;
-        let err = client(&server, Arc::new(Metrics::new()))
+        let c = client(&server, Arc::new(Metrics::new()));
+        let err = c
             .set_thread_status("C0000001", "1.0", "")
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "slack error: missing_scope");
+        let received = server.received_requests().await.unwrap();
+        let clear: Value = serde_json::from_slice(&received[0].body).unwrap();
+        assert!(clear.get("loading_messages").is_none());
     }
 
     #[tokio::test]

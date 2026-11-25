@@ -999,8 +999,8 @@ pub mod testing {
         pub error: Mutex<Option<String>>,
         pub delay: Mutex<Duration>,
         pub states: Mutex<Vec<&'static str>>,
-        /// The running tool every progress report carries.
-        pub tool: Mutex<&'static str>,
+        /// The running tools every progress report carries.
+        pub tools: Mutex<Vec<&'static str>>,
         pub inflight: std::sync::atomic::AtomicUsize,
         pub max_inflight: std::sync::atomic::AtomicUsize,
         /// Holds the slot for the whole delay even past the deadline, which
@@ -1027,7 +1027,13 @@ pub mod testing {
                         task_id: "task-1".into(),
                         state: (*state).into(),
                         polls: u32::try_from(i).unwrap(),
-                        tool: (*self.tool.lock().unwrap()).into(),
+                        tools: self
+                            .tools
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .map(|t| (*t).to_string())
+                            .collect(),
                     });
                 }
             }

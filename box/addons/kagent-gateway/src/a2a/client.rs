@@ -61,10 +61,10 @@ pub struct Progress {
     pub state: String,
     /// How many `tasks/get` reads have been spent so far.
     pub polls: u32,
-    /// The tool the agent called last and has not had a result for yet.
-    /// Empty while the model itself is working, or when the agent records no
-    /// tool calls in its task history.
-    pub tool: String,
+    /// The tools the agent called last and has no result for yet, several
+    /// when the model called them in parallel. Empty while the model itself
+    /// is working, or when the agent records no tool calls in its task.
+    pub tools: Vec<String>,
 }
 
 /// The outcome of one analysis run.
@@ -335,7 +335,7 @@ impl Client {
                     task_id: task_id.to_string(),
                     state: state.clone(),
                     polls,
-                    tool: running_tool(&out),
+                    tools: running_tools(&out),
                 },
             );
 
@@ -571,7 +571,7 @@ impl AgentClient for Client {
                 task_id: task_id.clone(),
                 state: state.clone(),
                 polls: 0,
-                tool: running_tool(&out),
+                tools: running_tools(&out),
             },
         );
 
@@ -591,25 +591,44 @@ impl AgentClient for Client {
     }
 }
 
-/// Finds the tool the agent is waiting on: the newest tool event in the task,
-/// when it is a call rather than its result. kagent records each call and
-/// result as a data part, with the newest event in `status.message` and the
-/// older ones in `history`.
-fn running_tool(out: &RpcResult) -> String {
-    let status = out.status.message.iter().flat_map(|m| m.parts.iter().rev());
-    let history = out.history.iter().rev().flat_map(|h| h.parts.iter().rev());
-    let Some(part) = status.chain(history).find(|p| p.tool_event().is_some()) else {
-        return String::new();
+/// Finds the tools the agent is waiting on. kagent records the calls a
+/// model makes in one step as one message and their results as the next, with
+/// the newest message in `status.message` and the older ones in `history`, so
+/// the newest message carrying tool parts holds either the pending calls or
+/// their results.
+fn running_tools(out: &RpcResult) -> Vec<String> {
+    let status = out.status.message.iter().map(|m| m.parts.as_slice());
+    let history = out.history.iter().rev().map(|h| h.parts.as_slice());
+    let Some(parts) = status
+        .chain(history)
+        .find(|parts| parts.iter().any(|p| p.tool_event().is_some()))
+    else {
+        return Vec::new();
     };
-    if part.tool_event() != Some("function_call") {
-        return String::new();
+    let name = |p: &Part| {
+        p.data
+            .as_ref()
+            .and_then(|d| d.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let answered: Vec<String> = parts
+        .iter()
+        .filter(|p| p.tool_event() == Some("function_response"))
+        .map(name)
+        .collect();
+    let mut calls: Vec<String> = Vec::new();
+    for call in parts
+        .iter()
+        .filter(|p| p.tool_event() == Some("function_call"))
+        .map(name)
+    {
+        if !call.is_empty() && !answered.contains(&call) && !calls.contains(&call) {
+            calls.push(call);
+        }
     }
-    part.data
-        .as_ref()
-        .and_then(|d| d.get("name"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string()
+    calls
 }
 
 /// Calls a progress hook when the caller supplied one.
@@ -919,7 +938,7 @@ mod tests {
             .iter()
             .map(|p| (p.state.clone(), p.polls))
             .collect();
-        assert!(seen.lock().unwrap().iter().all(|p| p.tool.is_empty()));
+        assert!(seen.lock().unwrap().iter().all(|p| p.tools.is_empty()));
         assert_eq!(
             states,
             vec![
@@ -1248,33 +1267,43 @@ mod tests {
     }
 
     #[test]
-    fn running_tool_reads_the_newest_call_in_either_key_form() {
+    fn running_tools_read_the_newest_calls_in_either_key_form() {
         let out = task_result(json!({"status": {"state": "working", "message": {
             "parts": [tool_part("function_call", "kagent.dev/a2a/part-type", "k8s_get_resources")]
         }}}));
-        assert_eq!(running_tool(&out), "k8s_get_resources");
+        assert_eq!(running_tools(&out), ["k8s_get_resources"]);
 
         let out = task_result(json!({"status": {"state": "working"}, "history": [
             {"role": "user", "parts": [{"kind": "text", "text": "q"}]},
             {"role": "agent", "parts": [tool_part("function_call", "kagent_type", "prometheus_query")]}
         ]}));
-        assert_eq!(running_tool(&out), "prometheus_query");
+        assert_eq!(running_tools(&out), ["prometheus_query"]);
+
+        let out = task_result(json!({"status": {"state": "working", "message": {"parts": [
+            tool_part("function_call", "adk_type", "platform_get_loki_components"),
+            tool_part("function_call", "adk_type", "k8s_get_resources"),
+            tool_part("function_call", "adk_type", "k8s_get_resources")
+        ]}}}));
+        assert_eq!(
+            running_tools(&out),
+            ["platform_get_loki_components", "k8s_get_resources"]
+        );
     }
 
     #[test]
-    fn running_tool_is_empty_once_the_result_arrived_or_without_tool_parts() {
+    fn running_tools_are_empty_once_the_results_arrived_or_without_tool_parts() {
         let out = task_result(json!({"status": {"state": "working", "message": {
             "parts": [tool_part("function_response", "adk_type", "k8s_get_resources")]
         }}, "history": [
             {"role": "agent", "parts": [tool_part("function_call", "adk_type", "k8s_get_resources")]}
         ]}));
-        assert_eq!(running_tool(&out), "");
+        assert_eq!(running_tools(&out), Vec::<String>::new());
 
         let out = task_result(json!({"status": {"state": "working", "message": {
             "parts": [{"kind": "data", "data": {"name": "x"}, "metadata": {"other": "function_call"}},
                       {"kind": "text", "text": "thinking"}]
         }}}));
-        assert_eq!(running_tool(&out), "");
+        assert_eq!(running_tools(&out), Vec::<String>::new());
     }
 
     #[test]
