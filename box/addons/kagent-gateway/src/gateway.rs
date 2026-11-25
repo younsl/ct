@@ -809,6 +809,11 @@ pub mod testing {
             ts: String,
             name: String,
         },
+        ThreadStatus {
+            channel: String,
+            thread_ts: String,
+            status: String,
+        },
     }
 
     #[derive(Default)]
@@ -824,6 +829,8 @@ pub mod testing {
         pub parent: Mutex<Option<Result<ThreadMessage, slack::Error>>>,
         pub channel_ids: Mutex<HashMap<String, String>>,
         pub reaction_error: Mutex<Option<String>>,
+        /// Fails every thread status call when set.
+        pub thread_status_error: Mutex<Option<String>>,
     }
 
     impl FakeSlack {
@@ -957,6 +964,24 @@ pub mod testing {
             Ok(())
         }
 
+        async fn set_thread_status(
+            &self,
+            channel: &str,
+            thread_ts: &str,
+            status: &str,
+        ) -> Result<(), slack::Error> {
+            self.record(Call::ThreadStatus {
+                channel: channel.into(),
+                thread_ts: thread_ts.into(),
+                status: status.into(),
+            });
+            let failure = self.thread_status_error.lock().unwrap().clone();
+            if let Some(err) = failure {
+                return Err(slack::Error::Other(anyhow::anyhow!(err)));
+            }
+            Ok(())
+        }
+
         async fn resolve_channel_id(&self, channel: &str) -> Result<String, slack::Error> {
             let ids = self.channel_ids.lock().unwrap();
             ids.get(channel)
@@ -974,6 +999,8 @@ pub mod testing {
         pub error: Mutex<Option<String>>,
         pub delay: Mutex<Duration>,
         pub states: Mutex<Vec<&'static str>>,
+        /// The running tool every progress report carries.
+        pub tool: Mutex<&'static str>,
         pub inflight: std::sync::atomic::AtomicUsize,
         pub max_inflight: std::sync::atomic::AtomicUsize,
         /// Holds the slot for the whole delay even past the deadline, which
@@ -1000,6 +1027,7 @@ pub mod testing {
                         task_id: "task-1".into(),
                         state: (*state).into(),
                         polls: u32::try_from(i).unwrap(),
+                        tool: (*self.tool.lock().unwrap()).into(),
                     });
                 }
             }

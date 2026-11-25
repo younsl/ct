@@ -8,7 +8,7 @@ Bot token scopes:
 
 | Scope | Needed when |
 |-------|-------------|
-| `chat:write` | Always. Also covers `chat.update` for the live status message and `chat.postEphemeral` for the mention hints. |
+| `chat:write` | Always. Also covers `assistant.threads.setStatus` for the mention typing indicator, `chat.update` for the status message, and `chat.postEphemeral` for the mention hints. The typing indicator needs no `assistant:write` and no AI assistant app setting. |
 | `channels:history` | `lookup` mode, public channels, and reading the alert a mention was asked under. |
 | `channels:read` | `lookup` mode, when channels are configured by name. Configuring conversation IDs instead skips the name lookup and this scope. Public channels are resolved with this scope alone. Private channels are only listed when the name is not public. Mention invocation needs it too when `CHAT_CHANNELS` or `CHAT_AGENT_MAP` name channels rather than IDs. |
 | `groups:read` | Any private channel configured by name: `lookup` mode, the alert reactions, and `CHAT_CHANNELS` or `CHAT_AGENT_MAP` entries. Names are tried against public channels first, so without this scope a private name fails with `missing_scope` and never matches. Configuring the conversation ID (`G...` or `C...`) instead skips the name lookup and this scope. |

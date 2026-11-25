@@ -1,8 +1,8 @@
 //! Talks to the Slack Web API with a bot token.
 //!
 //! The write calls are `chat.postMessage` to publish, `chat.update` to rewrite
-//! a message the bot already posted, and `chat.postEphemeral` for a note only
-//! one reader sees. The read calls are `conversations.list` plus
+//! a message the bot already posted, `chat.postEphemeral` for a note only one
+//! reader sees, and `assistant.threads.setStatus` for the typing indicator. The read calls are `conversations.list` plus
 //! `conversations.history` to locate a message somebody else posted, and
 //! `auth.test` for the bot's own user ID. The lookup exists because an
 //! Alertmanager incoming webhook does not return the message timestamp that
@@ -153,6 +153,14 @@ pub trait SlackClient: Send + Sync {
     async fn add_reaction(&self, channel: &str, ts: &str, name: &str) -> Result<(), Error>;
     /// Removes an emoji reaction the bot added earlier.
     async fn remove_reaction(&self, channel: &str, ts: &str, name: &str) -> Result<(), Error>;
+    /// Shows `status` as the app's typing indicator under the thread, or
+    /// clears it when `status` is empty. `channel` must be an ID.
+    async fn set_thread_status(
+        &self,
+        channel: &str,
+        thread_ts: &str,
+        status: &str,
+    ) -> Result<(), Error>;
     /// Maps a channel name to its conversation ID, returning an ID unchanged.
     async fn resolve_channel_id(&self, channel: &str) -> Result<String, Error>;
 }
@@ -754,6 +762,23 @@ impl SlackClient for Client {
 
     async fn remove_reaction(&self, channel: &str, ts: &str, name: &str) -> Result<(), Error> {
         self.react("reactions.remove", channel, ts, name).await
+    }
+
+    /// Slack clears the indicator by itself when the app posts in the thread,
+    /// or two minutes after the last call, so a long turn has to refresh it.
+    /// It needs only `chat:write`, the scope that also posts the answer.
+    async fn set_thread_status(
+        &self,
+        channel: &str,
+        thread_ts: &str,
+        status: &str,
+    ) -> Result<(), Error> {
+        self.write(
+            "assistant.threads.setStatus",
+            &json!({"channel_id": channel, "thread_ts": thread_ts, "status": status}),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// The mention path compares a configured allow list against the ID the
@@ -1379,6 +1404,41 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), "slack error: cant_update_message");
+    }
+
+    #[tokio::test]
+    async fn thread_status_sets_and_surfaces_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/assistant.threads.setStatus"))
+            .and(header("authorization", "Bearer xoxb-test"))
+            .and(body_partial_json(
+                json!({"channel_id": "C0000001", "thread_ts": "1.0", "status": "is thinking..."}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let metrics = Arc::new(Metrics::new());
+        client(&server, metrics.clone())
+            .set_thread_status("C0000001", "1.0", "is thinking...")
+            .await
+            .unwrap();
+        assert_eq!(requests(&metrics, "assistant.threads.setStatus", "ok"), 1);
+
+        let server = MockServer::start().await;
+        Mock::given(path("/assistant.threads.setStatus"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"ok": false, "error": "missing_scope"})),
+            )
+            .mount(&server)
+            .await;
+        let err = client(&server, Arc::new(Metrics::new()))
+            .set_thread_status("C0000001", "1.0", "")
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), "slack error: missing_scope");
     }
 
     #[tokio::test]

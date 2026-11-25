@@ -61,6 +61,10 @@ pub struct Progress {
     pub state: String,
     /// How many `tasks/get` reads have been spent so far.
     pub polls: u32,
+    /// The tool the agent called last and has not had a result for yet.
+    /// Empty while the model itself is working, or when the agent records no
+    /// tool calls in its task history.
+    pub tool: String,
 }
 
 /// The outcome of one analysis run.
@@ -133,6 +137,29 @@ struct RequestConfiguration {
 struct Part {
     kind: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// Metadata keys kagent tags a tool call data part with: the first is the
+/// 1.0 line, the other two the 0.x line.
+const PART_TYPE_KEYS: [&str; 3] = ["kagent.dev/a2a/part-type", "kagent_type", "adk_type"];
+
+impl Part {
+    /// Returns `function_call` or `function_response` for a kagent tool data
+    /// part, `None` for anything else.
+    fn tool_event(&self) -> Option<&str> {
+        if self.kind != "data" {
+            return None;
+        }
+        let meta = self.metadata.as_ref()?;
+        PART_TYPE_KEYS
+            .iter()
+            .find_map(|key| meta.get(*key).and_then(serde_json::Value::as_str))
+            .filter(|t| *t == "function_call" || *t == "function_response")
+    }
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -308,6 +335,7 @@ impl Client {
                     task_id: task_id.to_string(),
                     state: state.clone(),
                     polls,
+                    tool: running_tool(&out),
                 },
             );
 
@@ -486,6 +514,7 @@ impl AgentClient for Client {
                 parts: vec![Part {
                     kind: "text".into(),
                     text: req.text.clone(),
+                    ..Part::default()
                 }],
             },
             configuration: RequestConfiguration { blocking: false },
@@ -542,6 +571,7 @@ impl AgentClient for Client {
                 task_id: task_id.clone(),
                 state: state.clone(),
                 polls: 0,
+                tool: running_tool(&out),
             },
         );
 
@@ -559,6 +589,27 @@ impl AgentClient for Client {
         )
         .await
     }
+}
+
+/// Finds the tool the agent is waiting on: the newest tool event in the task,
+/// when it is a call rather than its result. kagent records each call and
+/// result as a data part, with the newest event in `status.message` and the
+/// older ones in `history`.
+fn running_tool(out: &RpcResult) -> String {
+    let status = out.status.message.iter().flat_map(|m| m.parts.iter().rev());
+    let history = out.history.iter().rev().flat_map(|h| h.parts.iter().rev());
+    let Some(part) = status.chain(history).find(|p| p.tool_event().is_some()) else {
+        return String::new();
+    };
+    if part.tool_event() != Some("function_call") {
+        return String::new();
+    }
+    part.data
+        .as_ref()
+        .and_then(|d| d.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Calls a progress hook when the caller supplied one.
@@ -868,6 +919,7 @@ mod tests {
             .iter()
             .map(|p| (p.state.clone(), p.polls))
             .collect();
+        assert!(seen.lock().unwrap().iter().all(|p| p.tool.is_empty()));
         assert_eq!(
             states,
             vec![
@@ -1185,5 +1237,56 @@ mod tests {
         let near = decode_context(raw.as_bytes(), &err);
         assert!(near.contains("tru"), "{near}");
         assert!(near.chars().count() <= 203);
+    }
+
+    fn tool_part(kind: &str, key: &str, name: &str) -> Value {
+        json!({"kind": "data", "data": {"name": name, "args": {}}, "metadata": {key: kind}})
+    }
+
+    fn task_result(value: Value) -> RpcResult {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn running_tool_reads_the_newest_call_in_either_key_form() {
+        let out = task_result(json!({"status": {"state": "working", "message": {
+            "parts": [tool_part("function_call", "kagent.dev/a2a/part-type", "k8s_get_resources")]
+        }}}));
+        assert_eq!(running_tool(&out), "k8s_get_resources");
+
+        let out = task_result(json!({"status": {"state": "working"}, "history": [
+            {"role": "user", "parts": [{"kind": "text", "text": "q"}]},
+            {"role": "agent", "parts": [tool_part("function_call", "kagent_type", "prometheus_query")]}
+        ]}));
+        assert_eq!(running_tool(&out), "prometheus_query");
+    }
+
+    #[test]
+    fn running_tool_is_empty_once_the_result_arrived_or_without_tool_parts() {
+        let out = task_result(json!({"status": {"state": "working", "message": {
+            "parts": [tool_part("function_response", "adk_type", "k8s_get_resources")]
+        }}, "history": [
+            {"role": "agent", "parts": [tool_part("function_call", "adk_type", "k8s_get_resources")]}
+        ]}));
+        assert_eq!(running_tool(&out), "");
+
+        let out = task_result(json!({"status": {"state": "working", "message": {
+            "parts": [{"kind": "data", "data": {"name": "x"}, "metadata": {"other": "function_call"}},
+                      {"kind": "text", "text": "thinking"}]
+        }}}));
+        assert_eq!(running_tool(&out), "");
+    }
+
+    #[test]
+    fn outgoing_text_part_carries_no_data_fields() {
+        let part = Part {
+            kind: "text".into(),
+            text: "q".into(),
+            ..Part::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&part).unwrap(),
+            json!({"kind": "text", "text": "q"})
+        );
     }
 }

@@ -1,6 +1,7 @@
 //! The mention path: a question asked in a Slack thread runs the agent and is
 //! answered in that thread.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -13,6 +14,7 @@ use tracing::{Instrument, debug, error, info, info_span, warn};
 use super::{Gateway, GaugeGuard, korean_duration};
 use crate::a2a::{Progress, Request};
 use crate::access::{self, Backend, Lookup};
+use crate::config::ChatStatusStyle;
 use crate::observability::Metrics;
 use crate::slack::socket::{Event, Handler};
 use crate::slack::{self, Message, SlackClient};
@@ -29,6 +31,14 @@ const WORKING_REACTION: &str = "eyes";
 const FINISH_TIMEOUT: Duration = Duration::from_secs(60);
 const REACTION_TIMEOUT: Duration = Duration::from_secs(30);
 const STATUS_UPDATE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Slack drops the typing indicator two minutes after the last
+/// `assistant.threads.setStatus`, so it is refreshed well inside that even
+/// when `CHAT_STATUS_INTERVAL` is longer.
+const INDICATOR_KEEPALIVE: Duration = Duration::from_secs(60);
+
+/// The typing indicator shown while a mention waits for a slot.
+const QUEUED_INDICATOR: &str = "실행 슬롯을 기다리는 중...";
 
 /// Matches the leading user mention, which Slack renders as a link rather
 /// than as the handle people typed. The anchor is what keeps this to the
@@ -97,9 +107,17 @@ impl Handler for Arc<Gateway> {
     }
 }
 
-/// The last task state the agent reported. It is written from the polling
-/// task and read by the status ticker.
-type ProgressState = Arc<Mutex<String>>;
+/// What the agent last reported. It is written from the polling task and read
+/// by the status ticker.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Activity {
+    /// The A2A task state.
+    state: String,
+    /// The tool the agent is waiting on, empty while the model itself works.
+    tool: String,
+}
+
+type ProgressState = Arc<Mutex<Activity>>;
 
 impl Gateway {
     /// Applies the drop rules and returns the question with the leading
@@ -301,11 +319,13 @@ impl Gateway {
             thread: ev.thread_ts.clone(),
             started,
             interval: self.cfg.chat_status_interval,
+            style: self.cfg.chat_status_style,
+            native: AtomicBool::new(false),
             ts: Mutex::new(None),
         });
-        status.post(&queued_status()).await;
+        status.begin().await;
 
-        let permit = timeout_at(deadline, self.chat_sem.clone().acquire_owned()).await;
+        let permit = timeout_at(deadline, status.hold(self.chat_sem.clone().acquire_owned())).await;
         let Ok(Ok(_permit)) = permit else {
             self.metrics.chat_turn(&agent, "queue_timeout");
             error!(timeout = ?self.cfg.chat_timeout, "gave up waiting for a chat slot");
@@ -348,8 +368,12 @@ impl Gateway {
             .clone()
             .track(state.clone(), agent.clone(), with_alert);
         let hook_state = state.clone();
-        let hook: crate::a2a::ProgressHook =
-            Arc::new(move |p: Progress| *hook_state.lock().expect("progress state lock") = p.state);
+        let hook: crate::a2a::ProgressHook = Arc::new(move |p: Progress| {
+            *hook_state.lock().expect("progress state lock") = Activity {
+                state: p.state,
+                tool: p.tool,
+            };
+        });
 
         info!(
             backend = agent,
@@ -532,9 +556,13 @@ impl Gateway {
     }
 }
 
-/// The single thread reply a turn owns. It starts as a "queued" note, is
-/// rewritten while the agent works, and ends as the answer itself, so the
-/// asker watches one message rather than a thread of progress notes.
+/// How a turn shows it is still running. With the `assistant` style it is
+/// Slack's typing indicator under the thread, which leaves nothing in history
+/// and clears itself when the answer is posted. Otherwise, or when Slack
+/// refuses the indicator, it is the single thread reply a turn owns: it starts
+/// as a "queued" note, is rewritten while the agent works, and ends as the
+/// answer itself, so the asker watches one message rather than a thread of
+/// progress notes.
 struct StatusMessage {
     slack: Arc<dyn SlackClient>,
     metrics: Arc<Metrics>,
@@ -544,6 +572,10 @@ struct StatusMessage {
     /// How often the line is rewritten while the agent works. Zero leaves the
     /// first status standing until the answer replaces it.
     interval: Duration,
+    style: ChatStatusStyle,
+    /// Set once the typing indicator was accepted, which makes it the status
+    /// for the rest of the turn.
+    native: AtomicBool,
     /// The message being rewritten, `None` when the initial post failed.
     ts: Mutex<Option<String>>,
 }
@@ -566,6 +598,63 @@ impl StatusTracker {
 impl StatusMessage {
     fn ts(&self) -> Option<String> {
         self.ts.lock().expect("status ts lock").clone()
+    }
+
+    fn native(&self) -> bool {
+        self.native.load(Ordering::Relaxed)
+    }
+
+    /// Shows the first status. The typing indicator is tried first when it is
+    /// the configured style. A refusal (a workspace that rejects the method,
+    /// or a token without `chat:write` there) falls back to the status
+    /// message, so the asker always sees the question was taken.
+    async fn begin(&self) {
+        if self.style == ChatStatusStyle::Assistant {
+            match self
+                .slack
+                .set_thread_status(&self.channel, &self.thread, QUEUED_INDICATOR)
+                .await
+            {
+                Ok(()) => {
+                    self.native.store(true, Ordering::Relaxed);
+                    return;
+                }
+                Err(err) => {
+                    warn!(error = %err, "failed to set the thread status, falling back to a status message");
+                }
+            }
+        }
+        self.post(&queued_status()).await;
+    }
+
+    /// Waits on `fut` while keeping the queued typing indicator alive, which
+    /// Slack would otherwise drop during a long wait for a slot.
+    async fn hold<F: Future>(&self, fut: F) -> F::Output {
+        if !self.native() {
+            return fut.await;
+        }
+        let mut fut = std::pin::pin!(fut);
+        loop {
+            tokio::select! {
+                out = &mut fut => return out,
+                () = sleep(INDICATOR_KEEPALIVE) => self.indicate(QUEUED_INDICATOR).await,
+            }
+        }
+    }
+
+    /// Refreshes the typing indicator. A failure only costs this refresh.
+    async fn indicate(&self, text: &str) {
+        match timeout(
+            STATUS_UPDATE_TIMEOUT,
+            self.slack
+                .set_thread_status(&self.channel, &self.thread, text),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => warn!(error = %err, "failed to refresh the thread status"),
+            Err(_) => warn!("failed to refresh the thread status: timed out"),
+        }
     }
 
     /// Publishes the first status line. A failure is not fatal: the turn
@@ -599,12 +688,15 @@ impl StatusMessage {
         }
     }
 
-    /// Replaces the status line with the final text, which is the answer or
-    /// the reason there is none. It runs on its own budget: the turn's
+    /// Publishes the final text, which is the answer or the reason there is
+    /// none: it replaces the status message, or is posted as a reply that
+    /// clears the typing indicator. It runs on its own budget: the turn's
     /// deadline is usually what brought it here.
     async fn finish(&self, text: &str) {
         let deadline = Instant::now() + FINISH_TIMEOUT;
-        if let Some(ts) = self.ts() {
+        if !self.native()
+            && let Some(ts) = self.ts()
+        {
             match timeout_at(deadline, self.slack.update(&self.channel, &ts, text)).await {
                 Ok(Ok(())) => {
                     self.metrics.slack_message("chat", "ok");
@@ -628,7 +720,10 @@ impl StatusMessage {
             ..Message::default()
         };
         match timeout_at(deadline, self.slack.post(msg)).await {
-            Ok(Ok(_)) => self.metrics.slack_message("chat", "ok"),
+            Ok(Ok(_)) => {
+                self.metrics.slack_message("chat", "ok");
+                return;
+            }
             Ok(Err(err)) => {
                 self.metrics.slack_message("chat", "error");
                 error!(error = %err, "failed to post chat reply");
@@ -637,6 +732,11 @@ impl StatusMessage {
                 self.metrics.slack_message("chat", "error");
                 error!("failed to post chat reply: timed out");
             }
+        }
+        // Only a reply clears the indicator, so without one it would keep
+        // promising an answer until Slack's own timeout.
+        if self.native() {
+            self.indicate("").await;
         }
     }
 
@@ -650,7 +750,12 @@ impl StatusMessage {
         with_alert: bool,
     ) -> StatusTracker {
         let token = CancellationToken::new();
-        if self.interval.is_zero() {
+        let interval = if self.native() {
+            indicator_interval(self.interval)
+        } else {
+            self.interval
+        };
+        if interval.is_zero() {
             return StatusTracker {
                 token,
                 handle: None,
@@ -661,13 +766,19 @@ impl StatusMessage {
             loop {
                 tokio::select! {
                     () = child.cancelled() => return,
-                    () = sleep(self.interval) => {}
+                    () = sleep(interval) => {}
                 }
                 let current = state.lock().expect("progress state lock").clone();
-                let text = working_status(&agent, self.started.elapsed(), &current, with_alert);
-                if timeout(STATUS_UPDATE_TIMEOUT, self.set(&text))
-                    .await
-                    .is_err()
+                let elapsed = self.started.elapsed();
+                if self.native() {
+                    self.indicate(&working_indicator(&agent, elapsed, &current, with_alert))
+                        .await;
+                } else if timeout(
+                    STATUS_UPDATE_TIMEOUT,
+                    self.set(&working_status(&agent, elapsed, &current, with_alert)),
+                )
+                .await
+                .is_err()
                 {
                     warn!("chat status update timed out");
                 }
@@ -695,12 +806,55 @@ fn queued_status() -> String {
 /// is the elapsed time divided by `KAGENT_POLL_INTERVAL`, so it repeats a
 /// number the line already shows, and the one case where it diverges, a
 /// controller that stopped answering, is what `agent_requests_total` reports.
-fn working_status(agent: &str, elapsed: Duration, state: &str, with_alert: bool) -> String {
+fn working_status(agent: &str, elapsed: Duration, activity: &Activity, with_alert: bool) -> String {
+    let phrase = if activity.tool.is_empty() {
+        state_phrase(&activity.state, with_alert)
+    } else {
+        format!("`{}` 도구를 실행 중입니다.", activity.tool)
+    };
     format!(
-        ":mag: kagent의 {agent} 에이전트가 {} (경과 {})",
-        state_phrase(state, with_alert),
+        ":mag: kagent의 {agent} 에이전트가 {phrase} (경과 {})",
         korean_duration(elapsed)
     )
+}
+
+/// Renders the typing indicator, which Slack shows after the app name. It
+/// is plain text and reads as an ongoing action, so it carries the same
+/// facts as [`working_status`] in a shorter form.
+fn working_indicator(
+    agent: &str,
+    elapsed: Duration,
+    activity: &Activity,
+    with_alert: bool,
+) -> String {
+    let elapsed = korean_duration(elapsed);
+    if !activity.tool.is_empty() {
+        return format!(
+            "{agent} 에이전트가 {} 도구를 실행하는 중... (경과 {elapsed})",
+            activity.tool
+        );
+    }
+    let phrase = match (activity.state.as_str(), with_alert) {
+        ("" | "submitted", true) => "이 스레드의 알람으로 작업을 시작하는 중",
+        ("" | "submitted", false) => "작업을 시작하는 중",
+        ("working", true) => "이 스레드의 알람을 확인하는 중",
+        ("working", false) => "답변을 준비하는 중",
+        (other, _) => {
+            return format!("{agent} 에이전트가 확인하는 중... (상태 {other}, 경과 {elapsed})");
+        }
+    };
+    format!("{agent} 에이전트가 {phrase}... (경과 {elapsed})")
+}
+
+/// Picks the typing indicator refresh cadence: the configured interval, but
+/// never past [`INDICATOR_KEEPALIVE`], since the indicator must be refreshed
+/// to stay up at all.
+fn indicator_interval(interval: Duration) -> Duration {
+    if interval.is_zero() {
+        INDICATOR_KEEPALIVE
+    } else {
+        interval.min(INDICATOR_KEEPALIVE)
+    }
 }
 
 /// Turns an A2A task state into the sentence it belongs in. The raw state is
@@ -733,7 +887,29 @@ mod tests {
         let mut cfg = config();
         cfg.slack_app_token = "xapp".into();
         cfg.chat_status_interval = Duration::from_millis(20);
+        cfg.chat_status_style = ChatStatusStyle::Message;
         cfg
+    }
+
+    fn assistant_config() -> Config {
+        Config {
+            chat_status_style: ChatStatusStyle::Assistant,
+            ..chat_config()
+        }
+    }
+
+    fn indicators(slack: &FakeSlack) -> Vec<String> {
+        slack
+            .calls()
+            .into_iter()
+            .filter_map(|c| {
+                if let Call::ThreadStatus { status, .. } = c {
+                    Some(status)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     fn mention(text: &str) -> Event {
@@ -1545,12 +1721,33 @@ mod tests {
         assert!(last.ends_with("_(truncated)_"));
     }
 
+    fn activity(state: &str, tool: &str) -> Activity {
+        Activity {
+            state: state.into(),
+            tool: tool.into(),
+        }
+    }
+
     #[test]
     fn working_status_reads_as_a_sentence() {
-        let s = working_status("triage", Duration::from_secs(95), "working", true);
+        let s = working_status(
+            "triage",
+            Duration::from_secs(95),
+            &activity("working", ""),
+            true,
+        );
         assert_eq!(
             s,
             ":mag: kagent의 triage 에이전트가 이 스레드의 알람을 확인 중입니다. (경과 1분 35초)"
+        );
+        assert_eq!(
+            working_status(
+                "triage",
+                Duration::from_secs(5),
+                &activity("working", "k8s_get_resources"),
+                true
+            ),
+            ":mag: kagent의 triage 에이전트가 `k8s_get_resources` 도구를 실행 중입니다. (경과 5초)"
         );
         assert_eq!(state_phrase("", false), "작업을 시작했습니다.");
         assert_eq!(
@@ -1562,6 +1759,132 @@ mod tests {
             state_phrase("input-required", false),
             "확인 중입니다. (상태 input-required)"
         );
+    }
+
+    #[test]
+    fn working_indicator_names_the_tool_or_the_state() {
+        let d = Duration::from_secs(95);
+        assert_eq!(
+            working_indicator("triage", d, &activity("working", "prometheus_query"), true),
+            "triage 에이전트가 prometheus_query 도구를 실행하는 중... (경과 1분 35초)"
+        );
+        assert_eq!(
+            working_indicator("triage", d, &activity("submitted", ""), true),
+            "triage 에이전트가 이 스레드의 알람으로 작업을 시작하는 중... (경과 1분 35초)"
+        );
+        assert_eq!(
+            working_indicator("triage", d, &activity("", ""), false),
+            "triage 에이전트가 작업을 시작하는 중... (경과 1분 35초)"
+        );
+        assert_eq!(
+            working_indicator("triage", d, &activity("working", ""), true),
+            "triage 에이전트가 이 스레드의 알람을 확인하는 중... (경과 1분 35초)"
+        );
+        assert_eq!(
+            working_indicator("triage", d, &activity("working", ""), false),
+            "triage 에이전트가 답변을 준비하는 중... (경과 1분 35초)"
+        );
+        assert_eq!(
+            working_indicator("triage", d, &activity("input-required", ""), false),
+            "triage 에이전트가 확인하는 중... (상태 input-required, 경과 1분 35초)"
+        );
+    }
+
+    #[test]
+    fn indicator_interval_stays_inside_the_slack_timeout() {
+        assert_eq!(indicator_interval(Duration::ZERO), INDICATOR_KEEPALIVE);
+        assert_eq!(
+            indicator_interval(Duration::from_secs(10)),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            indicator_interval(Duration::from_secs(300)),
+            INDICATOR_KEEPALIVE
+        );
+    }
+
+    #[tokio::test]
+    async fn assistant_style_shows_the_typing_indicator_and_replies_once() {
+        let (g, slack, agent, metrics) = gateway(assistant_config());
+        *agent.delay.lock().unwrap() = Duration::from_millis(120);
+        *agent.states.lock().unwrap() = vec!["working"];
+        *agent.tool.lock().unwrap() = "k8s_get_resources";
+        run(&g, mention("<@UBOT> q")).await;
+
+        let calls = slack.calls();
+        assert!(
+            matches!(&calls[0], Call::ThreadStatus { channel, thread_ts, status } if channel == "C1" && thread_ts == "1.0" && status == QUEUED_INDICATOR)
+        );
+        let shown = indicators(&slack);
+        assert!(shown.len() >= 2, "{shown:?}");
+        assert!(
+            shown[1].starts_with(
+                "alert-triage-agent 에이전트가 k8s_get_resources 도구를 실행하는 중..."
+            ),
+            "{}",
+            shown[1]
+        );
+        assert!(!shown.contains(&String::new()), "cleared despite a reply");
+        assert_eq!(updates(&slack), Vec::<String>::new());
+        let posts = slack.posts();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].text, "*Summary* all good");
+        assert_eq!(posts[0].thread_ts, "1.0");
+        assert_eq!(
+            Metrics::counter(
+                &metrics.slack_messages,
+                &KindResultLabels {
+                    kind: "chat".into(),
+                    result: "ok".into()
+                }
+            ),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn assistant_style_falls_back_to_the_status_message() {
+        let (g, slack, _, _) = gateway(assistant_config());
+        *slack.thread_status_error.lock().unwrap() = Some("missing_scope".into());
+        run(&g, mention("<@UBOT> q")).await;
+        assert_eq!(indicators(&slack).len(), 1);
+        let posts = slack.posts();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].text, queued_status());
+        assert_eq!(updates(&slack).last().unwrap(), "*Summary* all good");
+    }
+
+    #[tokio::test]
+    async fn assistant_style_clears_the_indicator_when_the_reply_fails() {
+        let (g, slack, _, _) = gateway(assistant_config());
+        *slack.post_error.lock().unwrap() = Some("channel_not_found".into());
+        run(&g, mention("<@UBOT> q")).await;
+        assert_eq!(indicators(&slack).last().unwrap(), "");
+    }
+
+    #[tokio::test]
+    async fn assistant_style_keeps_the_indicator_up_while_queued() {
+        let slack = Arc::new(FakeSlack::default());
+        let status = StatusMessage {
+            slack: slack.clone(),
+            metrics: Arc::new(Metrics::new()),
+            channel: "C1".into(),
+            thread: "1.0".into(),
+            started: Instant::now(),
+            interval: Duration::from_millis(20),
+            style: ChatStatusStyle::Assistant,
+            native: AtomicBool::new(true),
+            ts: Mutex::new(None),
+        };
+        tokio::time::pause();
+        let out = status
+            .hold(async {
+                sleep(INDICATOR_KEEPALIVE * 2 + Duration::from_secs(1)).await;
+                7
+            })
+            .await;
+        assert_eq!(out, 7);
+        assert_eq!(indicators(&slack), vec![QUEUED_INDICATOR, QUEUED_INDICATOR]);
     }
 
     #[tokio::test]

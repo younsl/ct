@@ -160,6 +160,13 @@
         "statusInterval": {
           "$ref": "#/definitions/duration"
         },
+        "statusStyle": {
+          "type": "string",
+          "enum": [
+            "assistant",
+            "message"
+          ]
+        },
         "threadHint": {
           "type": [
             "string",

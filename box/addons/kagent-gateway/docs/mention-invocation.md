@@ -7,8 +7,8 @@ Setting `SLACK_APP_TOKEN` opens a Socket Mode connection and lets an engineer ta
 One turn works like this:
 
 1. The mention arrives as a Socket Mode envelope, which is acknowledged immediately: Slack redelivers anything not acknowledged within 3 seconds, so the acknowledgement never waits on the agent.
-2. A status message goes up in the thread before a concurrency slot is even held, so the asker sees the question was taken.
-3. That one message is then rewritten in place every `CHAT_STATUS_INTERVAL`, carrying the elapsed time and the task state the controller reports, and it ends as the answer itself. The thread gets one message per turn rather than one per state change.
+2. A status goes up in the thread before a concurrency slot is even held, so the asker sees the question was taken. By default (`CHAT_STATUS_STYLE=assistant`) it is Slack's typing indicator under the thread, the same "is thinking..." line AI apps show, which leaves nothing in channel history.
+3. The status is refreshed every `CHAT_STATUS_INTERVAL` with the elapsed time and what the agent reports: the task state, or the tool it is running, read from the tool call parts kagent records in the task. The answer is posted as one reply, which clears the indicator. With `CHAT_STATUS_STYLE=message`, or when Slack refuses the indicator for a turn, the status is a thread reply rewritten in place that ends as the answer itself. Either way the thread gets one message per turn rather than one per state change.
 4. The alert the thread hangs from is quoted in front of the question, together with the `channel_id` and `thread_ts` the mention arrived on. A question asked under an alert is unanswerable without the alert, so the gateway always sends it rather than leaving the agent to discover it.
 5. The thread keeps the A2A `contextId` for `CHAT_SESSION_TTL`, so a follow-up mention continues the same agent session instead of starting cold.
 

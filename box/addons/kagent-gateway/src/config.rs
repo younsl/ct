@@ -63,6 +63,29 @@ impl ParentMode {
     }
 }
 
+/// How a mention shows that the agent is still working on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatStatusStyle {
+    /// Slack's native typing indicator under the thread
+    /// (`assistant.threads.setStatus`), which leaves nothing in history and
+    /// clears itself when the answer is posted.
+    Assistant,
+    /// A thread reply rewritten in place with `chat.update` that ends as the
+    /// answer.
+    Message,
+}
+
+impl ChatStatusStyle {
+    /// Renders the style the way `CHAT_STATUS_STYLE` spells it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Assistant => "assistant",
+            Self::Message => "message",
+        }
+    }
+}
+
 /// All runtime settings for the gateway.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -144,9 +167,9 @@ pub struct Config {
     pub chat_timeout: Duration,
     /// How long a thread keeps its A2A `contextId` after its last turn.
     pub chat_session_ttl: Duration,
-    /// How often the in-thread status message is rewritten while the agent
-    /// works.
+    /// How often the in-thread status is refreshed while the agent works.
     pub chat_status_interval: Duration,
+    pub chat_status_style: ChatStatusStyle,
     /// Ephemeral hints for the two drops a person cannot tell from an outage.
     /// Empty restores a silent drop.
     pub chat_thread_hint: String,
@@ -192,6 +215,14 @@ impl Config {
             "lookup" => ParentMode::Lookup,
             "post" => ParentMode::Post,
             other => bail!("invalid SLACK_PARENT_MODE {other:?}: must be \"lookup\" or \"post\""),
+        };
+
+        let chat_status_style = match env.string("CHAT_STATUS_STYLE", "assistant").as_str() {
+            "assistant" => ChatStatusStyle::Assistant,
+            "message" => ChatStatusStyle::Message,
+            other => {
+                bail!("invalid CHAT_STATUS_STYLE {other:?}: must be \"assistant\" or \"message\"")
+            }
         };
 
         let webhook_path = env.string("WEBHOOK_PATH", "/alert");
@@ -299,6 +330,7 @@ impl Config {
                 Duration::from_secs(10),
                 Duration::from_secs(1),
             )?,
+            chat_status_style,
             // An explicitly empty hint turns that hint off and restores the
             // silent drop for that case alone.
             chat_thread_hint: env.optional("CHAT_THREAD_HINT", DEFAULT_THREAD_HINT, |v| {
@@ -577,6 +609,7 @@ mod tests {
         let cfg = Config::from_env(env_from(&base())).unwrap();
         assert_eq!(cfg.slack_api_url, "https://slack.com/api");
         assert_eq!(cfg.parent_mode, ParentMode::Lookup);
+        assert_eq!(cfg.chat_status_style, ChatStatusStyle::Assistant);
         assert_eq!(cfg.kagent_agent, "alert-triage-agent");
         assert_eq!(cfg.chat_agent, "alert-triage-agent");
         assert_eq!(cfg.chat_user_id, "gateway@kagent.dev");
@@ -627,11 +660,13 @@ mod tests {
             ("CHAT_ALLOWED_USERS", "U1,U2"),
             ("CHAT_ACCESS_POLICIES", "true"),
             ("CHAT_AGENT_MAP", "C1=c1-agent"),
+            ("CHAT_STATUS_STYLE", "message"),
             ("WEBHOOK_BEARER_TOKEN", "secret"),
             ("LISTEN_PORT", "9000"),
         ]);
         let cfg = Config::from_env(env_from(&env)).unwrap();
         assert_eq!(cfg.parent_mode, ParentMode::Post);
+        assert_eq!(cfg.chat_status_style, ChatStatusStyle::Message);
         assert_eq!(cfg.slack_channel_map["infra"], "infra-alerts");
         assert_eq!(cfg.slack_channel_map["sec"], "security");
         assert_eq!(cfg.kagent_agent_routing_map["infra"], "infra-agent");
@@ -734,5 +769,14 @@ mod tests {
     fn parent_mode_round_trips() {
         assert_eq!(ParentMode::Lookup.as_str(), "lookup");
         assert_eq!(ParentMode::Post.as_str(), "post");
+    }
+
+    #[test]
+    fn chat_status_style_round_trips_and_rejects_unknown() {
+        assert_eq!(ChatStatusStyle::Assistant.as_str(), "assistant");
+        assert_eq!(ChatStatusStyle::Message.as_str(), "message");
+        let mut env = base();
+        env.push(("CHAT_STATUS_STYLE", "typing"));
+        assert!(Config::from_env(env_from(&env)).is_err());
     }
 }

@@ -97,8 +97,10 @@ chat:
   timeout: "180s"
   # -- (string) How long a thread keeps its A2A `contextId` after its last turn, as a duration (30s, 5m, 1h). Within it a follow-up mention continues the same agent session. `0s` makes every mention a cold turn.
   sessionTTL: "2h"
-  # -- (string) How often the in-thread status message is rewritten while the agent works, as a duration (30s, 5m, 1h). Each rewrite is one `chat.update` call, so a short interval buys a livelier status line at the cost of Slack rate limit budget.
+  # -- (string) How often the in-thread status is refreshed while the agent works, as a duration (30s, 5m, 1h). Each refresh is one `assistant.threads.setStatus` or `chat.update` call, so a short interval buys a livelier status at the cost of Slack rate limit budget. The typing indicator is refreshed at least every 60s, since Slack drops it two minutes after the last call.
   statusInterval: "10s"
+  # -- (string) How a turn shows the agent is still working. `assistant` shows Slack's typing indicator under the thread (`assistant.threads.setStatus`, needs only `chat:write`), naming the tool the agent is running, and posts the answer as one reply. `message` posts a status reply and rewrites it into the answer with `chat.update`. `assistant` falls back to `message` for a turn Slack refuses the indicator on.
+  statusStyle: "assistant"
   # -- (string) Ephemeral hint sent when the bot is mentioned at channel level instead of in a thread. `null` keeps the built-in text; an empty string drops the mention silently.
   threadHint: null
   # -- (string) Ephemeral hint sent when the bot is mentioned in a channel outside `chat.channels`. `null` keeps the built-in text; an empty string drops the mention silently.

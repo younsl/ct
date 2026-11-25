@@ -207,6 +207,7 @@ async fn start_chat(
         chat_timeout = format_duration(cfg.chat_timeout),
         session_ttl = format_duration(cfg.chat_session_ttl),
         status_interval = format_duration(cfg.chat_status_interval),
+        status_style = cfg.chat_status_style.as_str(),
         max_concurrent_chats = cfg.max_concurrent_chats,
         channels = if cfg.chat_channels.is_empty() {
             "all".to_string()

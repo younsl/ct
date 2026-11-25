@@ -69,6 +69,7 @@ rand = "0.9"
 regex = "1.11"
 
 [dev-dependencies]
+tokio = { version = "1.54.1", features = ["test-util"] }
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 

@@ -36,7 +36,8 @@ All optional except the app-level token, which is what enables the feature.
 | `CHAT_USER_ID` | value of `KAGENT_USER_ID` | Sent as `X-User-Id` for mention turns. Splitting it from `KAGENT_USER_ID` keeps a person's questions and the unattended alert path on separate kagent sessions, which matters once agents carry long-term memory: memory is keyed by agent and user. |
 | `CHAT_TIMEOUT` | `180s` | Deadline for one whole turn including queueing. Matches the controller's 3 minute cap. Lower it to make the gateway's own expiry fire first and cancel the task. |
 | `CHAT_SESSION_TTL` | `2h` | How long a thread keeps its `contextId` after its last turn. `0s` makes every mention a cold turn. |
-| `CHAT_STATUS_INTERVAL` | `10s` | How often the in-thread status message is rewritten while the agent works. Each rewrite is one `chat.update` call. |
+| `CHAT_STATUS_INTERVAL` | `10s` | How often the in-thread status is refreshed while the agent works. Each refresh is one `assistant.threads.setStatus` or `chat.update` call. The typing indicator is refreshed at least every 60s, since Slack drops it two minutes after the last call. |
+| `CHAT_STATUS_STYLE` | `assistant` | `assistant` shows Slack's typing indicator under the thread and posts the answer as one reply. `message` posts a status reply and rewrites it into the answer. `assistant` falls back to `message` for a turn Slack refuses the indicator on. |
 | `CHAT_THREAD_HINT` | built-in text | Ephemeral hint sent when the bot is mentioned at channel level. Empty drops the mention silently. |
 | `CHAT_DENIED_HINT` | built-in text | Ephemeral hint sent when the bot is mentioned in a channel outside `CHAT_CHANNELS`. Empty drops the mention silently. |
 | `MAX_CONCURRENT_CHATS` | `2` | Maximum mention turns running at once. |
