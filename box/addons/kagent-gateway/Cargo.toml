@@ -1,6 +1,6 @@
 [package]
 name = "kagent-gateway"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.100.0"
 authors = ["younsl <cysl@kakao.com>"]
