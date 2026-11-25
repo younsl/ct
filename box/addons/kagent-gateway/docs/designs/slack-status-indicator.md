@@ -25,7 +25,7 @@ While a mention turn runs, the gateway shows Slack's native typing indicator und
 
 ## Slack API
 
-The indicator is `assistant.threads.setStatus` with `channel_id`, `thread_ts`, `status`, and `loading_messages`.
+The indicator is [`assistant.threads.setStatus`](https://docs.slack.dev/reference/methods/assistant.threads.setStatus) with `channel_id`, `thread_ts`, `status`, and `loading_messages`.
 
 | Behavior | Consequence for the gateway |
 | --- | --- |
@@ -86,7 +86,7 @@ The raw task state is a protocol token, so only an unrecognised one is printed, 
 
 ## Length limit
 
-The method reference documents no length for `status` or a `loading_messages` entry. The limit comes from live calls on a workspace with an agent named `aws-alert-triage-agent`:
+The [method reference](https://docs.slack.dev/reference/methods/assistant.threads.setStatus) documents no length for `status` or a `loading_messages` entry. The limit comes from live calls on a workspace with an agent named `aws-alert-triage-agent`:
 
 | Line | Characters | Result |
 | --- | --- | --- |
