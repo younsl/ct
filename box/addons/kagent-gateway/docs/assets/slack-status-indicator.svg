@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" font-family="Geist, Inter, 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#111" stroke-width="1"/>
+    </pattern>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#666"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#3291ff"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="560" fill="#000"/>
+  <rect width="1200" height="560" fill="url(#grid)"/>
+
+  <text x="40" y="56" fill="#888" font-size="14" font-family="'SF Mono', Menlo, monospace">kagent-gateway / typing indicator</text>
+  <rect x="1044" y="36" width="116" height="28" rx="14" fill="#0a0a0a" stroke="#2e2e2e"/>
+  <text x="1102" y="55" text-anchor="middle" fill="#a1a1a1" font-size="13" font-family="'SF Mono', Menlo, monospace">Slack API</text>
+  <text x="40" y="108" fill="#ededed" font-size="30" font-weight="600">The indicator follows the agent until the answer clears it</text>
+
+  <g font-family="'SF Mono', Menlo, monospace" font-size="13" fill="#3291ff">
+    <text x="40" y="168">assistant.threads.setStatus</text>
+    <text x="330" y="168">A2A tasks/get</text>
+    <text x="620" y="168">setStatus + loading_messages</text>
+    <text x="910" y="168">chat.postMessage</text>
+  </g>
+
+  <g fill="#0a0a0a" stroke="#2e2e2e">
+    <rect x="40" y="184" width="250" height="160" rx="8"/>
+    <rect x="330" y="184" width="250" height="160" rx="8"/>
+    <rect x="620" y="184" width="250" height="160" rx="8" stroke="#3291ff"/>
+    <rect x="910" y="184" width="250" height="160" rx="8"/>
+  </g>
+
+  <g fill="#ededed" font-size="14" font-weight="600" text-anchor="middle" font-family="'SF Mono', Menlo, monospace">
+    <circle cx="74" cy="218" r="14" fill="#1a1a1a" stroke="#2e2e2e"/>
+    <text x="74" y="223">1</text>
+    <circle cx="364" cy="218" r="14" fill="#1a1a1a" stroke="#2e2e2e"/>
+    <text x="364" y="223">2</text>
+    <circle cx="654" cy="218" r="14" fill="#1a1a1a" stroke="#3291ff"/>
+    <text x="654" y="223">3</text>
+    <circle cx="944" cy="218" r="14" fill="#1a1a1a" stroke="#2e2e2e"/>
+    <text x="944" y="223">4</text>
+  </g>
+
+  <g fill="#ededed" font-size="22" font-weight="600">
+    <text x="60" y="272">Mention taken</text>
+    <text x="350" y="272">Read progress</text>
+    <text x="640" y="272">Refresh line</text>
+    <text x="930" y="272">Answer posted</text>
+  </g>
+  <g fill="#a1a1a1" font-size="17">
+    <text x="60" y="306">Queued line at once</text>
+    <text x="350" y="306">State and tool calls</text>
+    <text x="640" y="306">On change or interval</text>
+    <text x="930" y="306">Reply clears the line</text>
+  </g>
+
+  <g stroke="#666" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <path d="M290 264H328"/>
+    <path d="M580 264H618"/>
+    <path d="M870 264H908"/>
+  </g>
+
+  <path d="M745 344V396H455V346" fill="none" stroke="#3291ff" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#b)"/>
+  <text x="600" y="420" text-anchor="middle" fill="#3291ff" font-size="15" font-family="'SF Mono', Menlo, monospace">every 1s, refresh at least every 60s</text>
+
+  <line x1="40" y1="470" x2="1160" y2="470" stroke="#1f1f1f"/>
+  <text x="40" y="508" fill="#888" font-size="17">Refused at step 1: a status reply rewritten with <tspan font-family="'SF Mono', Menlo, monospace" fill="#a1a1a1">chat.update</tspan> instead</text>
+</svg>

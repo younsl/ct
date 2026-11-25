@@ -8,6 +8,8 @@
 
 While a mention turn runs, the gateway shows Slack's native typing indicator under the thread instead of a status reply rewritten in place. The indicator names the agent, what it is doing (the task state or the tool it runs), and the elapsed time, and ends in one emoji. Nothing lands in channel history during the turn, and the answer is posted as one fresh reply that clears the indicator. It replaces the status message described in [Live status](slack-mention-invocation.md#live-status) as the default, which stays available as `CHAT_STATUS_STYLE=message` and as the fallback.
 
+![Slack status indicator](../assets/slack-status-indicator.svg)
+
 ## Goals
 
 - Show that a mention was taken the moment it is accepted, before a slot is held.
