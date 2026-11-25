@@ -1,114 +1,115 @@
+# -- (string) Override the chart name
+nameOverride: ""
+# -- (string) Override the full release name
+fullnameOverride: ""
+
 image:
-  # -- (string) Container image registry host
+  # -- (string) Image registry host
   registry: ghcr.io
-  # -- (string) Container image repository path without registry prefix
+  # -- (string) Image repository without the registry
   repository: younsl/kagent-gateway
-  # -- (string) Image tag; defaults to the chart appVersion when empty
+  # -- (string) Image tag. Empty uses the chart appVersion
   tag: ""
-  # -- (string) Image digest (`sha256:...`). When set, appended to the tag as `tag@digest` and takes precedence
+  # -- (string) Image digest (`sha256:...`), pinned as `tag@digest` when set
   digest: ""
   # -- (string) Image pull policy
   pullPolicy: IfNotPresent
 
-# -- (list) Image pull secrets for private registries
+# -- (list) Image pull secrets
 imagePullSecrets: []
-# -- (string) Override the chart name
-nameOverride: ""
-# -- (string) Override the fully qualified release name
-fullnameOverride: ""
 
 crds:
   # -- (bool) Install and upgrade the AgentAccessPolicy CRD
   install: true
-  # -- (bool) Keep the CRD on `helm uninstall`, so deleting the release does not delete every policy
+  # -- (bool) Keep the CRD (and every policy) on `helm uninstall`
   keep: true
   # -- (object) Extra CRD annotations
   annotations: {}
   # -- (object) Extra CRD labels
   additionalLabels: {}
 
-# -- (int) Number of replicas. Each replica keeps its own in-memory deduplication state, so more than one replica can analyse the same alert group twice.
+# -- (int) Replicas. Deduplication is in memory per replica, so more than one can analyse an alert group twice
 replicaCount: 1
 
-# -- (int) Number of old ReplicaSets to retain for rollback
+# -- (int) Old ReplicaSets kept for rollback
 revisionHistoryLimit: 3
 
 # -- (object) Deployment update strategy
 strategy:
   type: RollingUpdate
   rollingUpdate:
-    # -- (string|int) Max Pods created above desired count during an update
+    # -- (string|int) Max extra Pods during an update
     maxSurge: 25%
-    # -- (string|int) Max Pods unavailable during an update
+    # -- (string|int) Max unavailable Pods during an update
     maxUnavailable: 25%
 
 slack:
-  # -- (string) How the thread parent is obtained. `lookup` leaves the alert notification to Alertmanager and finds it in channel history to reply under, which needs `channels:history` and `channels:read` (plus the `groups:*` equivalents for private channels). `post` makes the gateway publish the alert itself and needs only `chat:write`.
+  # -- (string) `lookup` threads under the notification Alertmanager posted (needs the history and read scopes). `post` publishes the alert itself
   parentMode: "lookup"
-  # -- (string) How far back channel history is searched for the alert notification, as a duration (30s, 5m, 1h). Only used in `lookup` mode.
+  # -- (string) How far back `lookup` searches channel history
   lookupWindow: "15m"
-  # -- (int) How many times to re-search before giving up. Alertmanager delivers the Slack notification and the webhook independently, so the first attempt can miss. Only used in `lookup` mode.
+  # -- (int) `lookup` attempts, since the notification can land after the webhook
   lookupAttempts: 3
-  # -- (string) Emoji (without colons) placed on the alert notification while the agent investigates and removed when the analysis lands. Needs `reactions:write`. Empty string disables it.
+  # -- (string) Reaction on the alert while the agent investigates. Needs `reactions:write`. Empty disables it
   investigatingReaction: "telescope"
-  # -- (string) Emoji (without colons) that replaces the investigating reaction once the analysis has been posted. Needs `reactions:write`. Empty string disables it.
+  # -- (string) Reaction that replaces `investigatingReaction` once the analysis is posted. Empty disables it
   completedReaction: "white_check_mark"
-  # -- (string) Channel used when the routing label is absent. A bare name is prefixed with #; a conversation ID is used as-is and skips the `channels:read` lookup.
+  # -- (string) Channel used when the routing label is absent. A conversation ID skips the `channels:read` lookup
   defaultChannel: ""
-  # -- (string) Alert label that selects the destination channel
+  # -- (string) Alert label that selects the channel
   channelLabel: "slack_channel"
-  # -- (object) Mapping from routing label value to Slack channel, for labels whose value is not the channel name. Ignored when `chat.accessPolicies.enabled` is true.
+  # -- (object) Routing label value to channel, for values that are not channel names. Ignored under `chat.accessPolicies`
   channelMap: {}
     # test-route: alerts-test
-  # -- (int) Maximum characters posted in one message; longer text is truncated
+  # -- (int) Max characters per message, longer text is truncated
   maxTextLength: 8000
-  # -- (string) Slack Web API base URL; override to route through an egress proxy
+  # -- (string) Slack Web API base URL
   apiURL: "https://slack.com/api"
-  # -- (string) Name of an existing Secret holding the bot token. Leave empty to create one from `slack.token`.
+  # -- (string) Existing Secret with the tokens. Empty creates one from `slack.token` and `slack.appToken`
   existingSecret: ""
-  # -- (string) Key inside the Secret holding the bot token
+  # -- (string) Bot token key in the Secret
   existingSecretKey: "SLACK_BOT_TOKEN"
-  # -- (string) Bot token (xoxb-...). Only used when `slack.existingSecret` is empty; prefer an externally managed Secret.
+  # -- (string) Bot token (`xoxb-`), used when `slack.existingSecret` is empty
   token: ""
-  # -- (string) Key inside `slack.existingSecret` holding the app-level token. Only read when `chat.enabled` is true.
+  # -- (string) App-level token key in the Secret, read when `chat.enabled`
   existingSecretAppTokenKey: "SLACK_APP_TOKEN"
-  # -- (string) App-level token (xapp-...) that opens the Socket Mode connection carrying mentions. Created under Basic Information with the `connections:write` scope, which is not an OAuth scope. Only used when `slack.existingSecret` is empty.
+  # -- (string) App-level token (`xapp-`, `connections:write`) for Socket Mode, used when `slack.existingSecret` is empty
   appToken: ""
 
 chat:
-  # -- (bool) Answer `@bot` mentions posted inside a Slack thread by running a kagent agent and replying in that thread. Needs an app-level token and the `app_mentions:read` bot scope, with Socket Mode and the `app_mention` event subscription enabled on the Slack app. Leaving this off keeps the binary behaving exactly as the alert-only build does.
+  # -- (bool) Answer `@bot` mentions in threads. Needs an app-level token, `app_mentions:read`, Socket Mode, and the `app_mention` event
   enabled: false
-  # -- (string) Agent that answers mentions. Empty falls back to `kagent.agent`.
+  # -- (string) Agent that answers mentions. Empty uses `kagent.agent`
   agent: ""
-  # -- (object) Routing table from channel (name or ID) to the Agent resource answering there. A channel the table does not carry falls back to `chat.agent`. Ignored when `chat.accessPolicies.enabled` is true.
+  # -- (object) Channel (name or ID) to Agent. Unlisted channels use `chat.agent`. Ignored under `chat.accessPolicies`
   agentMap: {}
     # security-alerts: security-alert-triage-agent
-  # -- (list) Channel names or IDs allowed to invoke the bot. Empty allows every channel the bot is a member of. Ignored when `chat.accessPolicies.enabled` is true.
+  # -- (list) Channels allowed to invoke the bot. Empty allows every channel it is in. Ignored under `chat.accessPolicies`
   channels: []
     # - alerts-test
   accessPolicies:
-    # -- (bool) Route every mention and alert through `agentAccessPolicies`, like Gateway API routes. `chat.agentMap`, `chat.channels`, `kagent.agentRoutingMap`, and `slack.channelMap` are then ignored, and anything no policy matches is dropped. Mentions are refused until the policy cache has synced. Creates a Role and RoleBinding in `kagent.namespace` and mounts the ServiceAccount token into the Pod.
+    # -- (bool) Route every mention and alert through AgentAccessPolicies and drop what none matches. Replaces the env routing maps and adds a Role in `kagent.namespace`
     enabled: false
-  # -- (string) Instructions appended to every mention prompt. Empty uses the built-in English instructions, which are separate from `analysis.instructions` because a question has no alert sections to fill.
+  # -- (string) Instructions appended to every mention prompt. Empty uses the built-in ones
   instructions: ""
-  # -- (string) Identity sent as X-User-Id for mention turns, which owns the kagent sessions a person's questions create. Empty falls back to `kagent.userID`. Set it to split the two paths once agents carry long-term memory, which is keyed by agent and user: sharing one identity lets the unattended alert path write into the pool the questions read from.
+  # -- (string) X-User-Id for mention turns. Empty uses `kagent.userID`. Set it to keep agent memory of the two paths apart
   userID: ""
-  # -- (string) Deadline for one whole turn including queueing, as a duration (30s, 5m, 1h). The kagent controller caps a turn at 3 minutes in the v0.9.x line, so raising this above `180s` buys nothing; lowering it makes the gateway's own expiry fire first and cancel the task.
+  # -- (string) Deadline for one turn including queueing. The kagent controller caps a turn at 3m
   timeout: "180s"
-  # -- (string) How long a thread keeps its A2A `contextId` after its last turn, as a duration (30s, 5m, 1h). Within it a follow-up mention continues the same agent session. `0s` makes every mention a cold turn.
+  # -- (string) How long a thread keeps its agent session after the last turn. `0s` starts every mention fresh
   sessionTTL: "2h"
-  # -- (string) How often an unchanged in-thread status is refreshed while the agent works, as a duration (30s, 5m, 1h). A change in the task state or the running tools is shown within a second regardless. Each refresh is one `assistant.threads.setStatus` or `chat.update` call, so a short interval buys a livelier status at the cost of Slack rate limit budget. The typing indicator is refreshed at least every 60s, since Slack drops it two minutes after the last call.
+  # -- (string) Refresh interval of an unchanged status (at most 60s for the typing indicator). Changes show within a second
   statusInterval: "10s"
-  # -- (string) How a turn shows the agent is still working. `assistant` shows Slack's typing indicator under the thread (`assistant.threads.setStatus`, needs only `chat:write`), naming the tool the agent is running, and posts the answer as one reply. `message` posts a status reply and rewrites it into the answer with `chat.update`. `assistant` falls back to `message` for a turn Slack refuses the indicator on.
+  # -- (string) `assistant` shows Slack's typing indicator and posts the answer as one reply. `message` rewrites a status reply into the answer
   statusStyle: "assistant"
-  # -- (string) Ephemeral hint sent when the bot is mentioned at channel level instead of in a thread. `null` keeps the built-in text; an empty string drops the mention silently.
+  # -- (string) Ephemeral hint for a mention outside a thread. `null` uses the built-in text, empty drops it silently
   threadHint: null
-  # -- (string) Ephemeral hint sent when the bot is mentioned in a channel outside `chat.channels`. `null` keeps the built-in text; an empty string drops the mention silently.
+  # -- (string) Ephemeral hint for a mention in a channel not served. `null` uses the built-in text, empty drops it silently
   deniedHint: null
-  # -- (int) Maximum mention turns running at once. Separate from `analysis.maxConcurrent` so a burst of questions cannot starve alert analysis of model concurrency.
+  # -- (int) Max mention turns at once, separate from `analysis.maxConcurrent`
   maxConcurrent: 2
 
-# -- (object) AgentAccessPolicies keyed by name. `enabled` (default `true`) toggles rendering, `spec` is the CR spec verbatim. Needs `chat.accessPolicies.enabled`.
+# -- (object) AgentAccessPolicies by name: `enabled` (default `true`) and the CR `spec`. Needs `chat.accessPolicies.enabled`
 agentAccessPolicies: {}
   # security-alert-triage-agent:
   #   enabled: true
@@ -148,51 +149,51 @@ agentAccessPolicies: {}
   #       allowAll: true
 
 kagent:
-  # -- (string) Base URL of the kagent controller; the A2A path is appended to it
+  # -- (string) kagent controller base URL
   url: "http://kagent-controller.kagent:8083"
-  # -- (string) Namespace holding the Agent resource
+  # -- (string) Namespace of the Agent resources
   namespace: "kagent"
-  # -- (string) Name of the Agent resource used when the routing label is absent or names no mapped agent
+  # -- (string) Agent used when the routing label maps to none
   agent: "alert-triage-agent"
-  # -- (string) Alert label that routes an alert to an agent. Defaults to `slack.channelLabel` when empty, so one label can split both the channel and the agent.
+  # -- (string) Alert label that selects the agent. Empty uses `slack.channelLabel`
   agentRoutingLabel: ""
-  # -- (object) Routing table from label value to the Agent resource that handles it, so one gateway can feed several specialised agents. Unlike `slack.channelMap` this is not an alias table: a value it does not carry falls back to `kagent.agent` instead of being used as an agent name. Ignored when `chat.accessPolicies.enabled` is true.
+  # -- (object) Routing label value to Agent. Unlisted values use `kagent.agent`. Ignored under `chat.accessPolicies`
   agentRoutingMap: {}
     # infra-alerts: aws-alert-triage-agent
     # security-alerts: security-alert-triage-agent
-  # -- (string) Identity sent as X-User-Id, which owns the kagent sessions the gateway creates
+  # -- (string) X-User-Id that owns the sessions the gateway creates
   userID: "gateway@kagent.dev"
-  # -- (string) Deadline for one whole analysis (queueing, parent lookup, and the polled agent run), as a duration (30s, 5m, 1h). On expiry the task is cancelled on the controller so it stops consuming model tokens.
+  # -- (string) Deadline for one analysis including queueing. The task is cancelled on expiry
   timeout: "120s"
-  # -- (string) Timeout for a single HTTP call to the controller (submit, poll, or cancel), as a duration (30s, 5m, 1h)
+  # -- (string) Timeout of one controller call
   requestTimeout: "30s"
-  # -- (string) Wait between two task status polls, as a duration (30s, 5m, 1h)
+  # -- (string) Task status poll interval, which bounds how fast progress shows
   pollInterval: "5s"
 
 analysis:
-  # -- (string) Comma-separated severities to analyse; empty analyses every alert
+  # -- (string) Comma-separated severities to analyse. Empty analyses every alert
   severities: "critical"
-  # -- (string) Alert label that opts a rule in ("true") or out ("false") regardless of severity
+  # -- (string) Alert label that opts a rule in (`true`) or out (`false`) regardless of severity
   label: "analyze"
-  # -- (bool) Analyse resolved notifications as well as firing ones
+  # -- (bool) Analyse resolved notifications too
   resolved: false
-  # -- (string) How long a group stays suppressed after being analysed, as a duration (30s, 5m, 1h). Should cover the Alertmanager repeat_interval. "0s" disables deduplication.
+  # -- (string) Suppression after an analysis, covering the Alertmanager `repeat_interval`. `0s` disables it
   dedupeTTL: "12h"
-  # -- (int) Maximum alerts rendered into one prompt
+  # -- (int) Max alerts per prompt
   maxAlerts: 5
-  # -- (int) Maximum analyses running at once, which bounds concurrent model spend
+  # -- (int) Max analyses at once
   maxConcurrent: 2
-  # -- (string) Instructions appended to every prompt. Empty uses the built-in English instructions; override to change the output language or sections.
+  # -- (string) Instructions appended to every analysis prompt. Empty uses the built-in ones
   instructions: ""
 
 webhook:
   # -- (string) Path Alertmanager posts to
   path: "/alert"
-  # -- (string) Name of an existing Secret holding the bearer token the webhook requires. Leave empty to create one from `webhook.token`.
+  # -- (string) Existing Secret with the bearer token. Empty creates one from `webhook.token`
   existingSecret: ""
-  # -- (string) Key inside the Secret holding the bearer token
+  # -- (string) Bearer token key in the Secret
   existingSecretKey: "WEBHOOK_BEARER_TOKEN"
-  # -- (string) Bearer token required on incoming webhooks. Empty disables authentication.
+  # -- (string) Bearer token required on the webhook. Empty disables authentication
   token: ""
 
 log:
@@ -201,71 +202,71 @@ log:
   # -- (string) Log format: json or text
   format: "json"
 
-# -- (list) Additional environment variables for the container (raw EnvVar entries)
+# -- (list) Extra container env entries
 extraEnv: []
   # - name: HTTPS_PROXY
   #   value: http://proxy.example.com:3128
 
-# -- (list) Additional envFrom sources for the container (configMapRef/secretRef entries)
+# -- (list) Extra container envFrom entries
 extraEnvFrom: []
   # - secretRef:
   #     name: extra-secret
 
 ports:
-  # -- (int) Port serving the webhook, /healthz and /readyz
+  # -- (int) Port for the webhook, `/healthz`, and `/readyz`
   http: 8080
-  # -- (int) Port serving Prometheus /metrics
+  # -- (int) Port for `/metrics`
   metrics: 8081
 
 serviceAccount:
   # -- (bool) Create a ServiceAccount
   create: true
-  # -- (string) ServiceAccount name; defaults to the chart fullname when empty
+  # -- (string) ServiceAccount name. Empty uses the full name
   name: ""
   # -- (object) ServiceAccount annotations
   annotations: {}
   # -- (bool) Automount the ServiceAccount token
   automountServiceAccountToken: false
-  # -- (list) Image pull secrets attached to the ServiceAccount, injected into Pods that use it
+  # -- (list) Image pull secrets on the ServiceAccount
   imagePullSecrets: []
 
 service:
-  # -- (bool) Create a Service exposing the webhook and metrics ports
+  # -- (bool) Create a Service for the webhook and metrics ports
   enabled: true
   # -- (string) Service type
   type: ClusterIP
-  # -- (string) Traffic distribution preference, e.g. PreferClose (requires Kubernetes 1.31+); empty omits the field
+  # -- (string) Service `trafficDistribution`, e.g. PreferClose. Empty omits it
   trafficDistribution: ""
 
 serviceMonitor:
-  # -- (bool) Create a Prometheus Operator ServiceMonitor
+  # -- (bool) Create a ServiceMonitor
   enabled: false
   # -- (string) Scrape interval
   interval: 30s
   # -- (string) Scrape timeout
   scrapeTimeout: 10s
-  # -- (object) Extra labels for the ServiceMonitor
+  # -- (object) Extra ServiceMonitor labels
   labels: {}
-  # -- When true, honorLabels preserves the metric's labels when they collide with the target's labels.
+  # -- (bool) Keep the metric's labels when they collide with the target's
   honorLabels: false
-  # -- Prometheus [RelabelConfigs] to apply to samples before scraping
+  # -- (list) Relabelings applied before scraping
   relabelings: []
-  # -- Prometheus [MetricRelabelConfigs] to apply to samples before ingestion
+  # -- (list) Metric relabelings applied before ingestion
   metricRelabelings: []
 
 prometheusRule:
-  # -- (bool) Create a Prometheus Operator PrometheusRule. Requires the monitoring.coreos.com/v1 CRD.
+  # -- (bool) Create a PrometheusRule
   enabled: false
-  # -- (string) Namespace for the PrometheusRule; empty uses the release namespace
+  # -- (string) PrometheusRule namespace. Empty uses the release namespace
   namespace: ""
-  # -- (object) Extra labels for the PrometheusRule. Set whatever label the Prometheus instance selects rules by.
+  # -- (object) Extra PrometheusRule labels, e.g. the one Prometheus selects rules by
   labels: {}
-  # -- (object) Annotations for the PrometheusRule
+  # -- (object) PrometheusRule annotations
   annotations: {}
-  # -- (list) Rule groups, passed through as written. Empty creates no rule, so enabling this alone alerts on nothing.
+  # -- (list) Rule groups as written. Empty creates no rule
   groups: []
 
-# -- (object) Pod resource requests and limits
+# -- (object) Container resources
 resources:
   requests:
     cpu: 25m
@@ -273,22 +274,22 @@ resources:
   limits:
     memory: 128Mi
 
-# -- (list) Container resize policy for in-place vertical scaling (requires Kubernetes 1.27+); empty omits the field. CPU resizes in place without a restart; memory resizes restart the container.
+# -- (list) Container resize policy for in-place resizing. Empty omits it
 resizePolicy:
   - resourceName: cpu
     restartPolicy: NotRequired
   - resourceName: memory
     restartPolicy: RestartContainer
 
-# -- (int) Grace period for shutdown. Must exceed the longer of `kagent.timeout` and `chat.timeout`, plus the 30s drain margin, so a run already in flight still posts its thread reply.
+# -- (int) Shutdown grace period. Keep it above the longer of `kagent.timeout` and `chat.timeout` plus 30s
 terminationGracePeriodSeconds: 240
 
-# -- (object) Extra annotations for the pod
+# -- (object) Extra Pod annotations
 podAnnotations: {}
-# -- (object) Extra labels for the pod
+# -- (object) Extra Pod labels
 podLabels: {}
 
-# -- (object) Pod-level security context
+# -- (object) Pod security context
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
@@ -297,7 +298,7 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-# -- (object) Container-level security context
+# -- (object) Container security context
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
@@ -305,23 +306,21 @@ securityContext:
     drop:
       - ALL
 
-# -- (object) Node selector for pod scheduling
+# -- (object) Node selector
 nodeSelector: {}
-# -- (list) Tolerations for pod scheduling
+# -- (list) Tolerations
 tolerations: []
-# -- (object) Affinity rules for pod scheduling
+# -- (object) Affinity
 affinity: {}
-# -- (object) Extra Pod spec fields, e.g. runtimeClassName. Fields the chart already renders are rejected
+# -- (object) Extra Pod spec fields, e.g. runtimeClassName. Fields the chart renders are rejected
 extraPodSpec: {}
-# -- (list) Topology spread constraints for pod scheduling. `labelSelector` is
-# filled in with the chart's selector labels when a constraint omits it, so
-# spreading replicas across zones needs only the topologyKey.
+# -- (list) Topology spread constraints. A missing `labelSelector` uses the chart's selector labels
 topologySpreadConstraints: []
 
-# -- (string) Pod DNS policy, e.g. ClusterFirst or None; empty omits the field
+# -- (string) Pod DNS policy. Empty omits it
 dnsPolicy: ""
-# -- (object) Pod DNS config (used with dnsPolicy None); empty omits the field
+# -- (object) Pod DNS config. Empty omits it
 dnsConfig: {}
 
-# -- (list) Additional Kubernetes manifests rendered verbatim
+# -- (list) Extra manifests rendered as written
 extraObjects: []
