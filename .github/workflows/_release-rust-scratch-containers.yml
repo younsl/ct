@@ -56,6 +56,7 @@ jobs:
     outputs:
       has_releases: ${{ steps.gen.outputs.has_releases }}
       test_matrix: ${{ steps.gen.outputs.test_matrix }}
+      scan_matrix: ${{ steps.gen.outputs.scan_matrix }}
       binary_matrix: ${{ steps.gen.outputs.binary_matrix }}
       docker_matrix: ${{ steps.gen.outputs.docker_matrix }}
     steps:
@@ -145,10 +146,37 @@ jobs:
         run: cargo llvm-cov --fail-under-lines 70
 
   # ---------------------------------------------------------------------------
+  # Scan: no CRITICAL or HIGH vulnerability in any lockfile of the component
+  # ---------------------------------------------------------------------------
+  scan:
+    name: scan (${{ matrix.component }})
+    needs: detect
+    if: needs.detect.outputs.has_releases == 'true'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect.outputs.scan_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install trivy
+        uses: taiki-e/install-action@v2.90.3
+        with:
+          tool: trivy@0.76.2
+
+      # Run inside the component so its .trivyignore applies
+      - name: Scan lockfiles (CRITICAL 0, HIGH 0)
+        working-directory: ${{ matrix.scan_dir }}
+        run: trivy fs --scanners vuln --severity CRITICAL,HIGH --exit-code 1 .
+
+  # ---------------------------------------------------------------------------
   # Build binaries: cargo-zigbuild for musl targets (per project × arch)
   # ---------------------------------------------------------------------------
   build-binaries:
-    needs: [detect, test]
+    needs: [detect, test, scan]
     if: needs.detect.outputs.has_releases == 'true'
     runs-on: ubuntu-26.04
     permissions:
@@ -299,7 +327,7 @@ jobs:
   # Build & push Docker image (scratch, multiarch)
   # ---------------------------------------------------------------------------
   build-docker:
-    needs: [detect, test, build-binaries]
+    needs: [detect, test, scan, build-binaries]
     if: needs.detect.outputs.has_releases == 'true'
     runs-on: ubuntu-26.04
     permissions:

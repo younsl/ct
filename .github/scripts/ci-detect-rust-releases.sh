@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pick the Rust scratch-container projects to release and emit the job matrices.
 # Usage: ci-detect-rust-releases.sh   Writes has_releases, test_matrix,
-#   binary_matrix, docker_matrix to GITHUB_OUTPUT.
+#   scan_matrix, binary_matrix, docker_matrix to GITHUB_OUTPUT.
 # Env: GH_TOKEN, GITHUB_ACTOR, GITHUB_SHA, GITHUB_OUTPUT, EVENT_NAME,
 #   PUSH_BEFORE (push), SELECTED and FORCE (workflow_dispatch).
 # Projects come from ci-rust-projects.json, keyed by Dockerfile path. Every field
@@ -11,6 +11,8 @@
 # (the aya kernel crate built before the binary) to "-", and test_dir (where
 # fmt, clippy, tests, and coverage run, relative to the Dockerfile directory)
 # to "." so a workspace member can test its whole workspace.
+# scan_matrix holds one entry per component directory (box/addons/<component>),
+# where every lockfile of the component lives.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,6 +84,10 @@ done < <(jq -c 'to_entries[]
 
 TEST_JSON=$(jq -c '[ .[] | {project, base_dir, embed_dir, test_dir} ]' <<< "${RELEASES}")
 
+SCAN_JSON=$(jq -c '[ .[] | (.base_dir | split("/")[:3] | join("/")) ]
+  | unique
+  | map({component: (split("/") | last), scan_dir: .})' <<< "${RELEASES}")
+
 BINARY_JSON=$(jq -c '[ .[] as $p
   | {"x86_64-unknown-linux-musl": "amd64", "aarch64-unknown-linux-musl": "arm64"}
   | to_entries[]
@@ -113,10 +119,12 @@ HAS_RELEASES="false"
 {
   echo "has_releases=${HAS_RELEASES}"
   echo "test_matrix={\"include\":${TEST_JSON}}"
+  echo "scan_matrix={\"include\":${SCAN_JSON}}"
   echo "binary_matrix={\"include\":${BINARY_JSON}}"
   echo "docker_matrix={\"include\":${DOCKER_JSON}}"
 } >> "${GITHUB_OUTPUT}"
 
 echo "test_matrix: ${TEST_JSON}"
+echo "scan_matrix: ${SCAN_JSON}"
 echo "binary_matrix: ${BINARY_JSON}"
 echo "docker_matrix: ${DOCKER_JSON}"
