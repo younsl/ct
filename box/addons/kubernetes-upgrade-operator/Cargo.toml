@@ -49,8 +49,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Kubernetes
-kube = { version = "3.0.1", features = ["runtime", "derive", "client", "rustls-tls", "aws-lc-rs"], default-features = false }
-k8s-openapi = { version = "0.27", features = ["v1_31"] }
+kube = { version = "4.2", features = ["runtime", "derive", "client", "rustls-tls", "aws-lc-rs"], default-features = false }
+k8s-openapi = { version = "0.28", features = ["v1_32"] }
 schemars = { version = "1.2", features = ["chrono04"] }
 
 # HTTP server (health endpoints)
