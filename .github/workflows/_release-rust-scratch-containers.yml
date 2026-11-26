@@ -167,10 +167,10 @@ jobs:
         with:
           tool: trivy@0.76.2
 
-      # Run inside the component so its .trivyignore applies
       - name: Scan lockfiles (CRITICAL 0, HIGH 0)
-        working-directory: ${{ matrix.scan_dir }}
-        run: trivy fs --scanners vuln --severity CRITICAL,HIGH --exit-code 1 .
+        env:
+          SCAN_DIR: ${{ matrix.scan_dir }}
+        run: trivy fs --scanners vuln --severity CRITICAL,HIGH --exit-code 1 "${SCAN_DIR}"
 
   # ---------------------------------------------------------------------------
   # Build binaries: cargo-zigbuild for musl targets (per project × arch)
