@@ -11,6 +11,7 @@ Dependency update for RUSTSEC advisories. No behavior change.
 Only the crates with an advisory move, so the lockfile stays close to 0.6.0.
 
 - url 2.5.9 (RUSTSEC-2026-0592), released after the first build of this version, so the image is rebuilt at the same version.
+- aws-smithy-json 0.62.7 (CVE-2026-18140), and kube 4.2.1 with k8s-openapi 0.28.0 (RUSTSEC-2026-0600), both reported after the previous build of this version, so the image is rebuilt at the same version again.
 - aws-lc-rs 1.19.0 with aws-lc-sys 0.47.0 (RUSTSEC-2026-0044, 0045, 0046, 0047, 0048).
 - rustls 0.23.46 (RUSTSEC-2026-0285, 0346, 0348, 0349), rustls-webpki 0.103.17 (RUSTSEC-2026-0049, 0098, 0099, 0104, 0382), webpki-roots 1.0.12 (RUSTSEC-2026-0381).
 - h2 0.4.20 (RUSTSEC-2026-0258).

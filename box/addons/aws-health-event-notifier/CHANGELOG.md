@@ -11,6 +11,7 @@ Dependency update for RUSTSEC advisories, with one error reporting fix.
 cargo audit reported 25 vulnerabilities and now reports 0.
 
 - url 2.5.9 (RUSTSEC-2026-0592), released after the first build of this version, so the image is rebuilt at the same version.
+- aws-smithy-json 0.62.7 (CVE-2026-18140), and kube 4.2.1 with k8s-openapi 0.28.0 (RUSTSEC-2026-0600), both reported after the previous build of this version, so the image is rebuilt at the same version again.
 - vergen-gitcl replaces vergen-gix for the build metadata. It reads the commit from the git CLI, so the gix crates and the heapless 0.8.0 they pin leave the lockfile (RUSTSEC-2026-0574 to 0582). The binary carries the same short SHA and dirty flag.
 - The AWS SDK crates drop their default features and keep only the hyper 1 HTTPS client. This removes the legacy hyper 0.14 TLS stack (rustls 0.21.12, rustls-webpki 0.101.7, h2 0.3.27) and the SigV4a signing crates (crypto-bigint 0.4.9 and 0.5.5), none of which has a patched release in its line (RUSTSEC-2026-0098, 0099, 0104, 0258, 0346, 0349, 0382, 0387).
 - rustls 0.23.46 (RUSTSEC-2026-0285, 0346, 0348, 0349), rustls-webpki 0.103.17 (RUSTSEC-2026-0382), and webpki-roots 1.0.12 (RUSTSEC-2026-0381).
