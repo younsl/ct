@@ -7,8 +7,8 @@ Every run, dry runs included, passes the `PreflightChecking` phase before any in
 | EKS Cluster Insights | Mandatory | Fails if critical insights exist |
 | [EKS Deletion Protection](https://docs.aws.amazon.com/eks/latest/userguide/delete-cluster.html) | Mandatory | Fails if deletion protection is disabled |
 | PDB Drain Deadlock | Mandatory | Fails if any [PDB](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/) has `disruptionsAllowed == 0`, naming the blocking `namespace/name` PDBs (always enforced) |
-| Karpenter v1 API | Mandatory | Only when `karpenterNodePools.enabled`. Fails if the Karpenter v1 API is not served (v1beta1 and earlier unsupported) |
-| Karpenter AMI Selector | Mandatory | Only when `karpenterNodePools.enabled`. Fails if a target NodePool pins its AMI instead of `alias: <family>@latest` |
+| [Karpenter](https://github.com/kubernetes-sigs/karpenter) v1 API | Mandatory | Only when `karpenterNodePools.enabled`. Fails if the Karpenter v1 API is not served (v1beta1 and earlier unsupported) |
+| [Karpenter](https://github.com/kubernetes-sigs/karpenter) AMI Selector | Mandatory | Only when `karpenterNodePools.enabled`. Fails if a target NodePool pins its AMI instead of `alias: <family>@latest` |
 
 Rollback runs query insights under the `ROLLBACK_READINESS` category instead of `UPGRADE_READINESS`.
 
@@ -32,7 +32,7 @@ status:
             - kube-system/coredns-pdb
 ```
 
-Resource formats: `namespace/name` for PDBs, NodePool name for the Karpenter AMI check, `type:id` for EKS Insights findings (ERROR and CRITICAL only).
+Resource formats: `namespace/name` for PDBs, NodePool name for the [Karpenter](https://github.com/kubernetes-sigs/karpenter) AMI check, `type:id` for EKS Insights findings (ERROR and CRITICAL only).
 
 ## Logs
 
