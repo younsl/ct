@@ -7,7 +7,6 @@
   "box/addons/kagent-gateway/Dockerfile":                    {},
   "box/addons/argocd-canary-gate/Dockerfile":                {},
   "box/addons/filesystem-cleaner/Dockerfile":                {},
-  "box/addons/imds-bridge/Dockerfile":                       {},
   "box/addons/volume-autoscaler/Dockerfile":                 {},
   "box/addons/node-configuration-operator/crates/operator/Dockerfile": { "project": "node-configuration-operator" },
   "box/addons/node-configuration-operator/crates/agent/Dockerfile":    { "project": "node-configuration-agent" },

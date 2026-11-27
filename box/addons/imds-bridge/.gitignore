@@ -1,6 +1,0 @@
-/target/
-**/*.rs.bk
-imds-bridge-linux-*
-lcov.info
-
-.DS_Store

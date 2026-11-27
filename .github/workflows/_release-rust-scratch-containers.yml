@@ -13,7 +13,6 @@ on:
       - 'box/addons/kagent-gateway/Dockerfile'
       - 'box/addons/argocd-canary-gate/Dockerfile'
       - 'box/addons/filesystem-cleaner/Dockerfile'
-      - 'box/addons/imds-bridge/Dockerfile'
       - 'box/addons/volume-autoscaler/Dockerfile'
       - 'box/addons/node-configuration-operator/crates/operator/Dockerfile'
       - 'box/addons/node-configuration-operator/crates/agent/Dockerfile'
@@ -34,7 +33,6 @@ on:
           - kagent-gateway
           - argocd-canary-gate
           - filesystem-cleaner
-          - imds-bridge
           - volume-autoscaler
           - node-configuration-operator
           - node-configuration-agent
