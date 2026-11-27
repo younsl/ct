@@ -144,6 +144,8 @@ With `finalSnapshot.enabled`, a claim past its deadline is deleted only after a 
 | Backup `Completed` with a volume snapshot | The claim is deleted. The `OrphanPvcDeleted` Event and alert name the backup |
 | Backup failed, partially failed, or completed with no volume snapshot | The claim is kept, counted as `failed` with `error_total{stage="orphan_pvc_final_snapshot"}`, and `OrphanPvcDeletionFailed` is sent every pass |
 
+Every pass first checks that the cluster serves the Velero Backup API (`backups.velero.io`), starting with the first pass after startup. Without it the pass logs an error, counts `error_total{stage="orphan_pvc_final_snapshot_preflight"}`, and keeps every bound claim past its deadline with an `OrphanPvcDeletionFailed` alert. No claim is labeled and no Backup is attempted. Alert on that stage to catch a missing Velero before the first claim reaches its deadline.
+
 The scan runs hourly, so a deletion happens one pass after its backup was created at the earliest. A claim waiting for its backup still takes one of the `maxDeletionsPerPass` slots.
 
 The Backup selects only the labeled claim. Velero adds the bound PersistentVolume and takes the volume snapshot. File system backup is turned off because no Pod mounts an orphan claim. A claim that never bound (`unbound`) has no volume and is deleted without a backup.

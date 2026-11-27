@@ -328,6 +328,18 @@ impl KubeApi for KubeClient {
             .map_err(|e| format!("patch persistentvolumeclaim {namespace}/{name} labels: {e}"))
     }
 
+    async fn backup_api_available(&self) -> Result<bool, String> {
+        match self
+            .client
+            .list_api_group_resources(BACKUP_API_VERSION)
+            .await
+        {
+            Ok(list) => Ok(list.resources.iter().any(|r| r.name == BACKUP_PLURAL)),
+            Err(kube::Error::Api(status)) if status.code == 404 => Ok(false),
+            Err(e) => Err(format!("discover {BACKUP_API_VERSION}: {e}")),
+        }
+    }
+
     async fn get_backup(
         &self,
         namespace: &str,

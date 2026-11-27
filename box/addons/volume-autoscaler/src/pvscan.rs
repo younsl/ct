@@ -75,6 +75,8 @@ pub trait KubeApi: Send + Sync {
         label: &str,
         value: &str,
     ) -> Result<(), String>;
+    /// Whether the cluster serves the Velero `Backup` API.
+    async fn backup_api_available(&self) -> Result<bool, String>;
     /// Reads a Velero `Backup`, `None` when it does not exist.
     async fn get_backup(
         &self,
@@ -399,7 +401,8 @@ impl Scanner {
             error!(error = %err, "failed to save the orphan PVC cleanup state, new schedules start over on the next pass");
         }
         let pending = due.len();
-        let deleted = self.delete_due(&findings, due).await;
+        let blocked = self.final_snapshot_preflight().await;
+        let deleted = self.delete_due(&findings, due, blocked.as_deref()).await;
         self.rec
             .observe_orphan_pvc_cleanup_scheduled(scheduled + pending - deleted);
         self.summarize(&findings);
@@ -471,7 +474,12 @@ impl Scanner {
     /// `max_deletions_per_pass` of them. Each claim is checked for a Pod
     /// mounting it right before the delete, since the inventory is up to a
     /// pass old, and any error skips the claim rather than guessing.
-    async fn delete_due(&self, findings: &[Finding], due: Vec<usize>) -> usize {
+    async fn delete_due(
+        &self,
+        findings: &[Finding],
+        due: Vec<usize>,
+        snapshot_blocked: Option<&str>,
+    ) -> usize {
         let Some(policy) = &self.orphan_pvc_cleanup else {
             return 0;
         };
@@ -518,6 +526,13 @@ impl Scanner {
             if let Some(settings) = &self.final_snapshot
                 && !f.volume_name.is_empty()
             {
+                if let Some(why) = snapshot_blocked {
+                    self.rec
+                        .observe_orphan_pvc_cleanup(orphan_pvc_cleanup::ACTION_FAILED);
+                    self.alert_failed(f, &format!("final snapshot preflight failed: {why}"))
+                        .await;
+                    continue;
+                }
                 backup = self.ensure_final_snapshot(settings, f).await;
                 if backup.is_none() {
                     continue;
@@ -563,6 +578,27 @@ impl Scanner {
             }
         }
         deleted
+    }
+
+    /// Checks every pass that Velero can take a final snapshot, so a cluster
+    /// without it is reported on the first pass and not when the first claim
+    /// reaches its deadline. Returns why bound claims must be kept, `None`
+    /// when final snapshots are off or Velero is there.
+    async fn final_snapshot_preflight(&self) -> Option<String> {
+        let settings = self.final_snapshot.as_ref()?;
+        let why = match self.kube.backup_api_available().await {
+            Ok(true) => return None,
+            Ok(false) => format!(
+                "the Velero Backup API ({}.velero.io) is not installed in this cluster",
+                final_snapshot::BACKUP_PLURAL
+            ),
+            Err(err) => format!("the Velero Backup API could not be checked: {err}"),
+        };
+        self.rec
+            .observe_error("orphan_pvc_final_snapshot_preflight");
+        error!(namespace = %settings.namespace, reason = %why,
+            "final snapshot preflight failed: no bound orphan PVC is deleted until Velero can back it up");
+        Some(why)
     }
 
     /// Returns the Velero backup holding the claim once it has completed. A
@@ -1042,6 +1078,8 @@ mod tests {
         saved: Mutex<Vec<OrphanPvcState>>,
         backups: Mutex<BTreeMap<String, serde_json::Value>>,
         fail_backup: bool,
+        /// `Some(false)` is a cluster without Velero, `None` one with it.
+        backup_api: Option<Result<bool, String>>,
         labels: Mutex<Vec<(String, String, String)>>,
     }
 
@@ -1160,6 +1198,9 @@ mod tests {
                 value.into(),
             ));
             Ok(())
+        }
+        async fn backup_api_available(&self) -> Result<bool, String> {
+            self.backup_api.clone().unwrap_or(Ok(true))
         }
         async fn get_backup(
             &self,
@@ -1769,6 +1810,62 @@ mod tests {
                 .ends_with(&format!("Final snapshot: Velero backup {backup}.")),
             "{}",
             deleted.5
+        );
+    }
+
+    #[tokio::test]
+    async fn final_snapshot_preflight_holds_bound_claims_without_velero() {
+        let now = Utc::now();
+        let due = Some(now - chrono::TimeDelta::hours(1));
+        for api in [Ok(false), Err("timeout".to_string())] {
+            let kube = Arc::new(FakeKube {
+                inv: Mutex::new(orphan_inventory(now, due)),
+                backup_api: Some(api),
+                ..FakeKube::default()
+            });
+            let rec = Arc::new(Rec::default());
+            let alerts = Arc::new(Alerts::default());
+            let s = scanner(kube.clone(), rec.clone(), None, false, now)
+                .with_orphan_pvc_cleanup(Some(orphan_policy(10)))
+                .with_orphan_pvc_alerts(Some(alerts.clone()))
+                .with_final_snapshot(Some(snapshot_settings()));
+            s.reconcile().await.unwrap();
+            assert!(kube.deletes.lock().unwrap().is_empty());
+            assert!(kube.labels.lock().unwrap().is_empty(), "nothing attempted");
+            assert!(kube.backups.lock().unwrap().is_empty());
+            assert_eq!(
+                rec.cleanup.lock().unwrap().clone(),
+                vec![orphan_pvc_cleanup::ACTION_FAILED]
+            );
+            assert!(
+                rec.errors
+                    .lock()
+                    .unwrap()
+                    .contains(&"orphan_pvc_final_snapshot_preflight".to_string())
+            );
+            let sent = alerts.0.lock().unwrap().clone();
+            assert!(
+                sent.iter().any(|a| a.1 == ALERT_DELETION_FAILED),
+                "{sent:?}"
+            );
+        }
+
+        let kube = Arc::new(FakeKube {
+            inv: Mutex::new(orphan_inventory(now, None)),
+            backup_api: Some(Ok(false)),
+            ..FakeKube::default()
+        });
+        let rec = Arc::new(Rec::default());
+        let s = scanner(kube, rec.clone(), None, false, now)
+            .with_orphan_pvc_cleanup(Some(orphan_policy(10)))
+            .with_final_snapshot(Some(snapshot_settings()));
+        s.reconcile().await.unwrap();
+        assert!(
+            rec.errors
+                .lock()
+                .unwrap()
+                .contains(&"orphan_pvc_final_snapshot_preflight".to_string()),
+            "reported before any claim is due"
         );
     }
 

@@ -75,6 +75,7 @@ Since 0.4.0 an operator can require a backup before every deletion (`finalSnapsh
 - **One Backup per claim and deadline.** The name carries the claim UID and the deadline, so a claim canceled and scheduled again never reuses a backup taken for the earlier schedule, and a restart finds the same Backup instead of creating a second one. No new state is stored.
 - **Selected by a label.** A Backup has no field that names one object, so the claim is labeled with the backup name and the Backup selects that label. Velero follows the claim to its PersistentVolume by itself.
 - **Completed is not enough.** A Backup can complete while holding only the claim manifest, for example with no snapshotter configured. The claim is deleted only when the Backup reports at least one completed volume snapshot or data upload. Anything else keeps the claim and alerts.
+- **Preflight every pass.** A missing Backup API would otherwise show up only when the first claim reaches its deadline, days after enabling. Each pass asks API discovery for `backups.velero.io` and reports its absence at once. Discovery needs no extra RBAC, and checking every pass covers Velero being removed later.
 - **No automatic retry.** A failed Backup stays failed until an operator deletes it. Retrying under a new name every hour would pile up failed backups for a cause only an operator can fix.
 - **Polled by the hourly scan.** A deletion lands one pass after its backup. A watch on Backups would save an hour on a claim that already waited days.
 

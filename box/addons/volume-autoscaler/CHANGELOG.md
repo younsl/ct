@@ -12,7 +12,8 @@ Adds an opt-in Velero final snapshot before orphan PVC cleanup deletes a claim.
 - The first pass after the deadline labels the claim `volume-autoscaler.sh/final-snapshot` and creates the Backup `orphan-pvc-<claim UID>-<deadline>` in `finalSnapshot.namespace` (default `velero`), with a Normal Event `OrphanPvcFinalSnapshotStarted`. The claim is deleted on the first later pass that finds the Backup `Completed`, and the `OrphanPvcDeleted` Event and alert name the Backup.
 - A Backup that fails, partially fails, or completes without a volume snapshot keeps the claim and sends `OrphanPvcDeletionFailed` every pass. It is not retried until an operator deletes the Backup. A claim that never bound has no volume and is deleted without a Backup.
 - `finalSnapshot.ttl` (default `30d`, at least `1h`) sets how long Velero keeps the Backup and its snapshots. `storageLocation`, `volumeSnapshotLocations`, and `snapshotMoveData` pass through to the Backup.
-- `volume_autoscaler_orphan_pvc_cleanup_total` actions `snapshot_started` and `snapshot_pending`, and the `volume_autoscaler_error_total` stage `orphan_pvc_final_snapshot`.
+- A preflight on every pass checks that the cluster serves the Velero Backup API (`backups.velero.io`). Without it, bound claims past their deadline are kept with an `OrphanPvcDeletionFailed` alert, and no claim is labeled and no Backup is attempted. Added after the first build of this version, so the image is rebuilt at the same version.
+- `volume_autoscaler_orphan_pvc_cleanup_total` actions `snapshot_started` and `snapshot_pending`, and the `volume_autoscaler_error_total` stages `orphan_pvc_final_snapshot_preflight` and `orphan_pvc_final_snapshot`.
 
 ### Security
 
