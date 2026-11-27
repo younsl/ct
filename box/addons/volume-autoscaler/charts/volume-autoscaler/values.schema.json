@@ -452,6 +452,34 @@
             },
             "alertBefore": {
               "$ref": "#/definitions/goDuration"
+            },
+            "finalSnapshot": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "namespace": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ttl": {
+                  "$ref": "#/definitions/goDuration"
+                },
+                "storageLocation": {
+                  "type": "string"
+                },
+                "volumeSnapshotLocations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "snapshotMoveData": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         }

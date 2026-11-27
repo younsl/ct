@@ -283,7 +283,7 @@ impl Metrics {
             orphan_pvc_cleanup_total: counter_vec(
                 &r,
                 "volume_autoscaler_orphan_pvc_cleanup_total",
-                "Orphan PVC cleanup actions by action (scheduled, canceled, deleted, failed, deferred, skipped_in_use, dry_run). Only claims are ever deleted, never a volume.",
+                "Orphan PVC cleanup actions by action (scheduled, canceled, deleted, failed, deferred, skipped_in_use, snapshot_started, snapshot_pending, dry_run). Only claims are ever deleted, never a volume.",
                 &["action"],
             ),
             orphan_pvc_cleanup_scheduled: gauge(

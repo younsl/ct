@@ -565,6 +565,10 @@ fn log_orphan_pvc_cleanup_policy(cfg: &Config, events: bool) {
         alert_before = %go_duration(c.alert_before),
         alert_enabled = c.alert_enabled,
         alertmanager_enabled = cfg.alertmanager_enabled,
+        final_snapshot = c.final_snapshot.enabled,
+        final_snapshot_namespace = %c.final_snapshot.namespace,
+        final_snapshot_ttl = %go_duration(c.final_snapshot.ttl),
+        final_snapshot_move_data = c.final_snapshot.snapshot_move_data,
         dry_run = cfg.dry_run,
         "Orphan PVC cleanup is enabled: PersistentVolumeClaims are scheduled alertBefore ahead and deleted once unused for minUnusedAge. PersistentVolumes and EBS volumes follow their own reclaim policy"
     );
@@ -594,6 +598,20 @@ fn orphan_pvc_alerts(
 /// election Lease. The chart grants access to this name only.
 fn orphan_pvc_state_name(cfg: &Config) -> String {
     format!("{}-orphan-pvc", cfg.lease_name)
+}
+
+/// The Velero backup every bound claim needs before its deletion, or `None`
+/// while final snapshots or cleanup itself are disabled.
+fn final_snapshot_settings(cfg: &Config) -> Option<pvscan::FinalSnapshotSettings> {
+    let c = &cfg.orphan_pvc_cleanup;
+    let s = &c.final_snapshot;
+    (c.enabled && s.enabled).then(|| pvscan::FinalSnapshotSettings {
+        namespace: s.namespace.clone(),
+        ttl: s.ttl,
+        storage_location: s.storage_location.clone(),
+        volume_snapshot_locations: s.volume_snapshot_locations.clone(),
+        snapshot_move_data: s.snapshot_move_data,
+    })
 }
 
 /// The scanner's orphan PVC cleanup policy, or `None` while it is disabled.
@@ -886,6 +904,7 @@ fn build_scanner(
     Some(
         Scanner::new(cfg.dry_run, Arc::new(kube), rec, events)
             .with_orphan_pvc_cleanup(policy)
+            .with_final_snapshot(final_snapshot_settings(cfg))
             .with_orphan_pvc_alerts(orphan_pvc_alerts(cfg)),
     )
 }
@@ -1024,8 +1043,13 @@ mod tests {
         );
         c.orphan_pvc_cleanup.alert_enabled = false;
         assert!(orphan_pvc_alerts(&c).is_none());
+        assert!(final_snapshot_settings(&c).is_none(), "off by default");
+        c.orphan_pvc_cleanup.final_snapshot.enabled = true;
+        c.orphan_pvc_cleanup.final_snapshot.namespace = "velero".into();
+        assert_eq!(final_snapshot_settings(&c).unwrap().namespace, "velero");
         c.orphan_pvc_cleanup.enabled = false;
         assert!(orphan_pvc_cleanup_policy(&c).is_none());
+        assert!(final_snapshot_settings(&c).is_none(), "needs cleanup");
     }
 
     #[test]

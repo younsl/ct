@@ -58,9 +58,16 @@ orphanPvcCleanup:                      # deletes unused claims, never a volume; 
   maxDeletionsPerPass: 1               # 1 to 100 per hourly scan
   alertEnabled: true                   # alert upcoming, deleted, failed; requires alertmanager.enabled
   alertBefore: 6h                      # schedule and alert this long before deletion; at least 1h
+  finalSnapshot:                       # Velero backup before each deletion; see orphan-pvc-cleanup.md#final-snapshot
+    enabled: false                     # requires Velero with a volume snapshotter
+    namespace: velero                  # where Velero watches Backup objects
+    ttl: 30d                           # how long Velero keeps the backup; at least 1h
+    storageLocation: ""                # empty uses the Velero default
+    volumeSnapshotLocations: []        # empty uses the Velero defaults
+    snapshotMoveData: false            # upload snapshot data to the backup storage location
 ```
 
-Every key exists since app version 0.1.0, except `orphanPvcCleanup`, which was added in 0.2.0.
+Every key exists since app version 0.1.0, except `orphanPvcCleanup`, which was added in 0.2.0, and `orphanPvcCleanup.finalSnapshot`, added in 0.4.0.
 
 A third environment-injected value applies whenever `metrics.url` is queried:
 `PROMETHEUS_BEARER_TOKEN`, for a gateway that fronts the metrics backend with token

@@ -208,6 +208,20 @@ config:
     alertEnabled: true
     # -- (string) Schedule the claim and send the one upcoming alert this long before deletion, at least 1h
     alertBefore: "6h"
+    # -- (object) Final snapshot: a Velero Backup of each bound claim that must complete before the claim is deleted
+    finalSnapshot:
+      # -- (bool) Take a Velero backup before every deletion, requires Velero with a volume snapshotter
+      enabled: false
+      # -- (string) Namespace Velero watches for Backup objects. The chart creates a Role and RoleBinding in it
+      namespace: "velero"
+      # -- (string) How long Velero keeps the backup and its snapshots, at least 1h. Units `m`, `h`, `d`
+      ttl: "30d"
+      # -- (string) BackupStorageLocation name, empty uses the Velero default
+      storageLocation: ""
+      # -- (list) VolumeSnapshotLocation names, empty uses the Velero defaults
+      volumeSnapshotLocations: []
+      # -- (bool) Upload the snapshot data to the backup storage location (CSI snapshot data movement)
+      snapshotMoveData: false
 
 # -- (list) Extra container env (EnvVar entries)
 extraEnv: []

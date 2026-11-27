@@ -15,6 +15,7 @@
 pub mod annotations;
 pub mod decide;
 pub mod defaults;
+pub mod final_snapshot;
 pub mod kube;
 pub mod orphan_pvc_cleanup;
 pub mod types;
@@ -32,6 +33,7 @@ use crate::k8s::events::{Emitter, TYPE_NORMAL, TYPE_WARNING, Target};
 pub use annotations::{build_annotations, key};
 pub use decide::classify;
 pub use defaults::{INTERVAL, MIN_UNUSED_AGE};
+pub use final_snapshot::{Progress as FinalSnapshotProgress, Settings as FinalSnapshotSettings};
 pub use kube::KubeClient;
 pub use orphan_pvc_cleanup::{
     Policy as OrphanPvcCleanupPolicy, Record as OrphanPvcRecord, State as OrphanPvcState, Verdict,
@@ -66,6 +68,24 @@ pub trait KubeApi: Send + Sync {
     async fn load_orphan_state(&self) -> Result<OrphanPvcState, String>;
     /// Replaces the controller-owned orphan PVC cleanup state.
     async fn save_orphan_state(&self, state: &OrphanPvcState) -> Result<(), String>;
+    async fn label_pvc(
+        &self,
+        namespace: &str,
+        name: &str,
+        label: &str,
+        value: &str,
+    ) -> Result<(), String>;
+    /// Reads a Velero `Backup`, `None` when it does not exist.
+    async fn get_backup(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<Option<serde_json::Value>, String>;
+    async fn create_backup(
+        &self,
+        namespace: &str,
+        backup: &serde_json::Value,
+    ) -> Result<(), String>;
 }
 
 /// Receives metrics observations. `observability::Metrics` implements it.
@@ -216,6 +236,7 @@ pub const REASON_UNUSED_CLEARED: &str = "UnusedVolumeCleared";
 pub const REASON_DELETION_SCHEDULED: &str = "OrphanPvcDeletionScheduled";
 pub const REASON_DELETION_CANCELED: &str = "OrphanPvcDeletionCanceled";
 pub const REASON_DELETED: &str = "OrphanPvcDeleted";
+pub const REASON_FINAL_SNAPSHOT_STARTED: &str = "OrphanPvcFinalSnapshotStarted";
 /// Alertmanager alert names. Upcoming is sent once, `alertBefore` ahead of
 /// the deadline. Deleted reuses the Event reason.
 pub const ALERT_DELETION_UPCOMING: &str = "OrphanPvcDeletionUpcoming";
@@ -245,6 +266,9 @@ pub struct Scanner {
     /// Alertmanager alerts for scheduled, deleted, and failed orphan PVC
     /// deletions. `None` while alerts are off.
     orphan_pvc_alerts: Option<Arc<dyn AlertNotifier>>,
+    /// `Some` holds every deletion of a bound claim until a Velero backup of
+    /// it has completed.
+    final_snapshot: Option<FinalSnapshotSettings>,
 }
 
 /// What orphan PVC cleanup may do in one pass.
@@ -280,7 +304,14 @@ impl Scanner {
             now: Box::new(Utc::now),
             orphan_pvc_cleanup: None,
             orphan_pvc_alerts: None,
+            final_snapshot: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_final_snapshot(mut self, settings: Option<FinalSnapshotSettings>) -> Self {
+        self.final_snapshot = settings;
+        self
     }
 
     #[must_use]
@@ -483,6 +514,15 @@ impl Scanner {
                     continue;
                 }
             }
+            let mut backup = None;
+            if let Some(settings) = &self.final_snapshot
+                && !f.volume_name.is_empty()
+            {
+                backup = self.ensure_final_snapshot(settings, f).await;
+                if backup.is_none() {
+                    continue;
+                }
+            }
             let reclaim_policy = reclaim
                 .get(f.volume_name.as_str())
                 .copied()
@@ -494,19 +534,21 @@ impl Scanner {
                         .observe_orphan_pvc_cleanup(orphan_pvc_cleanup::ACTION_DELETED);
                     warn!(object = %f.key(), reason = %f.reason, unused_days = f.unused_days(),
                         capacity_bytes = f.capacity_bytes, volume_name = %f.volume_name,
-                        volume_id = %f.volume_id, reclaim_policy, "orphan PVC deleted");
-                    self.emit_deleted(f, reclaim_policy);
+                        volume_id = %f.volume_id, reclaim_policy,
+                        final_snapshot = backup.as_deref().unwrap_or_default(), "orphan PVC deleted");
+                    self.emit_deleted(f, reclaim_policy, backup.as_deref());
                     self.alert(
                         f,
                         "info",
                         REASON_DELETED,
                         format!("Orphan PVC {} deleted", f.key()),
                         format!(
-                            "Deleted after {} days unused ({}), holding {}. Reclaim policy of its volume: {}.",
+                            "Deleted after {} days unused ({}), holding {}. Reclaim policy of its volume: {}.{}",
                             f.unused_days(),
                             f.reason,
                             describe_capacity(f),
-                            if reclaim_policy.is_empty() { "none" } else { reclaim_policy }
+                            if reclaim_policy.is_empty() { "none" } else { reclaim_policy },
+                            describe_backup(backup.as_deref())
                         ),
                     )
                     .await;
@@ -521,6 +563,75 @@ impl Scanner {
             }
         }
         deleted
+    }
+
+    /// Returns the Velero backup holding the claim once it has completed. A
+    /// pass that finds none creates it and returns `None`, as does a backup
+    /// still running or failed, so the claim is kept until a later pass.
+    async fn ensure_final_snapshot(
+        &self,
+        settings: &FinalSnapshotSettings,
+        f: &Finding,
+    ) -> Option<String> {
+        let name = final_snapshot::backup_name(&f.uid, f.delete_after?);
+        let backup = format!("{}/{name}", settings.namespace);
+        let failed = match self.kube.get_backup(&settings.namespace, &name).await {
+            Ok(Some(b)) => match final_snapshot::progress(&b) {
+                FinalSnapshotProgress::Completed => return Some(backup),
+                FinalSnapshotProgress::Pending(phase) => {
+                    self.rec
+                        .observe_orphan_pvc_cleanup(orphan_pvc_cleanup::ACTION_SNAPSHOT_PENDING);
+                    info!(object = %f.key(), backup = %backup, phase = %phase,
+                        "orphan PVC deletion waits for its final snapshot");
+                    return None;
+                }
+                FinalSnapshotProgress::Failed(why) => format!(
+                    "final snapshot {backup} failed: {why}. Delete the Velero backup to take a new one"
+                ),
+            },
+            Ok(None) => match self.start_final_snapshot(settings, f, &name).await {
+                Ok(()) => {
+                    self.rec
+                        .observe_orphan_pvc_cleanup(orphan_pvc_cleanup::ACTION_SNAPSHOT_STARTED);
+                    info!(object = %f.key(), backup = %backup, volume_name = %f.volume_name,
+                        volume_id = %f.volume_id, "orphan PVC final snapshot started");
+                    if let Some(events) = &self.events {
+                        events.event(
+                            Target::claim(&f.namespace, &f.name, &f.uid),
+                            TYPE_NORMAL,
+                            REASON_FINAL_SNAPSHOT_STARTED,
+                            format!(
+                                "Velero backup {backup} started. The claim is deleted once it completes with a volume snapshot."
+                            ),
+                        );
+                    }
+                    return None;
+                }
+                Err(err) => format!("final snapshot {backup} could not be started: {err}"),
+            },
+            Err(err) => format!("final snapshot {backup} could not be read: {err}"),
+        };
+        self.rec
+            .observe_orphan_pvc_cleanup(orphan_pvc_cleanup::ACTION_FAILED);
+        self.rec.observe_error("orphan_pvc_final_snapshot");
+        error!(object = %f.key(), error = %failed, "orphan PVC deletion skipped: no completed final snapshot");
+        self.alert_failed(f, &failed).await;
+        None
+    }
+
+    async fn start_final_snapshot(
+        &self,
+        settings: &FinalSnapshotSettings,
+        f: &Finding,
+        name: &str,
+    ) -> Result<(), String> {
+        let label = key(final_snapshot::LABEL_FINAL_SNAPSHOT);
+        self.kube
+            .label_pvc(&f.namespace, &f.name, &label, name)
+            .await?;
+        self.kube
+            .create_backup(&settings.namespace, &settings.backup(f, name, &label))
+            .await
     }
 
     async fn alert(
@@ -618,7 +729,7 @@ impl Scanner {
         .await;
     }
 
-    fn emit_deleted(&self, f: &Finding, reclaim_policy: &str) {
+    fn emit_deleted(&self, f: &Finding, reclaim_policy: &str, backup: Option<&str>) {
         let Some(events) = &self.events else {
             return;
         };
@@ -640,10 +751,11 @@ impl Scanner {
             TYPE_NORMAL,
             REASON_DELETED,
             format!(
-                "Deleted after {} days unused ({}), holding {}. {volume}",
+                "Deleted after {} days unused ({}), holding {}. {volume}{}",
                 f.unused_days(),
                 f.reason,
-                describe_capacity(f)
+                describe_capacity(f),
+                describe_backup(backup)
             ),
         );
     }
@@ -893,6 +1005,10 @@ fn describe_capacity(f: &Finding) -> String {
     }
 }
 
+fn describe_backup(backup: Option<&str>) -> String {
+    backup.map_or_default(|b| format!(" Final snapshot: Velero backup {b}."))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashSet};
@@ -924,6 +1040,9 @@ mod tests {
         state: Mutex<Option<OrphanPvcState>>,
         fail_state: bool,
         saved: Mutex<Vec<OrphanPvcState>>,
+        backups: Mutex<BTreeMap<String, serde_json::Value>>,
+        fail_backup: bool,
+        labels: Mutex<Vec<(String, String, String)>>,
     }
 
     /// The state earlier passes would have written for the inventory.
@@ -1026,6 +1145,47 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((format!("{namespace}/{name}"), uid.to_string()));
+            Ok(())
+        }
+        async fn label_pvc(
+            &self,
+            namespace: &str,
+            name: &str,
+            label: &str,
+            value: &str,
+        ) -> Result<(), String> {
+            self.labels.lock().unwrap().push((
+                format!("{namespace}/{name}"),
+                label.into(),
+                value.into(),
+            ));
+            Ok(())
+        }
+        async fn get_backup(
+            &self,
+            namespace: &str,
+            name: &str,
+        ) -> Result<Option<serde_json::Value>, String> {
+            if self.fail_backup {
+                return Err("forbidden".into());
+            }
+            Ok(self
+                .backups
+                .lock()
+                .unwrap()
+                .get(&format!("{namespace}/{name}"))
+                .cloned())
+        }
+        async fn create_backup(
+            &self,
+            namespace: &str,
+            backup: &serde_json::Value,
+        ) -> Result<(), String> {
+            let name = backup["metadata"]["name"].as_str().unwrap_or_default();
+            self.backups
+                .lock()
+                .unwrap()
+                .insert(format!("{namespace}/{name}"), backup.clone());
             Ok(())
         }
     }
@@ -1507,6 +1667,147 @@ mod tests {
         assert_eq!(
             deleted[0].5,
             "Deleted after 3 days unused (no_consumer_pod), holding 20Gi on vol-pv-uploads. Volume pv-uploads follows its reclaim policy (Retain)."
+        );
+    }
+
+    fn snapshot_settings() -> FinalSnapshotSettings {
+        FinalSnapshotSettings {
+            namespace: "velero".into(),
+            ttl: Duration::from_hours(720),
+            storage_location: String::new(),
+            volume_snapshot_locations: vec![],
+            snapshot_move_data: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn final_snapshot_gates_the_delete() {
+        let now = Utc::now();
+        let deadline = now - chrono::TimeDelta::hours(1);
+        let kube = Arc::new(FakeKube {
+            inv: Mutex::new(orphan_inventory(now, Some(deadline))),
+            ..FakeKube::default()
+        });
+        let name = final_snapshot::backup_name("uid-uploads", {
+            DateTime::parse_from_rfc3339(&stamp(deadline))
+                .unwrap()
+                .with_timezone(&Utc)
+        });
+        let backup = format!("velero/{name}");
+        let pass = |status: Option<serde_json::Value>| {
+            let kube = kube.clone();
+            let backup = backup.clone();
+            async move {
+                if let Some(status) = status {
+                    kube.backups.lock().unwrap().get_mut(&backup).unwrap()["status"] = status;
+                }
+                let rec = Arc::new(Rec::default());
+                let sink = Arc::new(Capture::default());
+                let s = scanner(
+                    kube.clone(),
+                    rec.clone(),
+                    Some(Emitter::new(sink.clone())),
+                    false,
+                    now,
+                )
+                .with_orphan_pvc_cleanup(Some(orphan_policy(10)))
+                .with_final_snapshot(Some(snapshot_settings()));
+                s.reconcile().await.unwrap();
+                s.events.as_ref().unwrap().shutdown().await;
+                (
+                    rec.cleanup.lock().unwrap().clone(),
+                    rec.errors.lock().unwrap().clone(),
+                    sink.summary(),
+                )
+            }
+        };
+
+        let (actions, _, events) = pass(None).await;
+        assert_eq!(actions, vec![orphan_pvc_cleanup::ACTION_SNAPSHOT_STARTED]);
+        assert!(kube.deletes.lock().unwrap().is_empty(), "backup first");
+        assert_eq!(
+            kube.labels.lock().unwrap().clone(),
+            vec![(
+                "legacy/uploads".to_string(),
+                key(final_snapshot::LABEL_FINAL_SNAPSHOT),
+                name.clone()
+            )]
+        );
+        assert!(kube.backups.lock().unwrap().contains_key(&backup));
+        assert!(
+            events
+                .iter()
+                .any(|e| e.4 == REASON_FINAL_SNAPSHOT_STARTED && e.5.contains(&backup)),
+            "{events:?}"
+        );
+
+        let (actions, _, _) = pass(Some(serde_json::json!({"phase": "InProgress"}))).await;
+        assert_eq!(actions, vec![orphan_pvc_cleanup::ACTION_SNAPSHOT_PENDING]);
+        assert!(kube.deletes.lock().unwrap().is_empty());
+
+        for status in [
+            serde_json::json!({"phase": "PartiallyFailed"}),
+            serde_json::json!({"phase": "Completed"}),
+        ] {
+            let (actions, errors, _) = pass(Some(status)).await;
+            assert_eq!(actions, vec![orphan_pvc_cleanup::ACTION_FAILED]);
+            assert!(errors.contains(&"orphan_pvc_final_snapshot".to_string()));
+            assert!(kube.deletes.lock().unwrap().is_empty());
+        }
+
+        let (actions, _, events) = pass(Some(
+            serde_json::json!({"phase": "Completed", "csiVolumeSnapshotsCompleted": 1}),
+        ))
+        .await;
+        assert_eq!(actions, vec![orphan_pvc_cleanup::ACTION_DELETED]);
+        assert_eq!(kube.deletes.lock().unwrap().len(), 1);
+        assert_eq!(kube.labels.lock().unwrap().len(), 1, "labeled once");
+        let deleted = events.iter().find(|e| e.4 == REASON_DELETED).unwrap();
+        assert!(
+            deleted
+                .5
+                .ends_with(&format!("Final snapshot: Velero backup {backup}.")),
+            "{}",
+            deleted.5
+        );
+    }
+
+    #[tokio::test]
+    async fn final_snapshot_fails_closed_and_skips_unbound_claims() {
+        let now = Utc::now();
+        let due = Some(now - chrono::TimeDelta::hours(1));
+        let kube = Arc::new(FakeKube {
+            inv: Mutex::new(orphan_inventory(now, due)),
+            fail_backup: true,
+            ..FakeKube::default()
+        });
+        let rec = Arc::new(Rec::default());
+        let s = scanner(kube.clone(), rec.clone(), None, false, now)
+            .with_orphan_pvc_cleanup(Some(orphan_policy(10)))
+            .with_final_snapshot(Some(snapshot_settings()));
+        s.reconcile().await.unwrap();
+        assert!(kube.deletes.lock().unwrap().is_empty());
+        assert_eq!(
+            rec.cleanup.lock().unwrap().clone(),
+            vec![orphan_pvc_cleanup::ACTION_FAILED]
+        );
+
+        let mut inv = orphan_inventory(now, due);
+        inv.pvcs[1].volume_name.clear();
+        let kube = Arc::new(FakeKube {
+            inv: Mutex::new(inv),
+            fail_backup: true,
+            ..FakeKube::default()
+        });
+        let mut policy = orphan_policy(10);
+        policy.reasons = UNUSED_PVC_REASONS.iter().map(|r| (*r).into()).collect();
+        let s = scanner(kube.clone(), Arc::new(Rec::default()), None, false, now)
+            .with_orphan_pvc_cleanup(Some(policy))
+            .with_final_snapshot(Some(snapshot_settings()));
+        s.reconcile().await.unwrap();
+        assert!(
+            kube.backups.lock().unwrap().is_empty(),
+            "a claim with no volume has nothing to snapshot"
         );
     }
 

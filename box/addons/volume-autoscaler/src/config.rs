@@ -108,6 +108,20 @@ pub struct OrphanPvcCleanup {
     /// deletions. `alertmanager.enabled` remains the master gate.
     pub alert_enabled: bool,
     pub alert_before: Duration,
+    pub final_snapshot: FinalSnapshot,
+}
+
+/// Final snapshot: a Velero `Backup` of each bound claim that must complete
+/// before orphan PVC cleanup deletes it. Disabled by default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FinalSnapshot {
+    pub enabled: bool,
+    /// The namespace Velero watches for `Backup` objects.
+    pub namespace: String,
+    pub ttl: Duration,
+    pub storage_location: String,
+    pub volume_snapshot_locations: Vec<String>,
+    pub snapshot_move_data: bool,
 }
 
 /// All runtime settings for the resizer.
@@ -359,9 +373,52 @@ struct OrphanPvcCleanupFile {
     max_deletions_per_pass: i64,
     alert_enabled: bool,
     alert_before: String,
+    final_snapshot: FinalSnapshotFile,
     /// Keys this version does not know, reported and ignored.
     #[serde(flatten)]
     extra: BTreeMap<String, serde_yaml::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct FinalSnapshotFile {
+    enabled: bool,
+    namespace: String,
+    ttl: String,
+    storage_location: String,
+    volume_snapshot_locations: Vec<String>,
+    snapshot_move_data: bool,
+    #[serde(flatten)]
+    extra: BTreeMap<String, serde_yaml::Value>,
+}
+
+impl Default for FinalSnapshotFile {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            namespace: "velero".into(),
+            ttl: "30d".into(),
+            storage_location: String::new(),
+            volume_snapshot_locations: Vec::new(),
+            snapshot_move_data: false,
+            extra: BTreeMap::new(),
+        }
+    }
+}
+
+impl FinalSnapshotFile {
+    fn parse(&self, fx: &mut Fixes) -> FinalSnapshot {
+        let d = Self::default();
+        fx.unknown("orphanPvcCleanup.finalSnapshot.", &self.extra);
+        FinalSnapshot {
+            enabled: self.enabled,
+            namespace: self.namespace.trim().to_string(),
+            ttl: fx.duration("orphanPvcCleanup.finalSnapshot.ttl", &self.ttl, &d.ttl),
+            storage_location: self.storage_location.trim().to_string(),
+            volume_snapshot_locations: self.volume_snapshot_locations.clone(),
+            snapshot_move_data: self.snapshot_move_data,
+        }
+    }
 }
 
 impl OrphanPvcCleanupFile {
@@ -391,6 +448,7 @@ impl OrphanPvcCleanupFile {
                 &self.alert_before,
                 &d.alert_before,
             ),
+            final_snapshot: self.final_snapshot.parse(fx),
         }
     }
 }
@@ -435,6 +493,7 @@ impl Default for OrphanPvcCleanupFile {
             max_deletions_per_pass: 1,
             alert_enabled: true,
             alert_before: "6h".into(),
+            final_snapshot: FinalSnapshotFile::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -810,6 +869,13 @@ mod tests {
               maxDeletionsPerPass: 3
               alertEnabled: false
               alertBefore: 2d
+              finalSnapshot:
+                enabled: true
+                namespace: backup
+                ttl: 90d
+                storageLocation: primary
+                volumeSnapshotLocations: [aws-default]
+                snapshotMoveData: true
         "#};
         let e = Env {
             pod_name: "pod-0".into(),
@@ -872,6 +938,17 @@ mod tests {
         assert_eq!(uc.max_deletions_per_pass, 3);
         assert!(!uc.alert_enabled);
         assert_eq!(uc.alert_before, Duration::from_hours(48));
+        assert_eq!(
+            uc.final_snapshot,
+            FinalSnapshot {
+                enabled: true,
+                namespace: "backup".into(),
+                ttl: Duration::from_hours(2160),
+                storage_location: "primary".into(),
+                volume_snapshot_locations: vec!["aws-default".into()],
+                snapshot_move_data: true,
+            }
+        );
     }
 
     #[test]
@@ -1050,6 +1127,21 @@ mod tests {
                 with("orphanPvcCleanup:\n  reasons: [released, unbound]\n"),
                 "invalid orphanPvcCleanup.reasons entry \"released\"",
                 Box::new(|c| c.orphan_pvc_cleanup.reasons == vec!["unbound"]),
+            ),
+            (
+                with("orphanPvcCleanup:\n  finalSnapshot:\n    ttl: 10m\n"),
+                "orphanPvcCleanup.finalSnapshot.ttl must be at least 1h",
+                Box::new(|c| c.orphan_pvc_cleanup.final_snapshot.ttl == Duration::from_hours(1)),
+            ),
+            (
+                with("orphanPvcCleanup:\n  finalSnapshot:\n    namespace: \"\"\n"),
+                "orphanPvcCleanup.finalSnapshot.namespace is empty",
+                Box::new(|c| c.orphan_pvc_cleanup.final_snapshot.namespace == "velero"),
+            ),
+            (
+                with("orphanPvcCleanup:\n  finalSnapshot:\n    enabeld: true\n"),
+                "unknown key orphanPvcCleanup.finalSnapshot.enabeld",
+                Box::new(|c| !c.orphan_pvc_cleanup.final_snapshot.enabled),
             ),
             (
                 with("orphanPvcCleanup:\n  maxDeletionsPerPass: 0\n"),

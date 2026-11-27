@@ -32,3 +32,10 @@ orphanPvcCleanup:
   maxDeletionsPerPass: 1
   alertEnabled: true                                         # requires alertmanager.enabled
   alertBefore: 6h
+  finalSnapshot:
+    enabled: false                                           # requires Velero with a volume snapshotter
+    namespace: velero
+    ttl: 30d
+    storageLocation: ""                                      # empty uses the Velero default
+    volumeSnapshotLocations: []
+    snapshotMoveData: false

@@ -2,6 +2,22 @@
 
 Notable changes to the volume-autoscaler app (the container image), newest first. Entries are headed by the image version and its release date (KST).
 
+## 0.4.0 (2026-11-27)
+
+Adds an opt-in Velero final snapshot before orphan PVC cleanup deletes a claim.
+
+### Added
+
+- Final snapshot, configured by the new `orphanPvcCleanup.finalSnapshot` block and disabled by default. With it enabled, a bound claim past its deadline is deleted only after a Velero Backup of it has completed with at least one volume snapshot. The addon creates the Backup and takes no snapshot by itself, so no AWS permission is added. See [docs/orphan-pvc-cleanup.md](docs/orphan-pvc-cleanup.md#final-snapshot).
+- The first pass after the deadline labels the claim `volume-autoscaler.sh/final-snapshot` and creates the Backup `orphan-pvc-<claim UID>-<deadline>` in `finalSnapshot.namespace` (default `velero`), with a Normal Event `OrphanPvcFinalSnapshotStarted`. The claim is deleted on the first later pass that finds the Backup `Completed`, and the `OrphanPvcDeleted` Event and alert name the Backup.
+- A Backup that fails, partially fails, or completes without a volume snapshot keeps the claim and sends `OrphanPvcDeletionFailed` every pass. It is not retried until an operator deletes the Backup. A claim that never bound has no volume and is deleted without a Backup.
+- `finalSnapshot.ttl` (default `30d`, at least `1h`) sets how long Velero keeps the Backup and its snapshots. `storageLocation`, `volumeSnapshotLocations`, and `snapshotMoveData` pass through to the Backup.
+- `volume_autoscaler_orphan_pvc_cleanup_total` actions `snapshot_started` and `snapshot_pending`, and the `volume_autoscaler_error_total` stage `orphan_pvc_final_snapshot`.
+
+### Security
+
+- kube 4.2.1 (RUSTSEC-2026-0600). The addon builds kube with rustls only, so the affected `openssl-tls` path was never compiled in. `cargo audit` reports no vulnerability. The unmaintained warnings for chrono and unsafe-libyaml (through serde_yaml) remain, as neither has a replacement release.
+
 ## 0.3.0 (2026-11-24)
 
 Enforces the SSM Run Command timeout floor and adds AWS Emulator tests for the EC2 root volume growth path.

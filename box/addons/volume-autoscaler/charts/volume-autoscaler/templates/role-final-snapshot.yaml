@@ -1,0 +1,32 @@
+{{- $snapshot := (.Values.config.orphanPvcCleanup | default dict).finalSnapshot | default dict -}}
+{{- if and .Values.rbac.create (has "unused-volume-scan" .Values.controllers) (.Values.config.orphanPvcCleanup | default dict).enabled $snapshot.enabled -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "volume-autoscaler.fullname" . }}-final-snapshot
+  namespace: {{ $snapshot.namespace | default "velero" }}
+  labels:
+    {{- include "volume-autoscaler.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["velero.io"]
+    resources: ["backups"]
+    verbs:
+      - get
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "volume-autoscaler.fullname" . }}-final-snapshot
+  namespace: {{ $snapshot.namespace | default "velero" }}
+  labels:
+    {{- include "volume-autoscaler.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "volume-autoscaler.fullname" . }}-final-snapshot
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "volume-autoscaler.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -20,6 +20,7 @@ How the addon deletes orphan [PersistentVolumeClaims][k8s-pvc], the claims the [
 - **Blast radius cap**: At most `maxDeletionsPerPass` claims per hourly scan, longest unused first.
 - **Fails closed**: A failed workload list pauses cleanup for the pass, and a failed recheck skips the claim.
 - **One alert before deletion**: Sends a single Alertmanager alert `alertBefore` ahead of each deletion, plus deleted and failed alerts, switchable with `alertEnabled`.
+- **Final snapshot (opt-in)**: With `finalSnapshot.enabled`, a Velero backup of each bound claim must complete with a volume snapshot before the claim is deleted. Disabled by default.
 - **Dry run and observability**: Honors the global `dryRun`, and reports through metrics, Events, and logs.
 
 ## What it deletes
@@ -49,6 +50,13 @@ config:
     maxDeletionsPerPass: 1
     alertEnabled: true
     alertBefore: 6h
+    finalSnapshot:
+      enabled: false
+      namespace: velero
+      ttl: 30d
+      storageLocation: ""
+      volumeSnapshotLocations: []
+      snapshotMoveData: false
 ```
 
 | Key | Default | Meaning |
@@ -61,6 +69,12 @@ config:
 | `maxDeletionsPerPass` | `1` | Max claims deleted per hourly scan, 1 to 100. The rest wait for the next pass |
 | `alertEnabled` | `true` | Sends Alertmanager alerts for upcoming, deleted, and failed deletions. Needs `alertmanager.enabled`. See [Alerting](alerting.md#orphan-pvc-cleanup-alerts) |
 | `alertBefore` | `6h` | How far ahead of deletion the claim is scheduled and its one upcoming alert is sent, and the least notice any deletion gets. At least `1h`, the scan interval |
+| `finalSnapshot.enabled` | `false` | Takes a Velero backup of each bound claim before deleting it. See [Final snapshot](#final-snapshot) |
+| `finalSnapshot.namespace` | `velero` | The namespace Velero watches for Backup objects |
+| `finalSnapshot.ttl` | `30d` | How long Velero keeps the backup and its snapshots. At least `1h` |
+| `finalSnapshot.storageLocation` | `""` | BackupStorageLocation name. Empty uses the Velero default |
+| `finalSnapshot.volumeSnapshotLocations` | `[]` | VolumeSnapshotLocation names. Empty uses the Velero defaults |
+| `finalSnapshot.snapshotMoveData` | `false` | Uploads the snapshot data to the backup storage location (CSI snapshot data movement) |
 
 Durations take whole numbers with `m`, `h`, or `d`, such as `3d` or `1d12h`. Fractions are invalid, and an invalid value falls back to its default with a warning, see [Invalid values](configuration.md#invalid-values).
 
@@ -117,6 +131,33 @@ kubectl annotate pvc -n legacy uploads volume-autoscaler.sh/orphan-pvc-cleanup=d
 
 The guards fail closed. When the workload lists or the [state](#state) cannot be read, the pass schedules, cancels, and deletes nothing and counts `error_total{stage="orphan_pvc_cleanup_references"}` or `error_total{stage="orphan_pvc_cleanup_state"}`. When the Pod recheck before a delete fails, that claim is skipped.
 
+## Final snapshot
+
+> Available since app version 0.4.0.
+
+With `finalSnapshot.enabled`, a claim past its deadline is deleted only after a [Velero][velero] backup of it has completed. It is disabled by default and needs Velero installed with a volume snapshotter (the AWS plugin or CSI snapshot support). The addon itself still calls no AWS API.
+
+| Pass | What happens |
+|------|--------------|
+| First pass after the deadline | Labels the claim `volume-autoscaler.sh/final-snapshot=<backup name>`, creates the Backup `orphan-pvc-<claim UID>-<deadline>` in `finalSnapshot.namespace`, and records a Normal Event `OrphanPvcFinalSnapshotStarted`. Nothing is deleted |
+| While the backup runs | The claim waits, counted as `snapshot_pending` |
+| Backup `Completed` with a volume snapshot | The claim is deleted. The `OrphanPvcDeleted` Event and alert name the backup |
+| Backup failed, partially failed, or completed with no volume snapshot | The claim is kept, counted as `failed` with `error_total{stage="orphan_pvc_final_snapshot"}`, and `OrphanPvcDeletionFailed` is sent every pass |
+
+The scan runs hourly, so a deletion happens one pass after its backup was created at the earliest. A claim waiting for its backup still takes one of the `maxDeletionsPerPass` slots.
+
+The Backup selects only the labeled claim. Velero adds the bound PersistentVolume and takes the volume snapshot. File system backup is turned off because no Pod mounts an orphan claim. A claim that never bound (`unbound`) has no volume and is deleted without a backup.
+
+A failed Backup is never retried under the same name. Fix the cause, delete the Backup, and the next pass creates a new one:
+
+```bash
+velero backup delete orphan-pvc-<claim UID>-<deadline> --confirm
+```
+
+Restore a deleted claim with `velero restore create --from-backup <backup name>`. Find the backups with `kubectl get backups -n velero -l app.kubernetes.io/managed-by=volume-autoscaler`.
+
+The chart adds a Role and RoleBinding in `finalSnapshot.namespace` granting `get` and `create` on `backups.velero.io` while both cleanup and the final snapshot are enabled. The namespace must exist.
+
 ## Dry run
 
 The global `dryRun` covers cleanup too. The scan logs which claims it would schedule and delete and counts them as `orphan_pvc_cleanup_total{action="dry_run"}`, but writes no annotation, records no Event, and deletes nothing. Enabling cleanup without `dryRun` is also safe to preview: nothing is deleted for at least `alertBefore`, and every claim it will delete carries the deadline annotation and the Warning Event.
@@ -126,8 +167,8 @@ The global `dryRun` covers cleanup too. The scan logs which claims it would sche
 | Signal | What it answers |
 |--------|-----------------|
 | `volume_autoscaler_orphan_pvc_cleanup_scheduled` | How many claims are waiting out their notice. Alert on it to review deletions before they happen |
-| `volume_autoscaler_orphan_pvc_cleanup_total{action}` | What cleanup did: `scheduled`, `canceled`, `deleted`, `failed`, `deferred`, `skipped_in_use`, `dry_run` |
-| Events `OrphanPvcDeletionScheduled`, `OrphanPvcDeletionCanceled`, `OrphanPvcDeleted` | The claim's own history in `kubectl describe pvc` |
+| `volume_autoscaler_orphan_pvc_cleanup_total{action}` | What cleanup did: `scheduled`, `canceled`, `deleted`, `failed`, `deferred`, `skipped_in_use`, `snapshot_started`, `snapshot_pending`, `dry_run` |
+| Events `OrphanPvcDeletionScheduled`, `OrphanPvcDeletionCanceled`, `OrphanPvcFinalSnapshotStarted`, `OrphanPvcDeleted` | The claim's own history in `kubectl describe pvc` |
 
 List what is scheduled and when:
 
@@ -142,6 +183,7 @@ See [designs/orphan-pvc-cleanup.md](designs/orphan-pvc-cleanup.md) for why it wo
 [k8s-pvc]: https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims
 [k8s-pv]: https://kubernetes.io/docs/concepts/storage/persistent-volumes/
 [k8s-reclaim]: https://kubernetes.io/docs/concepts/storage/persistent-volumes/#reclaiming
+[velero]: https://github.com/vmware-tanzu/velero
 
 ## Conclusion
 

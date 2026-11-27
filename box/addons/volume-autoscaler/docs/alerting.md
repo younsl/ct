@@ -73,7 +73,7 @@ When [orphan PVC cleanup](orphan-pvc-cleanup.md) is enabled, it sends its own al
 |-------|----------|------------|
 | `OrphanPvcDeletionUpcoming` | `warning` | Once per claim, when its deadline is `orphanPvcCleanup.alertBefore` (default `6h`) away. The description carries the deadline and how to opt the claim out |
 | `OrphanPvcDeleted` | `info` | A claim was deleted. The description names the reclaim policy of its volume |
-| `OrphanPvcDeletionFailed` | `warning` | The Pod recheck or the delete failed. The claim stays scheduled and is retried on the next pass |
+| `OrphanPvcDeletionFailed` | `warning` | The Pod recheck, the [final snapshot](orphan-pvc-cleanup.md#final-snapshot), or the delete failed. The claim stays scheduled and is retried on the next pass |
 
 The upcoming alert is the only alert before a deletion. It is recorded in the controller-owned cleanup state (see [State](orphan-pvc-cleanup.md#state)), so a restart or failover never sends it twice. A claim canceled and scheduled again gets a new one.
 

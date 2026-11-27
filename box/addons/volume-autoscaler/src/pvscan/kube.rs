@@ -13,8 +13,12 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, PersistentVolume, PersistentVolumeClaim, Pod, PodSpec,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
-use kube::api::{DeleteParams, ListParams, Patch, PatchParams, Preconditions};
+use kube::api::{
+    ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
+    Preconditions,
+};
 
+use super::final_snapshot::{BACKUP_API_VERSION, BACKUP_KIND, BACKUP_PLURAL};
 use super::types::{Inventory, Pv, Pvc, StatefulSet};
 use super::{KubeApi, OrphanPvcRecord, OrphanPvcState};
 use crate::k8s::annotation_patch;
@@ -65,6 +69,18 @@ impl KubeClient {
             kube::Api::namespaced(self.client.clone(), ns),
             name.as_str(),
         ))
+    }
+
+    fn backup_api(&self, namespace: &str) -> kube::Api<DynamicObject> {
+        let (group, version) = BACKUP_API_VERSION.split_once('/').unwrap_or_default();
+        let resource = ApiResource {
+            group: group.into(),
+            version: version.into(),
+            api_version: BACKUP_API_VERSION.into(),
+            kind: BACKUP_KIND.into(),
+            plural: BACKUP_PLURAL.into(),
+        };
+        kube::Api::namespaced_with(self.client.clone(), namespace, &resource)
     }
 
     /// Lists every object of one kind, handing each page to `reduce` and
@@ -295,6 +311,50 @@ impl KubeApi for KubeClient {
             .await
             .map(|_| ())
             .map_err(|e| format!("delete persistentvolumeclaim {namespace}/{name}: {e}"))
+    }
+
+    async fn label_pvc(
+        &self,
+        namespace: &str,
+        name: &str,
+        label: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        let patch = serde_json::json!({"metadata": {"labels": {label: value}}});
+        kube::Api::<PersistentVolumeClaim>::namespaced(self.client.clone(), namespace)
+            .patch(name, &PatchParams::default(), &Patch::Merge(patch))
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("patch persistentvolumeclaim {namespace}/{name} labels: {e}"))
+    }
+
+    async fn get_backup(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
+        let found = self
+            .backup_api(namespace)
+            .get_opt(name)
+            .await
+            .map_err(|e| format!("get backup {namespace}/{name}: {e}"))?;
+        found
+            .map(|b| serde_json::to_value(b).map_err(|e| format!("encode backup: {e}")))
+            .transpose()
+    }
+
+    async fn create_backup(
+        &self,
+        namespace: &str,
+        backup: &serde_json::Value,
+    ) -> Result<(), String> {
+        let object: DynamicObject =
+            serde_json::from_value(backup.clone()).map_err(|e| format!("build backup: {e}"))?;
+        self.backup_api(namespace)
+            .create(&PostParams::default(), &object)
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("create backup in {namespace}: {e}"))
     }
 
     async fn load_orphan_state(&self) -> Result<OrphanPvcState, String> {

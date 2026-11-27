@@ -64,8 +64,19 @@ Every guard fails closed. A failed workload list holds every deadline as it is (
 ## What this deliberately does not do
 
 - **No PersistentVolume or EBS deletion.** Covered above.
-- **No snapshot before delete.** A snapshot needs EC2 permissions, a retention policy, and a cost owner, none of which belong to a claim cleaner. Use a `Retain` StorageClass for data that must survive its claim.
+- **No snapshot taken by the addon.** A snapshot needs EC2 permissions, a retention policy, and a cost owner, none of which belong to a claim cleaner. The opt-in final snapshot below hands all three to Velero.
 - **No per-namespace policy.** One policy, a namespace scope, and a per-claim opt-out. Different policies per team are what a custom resource would be for, and nothing so far needs one.
+
+## Final snapshot through Velero
+
+Since 0.4.0 an operator can require a backup before every deletion (`finalSnapshot.enabled`, disabled by default). The addon creates a [Velero](https://github.com/vmware-tanzu/velero) Backup and waits for it. It takes no snapshot by itself.
+
+- **Velero owns what a snapshot needs.** The EC2 or CSI permissions, the retention (`ttl`), and the storage location already belong to Velero. The addon gains `get` and `create` on Backups in one namespace and no AWS permission.
+- **One Backup per claim and deadline.** The name carries the claim UID and the deadline, so a claim canceled and scheduled again never reuses a backup taken for the earlier schedule, and a restart finds the same Backup instead of creating a second one. No new state is stored.
+- **Selected by a label.** A Backup has no field that names one object, so the claim is labeled with the backup name and the Backup selects that label. Velero follows the claim to its PersistentVolume by itself.
+- **Completed is not enough.** A Backup can complete while holding only the claim manifest, for example with no snapshotter configured. The claim is deleted only when the Backup reports at least one completed volume snapshot or data upload. Anything else keeps the claim and alerts.
+- **No automatic retry.** A failed Backup stays failed until an operator deletes it. Retrying under a new name every hour would pile up failed backups for a cause only an operator can fix.
+- **Polled by the hourly scan.** A deletion lands one pass after its backup. A watch on Backups would save an hour on a claim that already waited days.
 
 ## Conclusion
 

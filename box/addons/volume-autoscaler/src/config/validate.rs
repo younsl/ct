@@ -19,6 +19,7 @@ use crate::humanize::go_duration;
 const MIN_CLAIM_RECONCILE_INTERVAL: Duration = Duration::from_secs(10);
 const MIN_SSM_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_DELETIONS_PER_PASS: usize = 100;
+const MIN_FINAL_SNAPSHOT_TTL: Duration = Duration::from_hours(1);
 
 /// Raises `value` to `min` and records it.
 fn at_least(fx: &mut Fixes, name: &str, value: &mut Duration, min: Duration, why: &str) {
@@ -172,6 +173,17 @@ impl OrphanPvcCleanup {
             crate::pvscan::INTERVAL,
             ", the scan interval",
         );
+        at_least(
+            fx,
+            "orphanPvcCleanup.finalSnapshot.ttl",
+            &mut self.final_snapshot.ttl,
+            MIN_FINAL_SNAPSHOT_TTL,
+            "",
+        );
+        if self.final_snapshot.namespace.is_empty() {
+            fx.push("orphanPvcCleanup.finalSnapshot.namespace is empty, using velero".into());
+            self.final_snapshot.namespace = "velero".into();
+        }
         let (known, unknown): (Vec<String>, Vec<String>) = self
             .reasons
             .drain(..)

@@ -50,6 +50,8 @@ pub const ACTION_FAILED: &str = "failed";
 pub const ACTION_DEFERRED: &str = "deferred";
 pub const ACTION_SKIPPED_IN_USE: &str = "skipped_in_use";
 pub const ACTION_DRY_RUN: &str = "dry_run";
+pub const ACTION_SNAPSHOT_STARTED: &str = "snapshot_started";
+pub const ACTION_SNAPSHOT_PENDING: &str = "snapshot_pending";
 
 /// Which unused claims may be deleted, and how carefully.
 #[derive(Debug, Clone, PartialEq, Eq)]
