@@ -135,6 +135,8 @@ The guards fail closed. When the workload lists or the [state](#state) cannot be
 
 > Available since app version 0.4.0.
 
+![A claim is deleted only after its Velero backup completes with a volume snapshot](assets/orphan-pvc-final-snapshot.svg)
+
 With `finalSnapshot.enabled`, a claim past its deadline is deleted only after a [Velero][velero] backup of it has completed. It is disabled by default and needs Velero installed with a volume snapshotter (the AWS plugin or CSI snapshot support). The addon itself still calls no AWS API.
 
 | Pass | What happens |
