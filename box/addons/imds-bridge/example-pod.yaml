@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-app-with-imds-bridge
+spec:
+  serviceAccountName: example-app
+  initContainers:
+    - name: imds-bridge
+      image: ghcr.io/younsl/imds-bridge:0.1.0
+      restartPolicy: Always
+      env:
+        - name: ROLE_NAME
+          value: example-app
+      ports:
+        - name: metrics
+          containerPort: 9090
+      startupProbe:
+        httpGet:
+          path: /readyz
+          port: metrics
+        periodSeconds: 1
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: metrics
+      resources:
+        requests:
+          cpu: 5m
+          memory: 16Mi
+        limits:
+          memory: 32Mi
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+  containers:
+    - name: app
+      image: example.com/example-app:1.0.0
+      env:
+        - name: AWS_EC2_METADATA_SERVICE_ENDPOINT
+          value: http://127.0.0.1:1338
