@@ -68,13 +68,8 @@ async fn new_test_server_with(rec: Option<Arc<crate::audit::Recorder>>) -> TestS
         session_secret: b"test-secret-test-secret-test-secret".to_vec(),
         ..Default::default()
     };
-    let db_dir = tempfile::tempdir().expect("temp dir");
-    let store = Arc::new(
-        Store::open(db_dir.path().join("api.db"))
-            .await
-            .expect("open store"),
-    );
-    build_test_server(db_dir, store, opts, rec).await
+    let (store, db_dir) = Store::open_temp().await.expect("open store");
+    build_test_server(db_dir, Arc::new(store), opts, rec).await
 }
 
 pub async fn new_console_server() -> TestServer {

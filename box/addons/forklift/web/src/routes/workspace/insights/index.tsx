@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, RefreshCw, Settings } from "lucide-react";
@@ -9,6 +9,7 @@ import { Select } from "@/components/app-ui/select";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { advanceAnalysisWatch, startAnalysisWatch, type AnalysisWatch } from "@/lib/analysis-watch";
 import { getErrorMessageIfAny } from "@/lib/http/error/api-error";
 import { useTranslation, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -69,26 +70,38 @@ function InsightsRoute() {
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
 
+  // A requested run is followed until its report lands. `running` alone is not
+  // enough: each poll can reach a different pod.
+  const [watch, setWatch] = useState<AnalysisWatch | null>(null);
   const query = useQuery({
     ...openApiQueryOptions.getInsights(),
     meta: { suppressGlobalErrorToast: true },
-    // Poll only while a run is in flight, so a refresh lands without a reload.
-    refetchInterval: (q) => (q.state.data?.running ? 2000 : false),
+    refetchInterval: (q) => (q.state.data?.running || watch ? 2000 : false),
   });
-  const refresh = useMutation({
-    mutationFn: () => refreshInsights(),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: openApiQueryKeys.getInsights() }),
-  });
-
   const data = query.data;
   const report = data?.report ?? null;
+  const generatedAt = report?.generated_at ?? null;
+  const refresh = useMutation({
+    mutationFn: () => refreshInsights(),
+    onSuccess: () => {
+      setWatch(startAnalysisWatch(generatedAt));
+      return queryClient.invalidateQueries({ queryKey: openApiQueryKeys.getInsights() });
+    },
+  });
+
+  const answeredAt = query.dataUpdatedAt;
+  const serverRunning = Boolean(data?.running);
+  useEffect(() => {
+    if (answeredAt === 0) return;
+    setWatch((current) => current && advanceAnalysisWatch(current, { generatedAt, running: serverRunning }, answeredAt));
+  }, [answeredAt, generatedAt, serverRunning]);
   const checks = useMemo(() => filterChecks(report, search), [report, search]);
 
   const setSearch = (patch: Partial<InsightsSearch>) =>
     navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
 
   const error = getErrorMessageIfAny(query.error);
-  const running = Boolean(data?.running) || refresh.isPending;
+  const running = serverRunning || refresh.isPending || watch !== null;
 
   return (
     <>

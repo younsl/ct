@@ -4,6 +4,14 @@ Notable changes per release. Container image versions come from the
 `org.opencontainers.image.version` label in the `Dockerfile`; chart versions from
 `charts/forklift/Chart.yaml`.
 
+## 0.22.2 (2026-11-28)
+
+### Fixed
+
+- **Analyze now** on the security insights page went back to idle and kept showing the old report on an active-active PostgreSQL install, although the worker finished the analysis. The page stopped following the run the first time a pod answered that nothing was running. It now follows a requested run until the new report lands, and gives up only after no pod has reported a run for ten seconds.
+- A run requested through an API pod is reported as running from the moment the worker claims it. Before, the claim cleared the request and the run's first heartbeat marked it running in a second write, so a pod asked in between reported no run. This also covers **Scan now** on the coverage page.
+- An analysis started on the pod that leads is published to the other pods before it starts, not with its first heartbeat.
+
 ## 0.22.1 (2026-11-18)
 
 ### Fixed

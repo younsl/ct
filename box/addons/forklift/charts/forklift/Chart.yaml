@@ -3,8 +3,8 @@ name: forklift
 description: Lightweight Kubernetes-native artifact repository (Maven, npm, Cargo, Go, PyPI) with proxy caching and supply-chain controls (age policy, package approval, vulnerability scanning)
 type: application
 deprecated: false
-version: 0.25.1
-appVersion: "0.22.1"
+version: 0.25.2
+appVersion: "0.22.2"
 home: https://github.com/younsl/ct/tree/main/box/addons/forklift
 sources:
   - https://github.com/younsl/ct/tree/main/box/addons/forklift/charts/forklift
@@ -29,6 +29,6 @@ keywords:
 annotations:
   artifacthub.io/changes: |
     - kind: fixed
-      description: "appVersion 0.22.1. Scan now and Analyze now work on every API pod of an active-active install, and every pod shows the running scan"
-    - kind: security
-      description: "appVersion 0.22.1. rustls, rustls-webpki, rusqlite (bundled SQLite), zip, openidconnect and rmcp updated for RUSTSEC advisories"
+      description: "appVersion 0.22.2. Analyze now on the security insights page keeps showing the run until its report lands on an active-active install, instead of going back to idle with the old report"
+    - kind: fixed
+      description: "appVersion 0.22.2. A coverage scan or insights analysis asked for on an API pod is reported as running from the moment the worker claims it"

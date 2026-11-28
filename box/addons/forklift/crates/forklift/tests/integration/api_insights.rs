@@ -5,7 +5,11 @@ use http::{Method, StatusCode};
 
 use forklift::api::Trigger;
 use forklift::insights::Analyzer;
-use forklift::testing::api::{USER_PASS, mk_read_user, new_test_server};
+use forklift::testing::api::{TestServer, USER_PASS, mk_read_user, new_test_server};
+
+async fn running(srv: &TestServer) -> bool {
+    srv.admin_do(Method::GET, "/insights", "").await.json()["running"] == true
+}
 
 #[tokio::test]
 async fn insights_report_is_scoped_to_the_caller() {
@@ -98,14 +102,30 @@ async fn insights_report_is_scoped_to_the_caller() {
 
     srv.handler
         .set_insights(Arc::clone(&analyzer), Arc::new(|_: &str| Trigger::Standby));
-    let resp = srv.admin_do(Method::POST, "/insights/refresh", "").await;
     if srv.store.is_postgres() {
+        assert!(
+            running(&srv).await,
+            "the started run is reported before its first heartbeat"
+        );
+        srv.store
+            .finish_leader_job(forklift::leaderjob::INSIGHTS, "")
+            .await
+            .expect("finish");
+        assert!(!running(&srv).await);
+
+        let resp = srv.admin_do(Method::POST, "/insights/refresh", "").await;
         assert_eq!(resp.status, StatusCode::OK, "{}", resp.text());
-        let resp = srv.admin_do(Method::GET, "/insights", "").await;
-        assert!(resp.text().contains(r#""running":true"#), "{}", resp.text());
+        assert!(running(&srv).await, "a waiting request counts as running");
         let claimed = analyzer.take_request().await.expect("take");
         assert!(claimed.is_some(), "the request reached the store");
+        assert!(
+            running(&srv).await,
+            "a claimed request stays running until the run ends"
+        );
+        analyzer.run_once("admin").await.expect("analyze");
+        assert!(!running(&srv).await);
     } else {
+        let resp = srv.admin_do(Method::POST, "/insights/refresh", "").await;
         assert_eq!(
             resp.status,
             StatusCode::SERVICE_UNAVAILABLE,

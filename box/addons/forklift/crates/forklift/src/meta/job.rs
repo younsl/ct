@@ -1,5 +1,6 @@
 //! Requests and progress of leader-only jobs, see [`crate::leaderjob`].
 
+use chrono::Utc;
 use forklift_metadb::params;
 
 use crate::leaderjob::JobState;
@@ -25,7 +26,10 @@ impl Store {
     }
 
     /// Claims the waiting request for `job` and returns it. The claim clears
-    /// only the request it read, so two pods claiming at once run it once.
+    /// only the request it read, so two pods claiming at once run it once. A
+    /// request still worth running is marked as running in the same statement,
+    /// so no pod reads the job as idle between the claim and the run's first
+    /// heartbeat.
     pub async fn take_leader_job_request(&self, job: &str) -> Result<Option<JobState>> {
         let job = job.to_string();
         self.write(move |conn| {
@@ -42,18 +46,28 @@ impl Store {
             if by.is_empty() {
                 return Ok(None);
             }
-            let claimed = conn
-                .execute(
+            let state = JobState {
+                requested_by: by.clone(),
+                requested_at: parse_time_opt(Some(&at)),
+                ..JobState::default()
+            };
+            let claimed = if state.pending(Utc::now()) {
+                conn.execute(
+                    "UPDATE leader_jobs SET requested_by = '', requested_at = '',
+                 progress = CASE WHEN progress = '' THEN '{}' ELSE progress END,
+                 heartbeat_at = ?
+             WHERE job = ? AND requested_by = ? AND requested_at = ?",
+                    params![now_rfc3339(), job, by, at],
+                )
+            } else {
+                conn.execute(
                     "UPDATE leader_jobs SET requested_by = '', requested_at = ''
              WHERE job = ? AND requested_by = ? AND requested_at = ?",
                     params![job, by, at],
                 )
-                .map_err(|e| Error::sqlite("claim leader job", e))?;
-            Ok((claimed == 1).then(|| JobState {
-                requested_by: by,
-                requested_at: parse_time_opt(Some(&at)),
-                ..JobState::default()
-            }))
+            }
+            .map_err(|e| Error::sqlite("claim leader job", e))?;
+            Ok((claimed == 1).then_some(state))
         })
         .await
     }
@@ -130,9 +144,11 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use chrono::{TimeDelta, Utc};
+    use forklift_metadb::params;
 
-    use crate::leaderjob::COVERAGE_SCAN;
+    use crate::leaderjob::{COVERAGE_SCAN, REQUEST_TTL};
+    use crate::meta::Error;
     use crate::testing::meta::test_store;
 
     #[tokio::test]
@@ -157,6 +173,50 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        let state = s.read_leader_job(COVERAGE_SCAN).await.unwrap();
+        assert!(!state.pending(Utc::now()));
+        assert_eq!(
+            state.running(Utc::now()),
+            Some("{}"),
+            "a claimed request reads as running before the first heartbeat"
+        );
+    }
+
+    #[tokio::test]
+    async fn claiming_keeps_published_progress() {
+        let (s, _dir) = test_store().await;
+        s.write_leader_job_progress(COVERAGE_SCAN, r#"{"done":1}"#)
+            .await
+            .unwrap();
+        s.request_leader_job(COVERAGE_SCAN, "alice").await.unwrap();
+        assert!(
+            s.take_leader_job_request(COVERAGE_SCAN)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let state = s.read_leader_job(COVERAGE_SCAN).await.unwrap();
+        assert_eq!(state.running(Utc::now()), Some(r#"{"done":1}"#));
+    }
+
+    #[tokio::test]
+    async fn claiming_an_expired_request_does_not_mark_a_run() {
+        let (s, _dir) = test_store().await;
+        s.request_leader_job(COVERAGE_SCAN, "alice").await.unwrap();
+        let stale = (Utc::now() - REQUEST_TTL - TimeDelta::seconds(1)).to_rfc3339();
+        s.write(move |conn| {
+            conn.execute(
+                "UPDATE leader_jobs SET requested_at = ? WHERE job = ?",
+                params![stale, COVERAGE_SCAN],
+            )
+            .map(|_| ())
+            .map_err(|e| Error::sqlite("age request", e))
+        })
+        .await
+        .unwrap();
+
+        let claimed = s.take_leader_job_request(COVERAGE_SCAN).await.unwrap();
+        assert!(claimed.is_some_and(|c| !c.pending(Utc::now())));
         assert!(
             !s.read_leader_job(COVERAGE_SCAN)
                 .await

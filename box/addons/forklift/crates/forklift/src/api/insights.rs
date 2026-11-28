@@ -200,6 +200,13 @@ pub(super) async fn refresh(State(h): State<Arc<Handler>>, request: Request) -> 
         return write_error(StatusCode::CONFLICT, "an analysis is already running");
     }
     let triggered_by = principal_name(&parts);
+    // The run starts detached, so its own first heartbeat can land after the
+    // page asks another pod whether it is running.
+    if h.store.is_postgres()
+        && let Err(e) = analyzer.announce_run().await
+    {
+        tracing::warn!(err = %e, "insights: publishing the shared run state failed");
+    }
     match start(&triggered_by) {
         Trigger::Started => {}
         Trigger::Busy => {

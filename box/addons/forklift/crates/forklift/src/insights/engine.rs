@@ -129,6 +129,16 @@ impl Analyzer {
             .await?)
     }
 
+    /// Publishes that a run is about to start, so a pod asked right after the
+    /// trigger answers already reports it. The run's own heartbeat takes over
+    /// and its end clears the mark.
+    pub async fn announce_run(&self) -> Result<(), Error> {
+        Ok(self
+            .store
+            .write_leader_job_progress(leaderjob::INSIGHTS, "{}")
+            .await?)
+    }
+
     /// Claims a waiting request and returns who asked, or `None` when there is
     /// none or it expired.
     pub async fn take_request(&self) -> Result<Option<String>, Error> {
