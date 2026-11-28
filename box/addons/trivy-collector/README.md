@@ -3,7 +3,7 @@
 [![Scraper image](https://img.shields.io/badge/ghcr.io-trivy--collector--scraper-black?style=flat-square&logo=docker&logoColor=white)](https://github.com/younsl/ct/pkgs/container/trivy-collector-scraper)
 [![Server image](https://img.shields.io/badge/ghcr.io-trivy--collector--server-black?style=flat-square&logo=docker&logoColor=white)](https://github.com/younsl/ct/pkgs/container/trivy-collector-server)
 [![Helm Chart](https://img.shields.io/badge/ghcr.io-charts%2Ftrivy--collector-black?style=flat-square&logo=helm&logoColor=white)](https://github.com/younsl/ct/pkgs/container/charts%2Ftrivy-collector)
-[![Rust](https://img.shields.io/badge/rust-1.100.0-black?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.100.1-black?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![GitHub license](https://img.shields.io/github/license/younsl/ct?style=flat-square&color=black)](https://github.com/younsl/ct/blob/main/LICENSE)
 
 Multi-cluster [Trivy Operator](https://github.com/aquasecurity/trivy-operator) report collector. A hub cluster pulls vulnerability and SBOM reports from every edge cluster into one web UI.

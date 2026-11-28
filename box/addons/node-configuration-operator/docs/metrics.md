@@ -91,7 +91,7 @@ Number of rules that failed in the last run of a configuration on this node. A f
 ```console
 $ kubectl port-forward -n kube-system ds/node-configuration-operator-agent 8080:8080
 $ curl -s localhost:8080/metrics | grep -v '^#'
-node_configuration_build_info{version="0.2.0",revision="a5ac1432",rust_version="1.100.0"} 1
+node_configuration_build_info{version="0.2.0",revision="a5ac1432",rust_version="1.100.1"} 1
 node_configuration_reconcile_total{result="success"} 12
 node_configuration_agent_rule_outcomes_total{configuration="os-hardening",kind="fileMode",outcome="changed"} 19
 node_configuration_agent_rule_outcomes_total{configuration="os-hardening",kind="fileMode",outcome="unchanged"} 209

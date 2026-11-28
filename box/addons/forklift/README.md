@@ -1,6 +1,6 @@
 # forklift
 
-[![Rust](https://img.shields.io/badge/rust-1.100.0-black?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.100.1-black?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![GitHub Container Registry](https://img.shields.io/badge/ghcr.io-forklift-black?style=flat-square&logo=docker&logoColor=white)](https://github.com/younsl/ct/pkgs/container/forklift)
 [![Helm Chart](https://img.shields.io/badge/ghcr.io-charts%2Fforklift-black?style=flat-square&logo=helm&logoColor=white)](https://github.com/younsl/ct/pkgs/container/charts%2Fforklift)
 [![License](https://img.shields.io/github/license/younsl/ct?style=flat-square&color=black)](https://github.com/younsl/ct/blob/main/LICENSE)
